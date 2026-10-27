@@ -1,0 +1,30 @@
+{
+  "name": "inv3d",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "LGPL-2.1-or-later",
+  "scripts": {
+    "prepare-oc": "node scripts/split-wasm.mjs",
+    "dev": "npm run prepare-oc && vite",
+    "build": "npm run prepare-oc && tsc --noEmit && vite build && node scripts/clean-dist.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "cfb": "1.2.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "replicad": "1.2.0",
+    "replicad-opencascadejs": "1.1.0",
+    "three": "0.170.0",
+    "zustand": "4.5.5"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@types/three": "0.170.0",
+    "@vitejs/plugin-react": "4.3.3",
+    "typescript": "5.6.3",
+    "vite": "5.4.10"
+  }
+}
