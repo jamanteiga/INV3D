@@ -2,8 +2,11 @@
 import * as CFB from 'cfb';
 import { useStore, type FileInfo } from './store';
 import { cad } from './cadClient';
-import { newDoc, uid, validateDoc, nextName } from './doc';
+import { newDoc, uid, validateDoc, nextName, type PartDoc } from './doc';
+import { newAsm, validateAsm, IDENTITY, type AsmDoc } from './asm';
+import { validateDrawing, type DrawingDoc } from './drawing';
 import { zipStore } from './zip';
+import { readDxf } from './dxfread';
 
 export function download(data: BlobPart, name: string, type = 'application/octet-stream') {
   const url = URL.createObjectURL(new Blob([data], { type }));
@@ -58,16 +61,47 @@ async function saveAs(data: BlobPart, name: string, desc: string, ext: string, m
 
 const baseName = (n: string) => n.replace(/\.[^.]+$/, '');
 
+/** Documentos de pieza referenciados (para embeber en .i3a / .i3d). */
+function embedFor(ids: string[]) {
+  const s = useStore.getState();
+  const out: Record<string, { fileName: string; kind: string; data: unknown }> = {};
+  const add = (id: string) => {
+    if (out[id]) return;
+    const e = s.docs.find((d) => d.id === id); const data = s.docData(id);
+    if (!e || !data) return;
+    out[id] = { fileName: e.fileName, kind: e.kind, data };
+    if (e.kind === 'assembly') (data as AsmDoc).occurrences.forEach((o) => add(o.part));
+  };
+  ids.forEach(add);
+  return out;
+}
+
 export async function saveDoc() {
   const s = useStore.getState();
-  const name = await saveAs(JSON.stringify(s.doc, null, 2), s.fileName, 'Pieza INV3D', '.i3p', 'application/json');
-  if (name) { useStore.setState({ fileName: name, dirty: false }); s.notify(`Guardado ${name}`); }
+  let content: string, desc: string, ext: string;
+  if (s.kind === 'part') { content = JSON.stringify(s.doc, null, 1); desc = 'Pieza INV3D'; ext = '.i3p'; }
+  else if (s.kind === 'assembly') {
+    content = JSON.stringify({ ...s.asm, embedded: embedFor([...new Set(s.asm.occurrences.map((o) => o.part))]) }); desc = 'Ensamblaje INV3D'; ext = '.i3a';
+  } else {
+    content = JSON.stringify({ ...s.drw, embedded: embedFor([...new Set(s.drw.views.map((v) => v.source))]) }); desc = 'Plano INV3D'; ext = '.i3d';
+  }
+  const fn = s.fileName.endsWith(ext) ? s.fileName : `${baseName(s.fileName)}${ext}`;
+  const name = await saveAs(content, fn, desc, ext, 'application/json');
+  if (name) {
+    useStore.setState({ fileName: name, dirty: false, docs: useStore.getState().docs.map((d) => (d.id === s.active ? { ...d, fileName: name, dirty: false } : d)) });
+    s.notify(`Guardado ${name}`);
+  }
+}
+
+export async function saveText(data: BlobPart, name: string, desc: string, ext: string, mime: string) {
+  try { await saveAs(data, name, desc, ext, mime); } catch (e) { useStore.getState().notify((e as Error).message, 'error'); }
 }
 
 export async function exportSTEP() {
   const s = useStore.getState();
   try {
-    const txt = await cad.exportSTEP();
+    if (s.kind === 'drawing') throw new Error('Exporta el plano desde la pestaña Exportar (DXF, PDF, SVG)');
+    const txt = await cad.exportSTEP(s.kind === 'assembly' ? 'asm' : 'part');
     await saveAs(txt, `${baseName(s.fileName)}.stp`, 'STEP AP214', '.stp', 'application/step');
   } catch (e) { s.notify((e as Error).message, 'error'); }
 }
@@ -75,7 +109,8 @@ export async function exportSTEP() {
 export async function exportSTL() {
   const s = useStore.getState();
   try {
-    const buf = await cad.exportSTL();
+    if (s.kind === 'drawing') throw new Error('Un plano no se exporta a STL');
+    const buf = await cad.exportSTL(s.kind === 'assembly' ? 'asm' : 'part');
     await saveAs(buf, `${baseName(s.fileName)}.stl`, 'STL binario', '.stl', 'model/stl');
   } catch (e) { s.notify((e as Error).message, 'error'); }
 }
@@ -89,7 +124,7 @@ export function pickFile(accept: string): Promise<File | null> {
   });
 }
 
-export const OPEN_ACCEPT = '.i3p,.json,.zip,.step,.stp,.ipj,.ipt,.iam,.idw,.ipn,.dwg';
+export const OPEN_ACCEPT = '.i3p,.i3a,.i3d,.json,.zip,.step,.stp,.ipj,.ipt,.iam,.idw,.ipn,.dwg,.dxf';
 
 export async function openFile(file?: File | null) {
   const s = useStore.getState();
@@ -102,8 +137,22 @@ export async function openFile(file?: File | null) {
       const doc = validateDoc(JSON.parse(await file.text()));
       s.load(doc, file.name);
       s.notify(`Abierto ${file.name}`);
+    } else if (ext === 'i3a' || ext === 'i3d') {
+      const raw = JSON.parse(await file.text());
+      const embedded = (raw.embedded ?? {}) as Record<string, { fileName: string; kind: string; data: unknown }>;
+      delete raw.embedded;
+      for (const [id, e] of Object.entries(embedded)) {
+        if (s.docs.some((d) => d.id === id)) continue;
+        if (e.kind === 'part') s.addDocument('part', validateDoc(e.data), e.fileName, false, id);
+        else if (e.kind === 'assembly') s.addDocument('assembly', validateAsm(e.data), e.fileName, false, id);
+      }
+      if (ext === 'i3a') s.addDocument('assembly', validateAsm(raw), file.name);
+      else s.addDocument('drawing', validateDrawing(raw) as DrawingDoc, file.name);
+      s.notify(`Abierto ${file.name}`);
     } else if (ext === 'step' || ext === 'stp') {
       await importStep(file, true);
+    } else if (ext === 'dxf') {
+      s.open({ kind: 'fileinfo', title: 'Dibujo DXF', info: await dwgInfo(file, true) });
     } else if (ext === 'ipj') {
       await openIpj(file);
     } else if (['ipt', 'iam', 'idw', 'ipn'].includes(ext)) {
@@ -140,7 +189,22 @@ export async function importStep(file?: File | null, asNew = false) {
   const text = await file.text();
   if (!/ISO-10303-21/.test(text.slice(0, 200))) throw new Error('El fichero no es un STEP (ISO 10303-21)');
   s.notify('Leyendo STEP…');
-  await cad.checkSTEP(text);
+  const info = await cad.checkSTEP(text);
+  if (asNew && info.solids > 1 && await s.ask(`El STEP contiene ${info.solids} sólidos. ¿Abrirlo como ensamblaje, con un componente por sólido?`, 'Abrir como ensamblaje')) {
+    const steps = await cad.splitSTEP(text);
+    const asm = newAsm();
+    asm.iProperties.partNumber = baseName(file.name);
+    steps.forEach((st, i) => {
+      const d = newDoc();
+      d.iProperties.partNumber = `${baseName(file!.name)}-${String(i + 1).padStart(2, '0')}`;
+      d.features.push({ id: uid('f'), name: 'Sólido importado1', type: 'import', fileName: file!.name, step: st });
+      const pid = s.addDocument('part', d, `${d.iProperties.partNumber}.i3p`, false);
+      asm.occurrences.push({ id: uid('o'), name: `${d.iProperties.partNumber}:1`, part: pid, xf: { ...IDENTITY }, grounded: i === 0 });
+    });
+    s.addDocument('assembly', asm, `${baseName(file.name)}.i3a`);
+    s.notify(`Importado ${file.name}: ${steps.length} componentes`);
+    return;
+  }
   if (asNew) {
     const d = newDoc();
     d.iProperties.partNumber = baseName(file.name);
@@ -294,12 +358,37 @@ export async function inventorInfo(file: File): Promise<FileInfo> {
   return info;
 }
 
-async function dwgInfo(file: File): Promise<FileInfo> {
+let dwgLib: Promise<any> | null = null;
+/** Visor DWG/DXF con LibreDWG (WebAssembly, GPL-3.0), cargado solo cuando hace falta. */
+async function dwgInfo(file: File, dxf = false): Promise<FileInfo> {
   const head = new TextDecoder('ascii').decode(new Uint8Array(await file.slice(0, 6).arrayBuffer()));
   const ver: Record<string, string> = { AC1015: 'AutoCAD 2000', AC1018: 'AutoCAD 2004', AC1021: 'AutoCAD 2007', AC1024: 'AutoCAD 2010', AC1027: 'AutoCAD 2013', AC1032: 'AutoCAD 2018+' };
-  return {
-    fileName: file.name, kind: 'Dibujo DWG',
-    message: 'La lectura de geometría DWG (LibreDWG en WASM) llega en la fase F5. De momento, exporta el plano a DXF desde Inventor o AutoCAD.',
-    props: [{ label: 'Versión', value: `${head} ${ver[head] ?? ''}`.trim() }, { label: 'Tamaño', value: `${(file.size / 1024).toFixed(1)} kB` }],
+  const info: FileInfo = {
+    fileName: file.name, kind: dxf ? 'Dibujo DXF' : 'Dibujo DWG',
+    message: 'Vista de solo lectura del dibujo 2D (LibreDWG).',
+    props: [...(dxf ? [] : [{ label: 'Versión', value: `${head} ${ver[head] ?? ''}`.trim() }]), { label: 'Tamaño', value: `${(file.size / 1024).toFixed(1)} kB` }],
   };
+  if (dxf) {
+    try {
+      const r = readDxf(await file.text());
+      info.svg = r.svg;
+      info.message = 'Vista de solo lectura del dibujo 2D.';
+      info.props!.push({ label: 'Entidades', value: String(r.entities) }, { label: 'Capas', value: r.layers.join(', ') });
+    } catch (e) { info.message = `No se pudo interpretar el DXF: ${(e as Error).message}`; }
+    return info;
+  }
+  try {
+    dwgLib ??= import('@mlightcad/libredwg-web').then(async (m: any) => ({ m, lib: await m.LibreDwg.create(new URL('./dwg', document.baseURI).href.replace(/\/$/, '')) }));
+    const { m, lib } = await dwgLib;
+    const ptr = lib.dwg_read_data(await file.arrayBuffer(), dxf ? m.Dwg_File_Type.DXF : m.Dwg_File_Type.DWG);
+    if (ptr == null) throw new Error('No se pudo leer el fichero');
+    const db = lib.convert(ptr);
+    lib.dwg_free(ptr);
+    info.svg = lib.dwg_to_svg(db);
+    const ents = db.entities?.length ?? 0;
+    info.props!.push({ label: 'Entidades', value: String(ents) }, { label: 'Capas', value: String(db.tables?.LAYER?.entries?.length ?? '—') });
+  } catch (e) {
+    info.message = `No se pudo interpretar el dibujo: ${(e as Error).message}`;
+  }
+  return info;
 }

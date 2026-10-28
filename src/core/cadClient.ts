@@ -1,5 +1,6 @@
 // Cliente RPC del Web Worker geométrico.
-import type { PartDoc, V3 } from './doc';
+import type { PartDoc, V3, V2 } from './doc';
+import type { AsmDoc, Xform } from './asm';
 
 export interface MeshData {
   vertices: Float32Array; normals: Float32Array; triangles: Uint32Array;
@@ -13,6 +14,19 @@ export interface RegenResult {
   props: MassProps | null;
   ms: number;
 }
+export interface AsmResult {
+  parts: Record<string, { key: string; mesh?: MeshData; props: MassProps | null; ok: boolean; error?: string }>;
+  xf: Record<string, Xform>;
+  occCut: Record<string, { mesh: MeshData; props: MassProps | null }>;
+  members: { id: string; mesh: MeshData; length: number; cutAngles: [number, number]; volume: number }[];
+  welds: { id: string; mesh: MeshData; length: number; area: number }[];
+  bolts: { id: string; mesh: MeshData; length: number; count: number }[];
+  errors: Record<string, string>;
+  ms: number;
+}
+export interface FlatResult { paths: string[]; bends: { a: V2; b: V2; label: string }[]; t: number; r: number; k: number }
+export interface Projection { visible: string[]; hidden: string[] }
+export type ProjSource = { kind: 'part'; doc: PartDoc } | { kind: 'asm'; asm: AsmDoc; parts: Record<string, PartDoc> };
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
 
@@ -47,10 +61,14 @@ class CadClient {
   }
 
   init() { return this.call<void>('init'); }
-  regen(doc: PartDoc, preview = false) { return this.call<RegenResult>('regen', { doc, preview }); }
-  exportSTEP() { return this.call<string>('exportSTEP'); }
-  exportSTL() { return this.call<ArrayBuffer>('exportSTL'); }
-  checkSTEP(text: string) { return this.call<{ bbox: [V3, V3] }>('checkSTEP', { text }); }
+  regen(doc: PartDoc, preview = false, upTo?: number) { return this.call<RegenResult>('regen', { doc, preview, upTo }); }
+  asm(asm: AsmDoc, parts: Record<string, PartDoc>, have: string[]) { return this.call<AsmResult>('asm', { asm, parts, have }); }
+  exportSTEP(target: 'part' | 'asm' = 'part') { return this.call<string>('exportSTEP', { target }); }
+  exportSTL(target: 'part' | 'asm' = 'part') { return this.call<ArrayBuffer>('exportSTL', { target }); }
+  checkSTEP(text: string) { return this.call<{ bbox: [V3, V3]; solids: number }>('checkSTEP', { text }); }
+  splitSTEP(text: string) { return this.call<string[]>('splitSTEP', { text }); }
+  project(source: ProjSource, dir: V3, x: V3) { return this.call<Projection>('project', { source, dir, x }); }
+  flat(doc: PartDoc) { return this.call<FlatResult>('flat', { doc }); }
 }
 
 export const cad = new CadClient();

@@ -3,18 +3,29 @@
 CAD paramétrico 3D libre en el navegador, con el flujo de trabajo de Autodesk Inventor.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Estado: fase F0 (MVP)
+## Versión 0.2
 
-| Área | Incluido |
+| Entorno | Qué hace |
 | --- | --- |
-| Boceto 2D | Línea (cadena; al cerrar crea un contorno), rectángulo, círculo, polígono regular, líneas de construcción, cotas editables con doble clic, enganche a puntos y rejilla, boceto en plano de origen (con desfase) o en cara plana |
-| Pieza | Extrusión (normal, inversa, simétrica), revolución (eje X/Y del boceto o línea), empalme y chaflán (aristas seleccionadas en pantalla o por filtro), unir / cortar / intersección / nuevo sólido |
-| Paramétrico | Tabla de parámetros fx con unidades y funciones; cualquier cota admite expresiones (`L/2`, `2*e + 5 mm`) |
-| Árbol | Navegador con bocetos anidados, editar, renombrar, suprimir, eliminar; errores marcados en rojo |
-| Propiedades | iProperties, material, masa, volumen, área, centro de gravedad |
-| Ficheros | `.i3p` propio (JSON), importar/exportar STEP, exportar STL, abrir/crear `.ipj`, metadatos y miniatura de `.ipt/.iam/.idw/.ipn`, versión de `.dwg` |
+| **Boceto 2D** | Línea (cadena; al cerrar crea contorno), círculo, arco, rectángulo, ranura, polígono, punto, construcción. Cotas editables con doble clic y expresiones (`L/2`). Boceto en plano de origen, plano de trabajo o cara plana |
+| **Pieza** | Extrusión, revolución, solevación, barrido, agujero (simple, refrentado, avellanado, roscado), empalme, chaflán, vaciado, patrón rectangular y circular, simetría, planos de trabajo, importar STEP. Parámetros fx, iProperties, masa y CdG |
+| **Chapa** | Estilo (t, R, K), cara, pestaña sobre arista elegida en pantalla, desarrollo con líneas de pliegue y DXF para corte |
+| **Ensamblaje** | Colocar, crear pieza en contexto, mover/girar con gizmo, fijar, uniones coincidente / al ras / rígida, líneas de esqueleto 3D, lista de materiales (CSV), STEP de ensamblaje |
+| **Estructura** | Perfiles EN: IPE, HEA, HEB, UPN, L, SHS, RHS, CHS, pletina, redondo. Insertar sobre líneas de esqueleto o de bocetos, giro, desfase, simetría, inglete automático, recortar/alargar a la cara de otra barra, longitudes y ángulos de corte en la lista de materiales |
+| **Soldadura** | Cordón en ángulo entre dos caras que forman rincón, garganta *a*, símbolo ISO 2553, longitud y masa de aporte |
+| **Tornillería** | Conexión atornillada ISO 4017 + ISO 4032 + ISO 7089, filas y columnas, espesor apretado automático, longitud comercial, taladros en los componentes (EN 1090-2). Cálculo EN 1993-1-8: cortadura, aplastamiento, tracción, punzonamiento e interacción |
+| **Dibujo** | Hojas A4–A1 con marco y cajetín, vista base, proyectadas (proyección europea), isométrica, aristas ocultas, cotas, notas, lista de piezas. Exporta DXF, PDF y SVG |
+| **Presentación** | Explosionado automático o manual, animación y grabación de vídeo WebM |
+| **Inventor** | Lee proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`. Regla iLogic para exportar un proyecto completo a STEP/DWG. Un STEP de varios sólidos se abre como ensamblaje |
 
-Atajos: `S` boceto, `L` `R` `C` `P` herramientas de boceto, `E` extrusión, `R` revolución, `F` empalme, `Esc`, `Supr`, `Ctrl+Z/Y/S/O`, `F6` inicio.
+Ejemplos en **Herramientas › Ejemplos**: brida paramétrica y escalera con meseta (perfiles, ingletes, recortes, placas base y cordones).
+
+### Límites conocidos
+
+- La geometría de `.ipt/.iam/.idw` está en un formato cerrado de Autodesk: hay que exportarla a STEP/DWG (regla iLogic incluida en **Herramientas › Regla de exportación**).
+- El boceto aún no tiene restricciones geométricas (paralela, tangente…): solo cotas y expresiones.
+- Las uniones se resuelven en orden, no con un solver simultáneo.
+- Desarrollo de chapa: pestañas sobre la cara base (no pestañas sobre pestañas).
 
 ## Desarrollo
 
@@ -24,29 +35,21 @@ npm run dev      # http://localhost:5173
 npm run build    # genera dist/
 ```
 
-`scripts/split-wasm.mjs` parte el WASM de OpenCascade (23 MB) en trozos de 12 MB dentro de `public/oc/`; el worker los recompone al cargar. Así cabe en alojamientos con límite por fichero.
+`scripts/split-wasm.mjs` parte el WASM de OpenCascade (23 MB) en trozos de 12 MB en `public/oc/` y copia el de LibreDWG a `public/dwg/`.
 
 ## Despliegue en GitHub Pages
 
-1. Crea el repositorio y sube el código a la rama `main`.
-2. En GitHub: **Settings › Pages › Build and deployment › Source: GitHub Actions**.
-3. Cada `push` a `main` ejecuta `.github/workflows/pages.yml` y publica `dist/`.
-
-## Compatibilidad con Inventor
-
-Los `.ipt/.iam/.idw/.ipn` guardan la geometría en un formato cerrado de Autodesk; no se pueden reconstruir. Flujo recomendado: en Inventor, **Archivo › Exportar › Formato CAD › STEP**, y abrir el `.stp` en INV3D.
+1. **Settings › Pages › Build and deployment › Source: GitHub Actions**.
+2. Cada `push` a `main` ejecuta `.github/workflows/pages.yml` y publica `dist/`.
 
 ## Estructura
 
 ```
-src/core/expr.ts        evaluador de expresiones y parámetros
-src/core/doc.ts         modelo de datos .i3p
-src/core/store.ts       estado (Zustand), deshacer/rehacer, regeneración
-src/core/files.ts       E/S: .i3p, STEP, STL, .ipj, OLE de Inventor
-src/worker/cad.worker.ts núcleo OpenCascade en Web Worker
-src/ui/                 cinta, navegador, visor 3D + boceto, paneles
+src/core/        modelo de datos (pieza, ensamblaje, plano), catálogos EN/ISO, cálculo EC3, E/S, DXF
+src/worker/      núcleo OpenCascade: pieza y chapa (part.ts), ensamblaje y estructura (asm.ts)
+src/ui/          cinta, navegador, visores 3D (pieza, ensamblaje), plano, paneles y diálogos
 ```
 
 ## Licencia
 
-LGPL-2.1-or-later (compatible con OpenCascade y replicad).
+GPL-3.0-or-later, por el visor DWG (LibreDWG). Sin él (`src/core/files.ts`, función `dwgInfo`), el resto es compatible con LGPL-2.1 (OpenCascade, replicad).

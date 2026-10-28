@@ -1,30 +1,39 @@
 import { useEffect, useState } from 'react';
 import { useStore, activeSketch, startCad } from './core/store';
-import Ribbon, { confirmDiscard } from './ui/Ribbon';
+import Ribbon from './ui/Ribbon';
 import Browser from './ui/Browser';
-import Viewport from './ui/Viewport';
+import PartViewport from './ui/PartViewport';
+import AsmViewport from './ui/AsmViewport';
+import DrawingView from './ui/DrawingView';
 import { PropertyPanel, Modals } from './ui/Panels';
 import { saveDoc, openFile } from './core/files';
-import { newDoc } from './core/doc';
 import { fmt } from './core/expr';
+import { Icon } from './ui/icons';
+import { asmActions } from './ui/actions';
+
+const TOOL_MSG: Record<string, string> = {
+  pickPlane: 'Selecciona un plano de origen, un plano de trabajo o una cara plana para el boceto',
+  line: 'Línea: clic en puntos sucesivos · cerrar en el primer punto crea un contorno · doble clic o Esc termina',
+  rect: 'Rectángulo: clic en dos esquinas opuestas', circle: 'Círculo: centro y radio', npoly: 'Polígono: centro y vértice',
+  arc: 'Arco: centro, punto inicial y punto final (sentido antihorario)', slot: 'Ranura: centro 1, centro 2 y anchura', point: 'Punto: clic para colocar',
+  pickEdges: 'Selecciona aristas en la pantalla', pickFaces: 'Selecciona caras', pickFlangeEdge: 'Selecciona la arista de la pestaña',
+  asmFace: 'Selecciona caras planas de los componentes', frameLine: 'Selecciona líneas para los perfiles', skelPoint: 'Selecciona puntos',
+  weldFace: 'Selecciona las dos caras del rincón', boltFace: 'Selecciona la cara de inicio', move: 'Mover componente', pickMember: 'Selecciona barras',
+  drwDim: 'Cota: dos puntos y posición', drwNote: 'Nota: clic para colocar',
+};
 
 function StatusBar() {
   const s = useStore();
   const sk = activeSketch(s);
-  const msg = s.tool === 'pickPlane' ? 'Selecciona un plano de origen o una cara plana para el boceto'
-    : s.tool === 'line' ? 'Línea: clic en puntos sucesivos · cerrar en el primer punto crea un contorno · doble clic o Esc termina'
-    : s.tool === 'rect' ? 'Rectángulo: clic en dos esquinas opuestas'
-    : s.tool === 'circle' ? 'Círculo: clic en el centro y después en el radio'
-    : s.tool === 'npoly' ? 'Polígono: clic en el centro y después en un vértice'
-    : s.tool === 'pickEdges' ? 'Selecciona aristas en la pantalla'
-    : sk ? `Editando ${sk.name}` : 'Preparado';
+  const msg = (s.tool && TOOL_MSG[s.tool]) || (sk ? `Editando ${sk.name}` : 'Preparado');
+  const ms = s.kind === 'part' ? s.result?.ms : s.kind === 'assembly' ? s.asmResult?.ms : undefined;
   return (
     <footer className="status">
       <span className="st-msg">{msg}</span>
       <span className="grow" />
       {s.cursor && s.mode === 'sketch' && <span className="st-item mono">X {fmt(s.cursor[0], 2)} · Y {fmt(s.cursor[1], 2)} mm</span>}
       {s.busy && <span className="st-item">Regenerando…</span>}
-      {!s.busy && s.result && <span className="st-item">{fmt(s.result.ms, 0)} ms</span>}
+      {!s.busy && ms !== undefined && <span className="st-item">{fmt(ms, 0)} ms</span>}
       <span className={`st-item oc ${s.oc}`}>{s.oc === 'ready' ? 'OpenCascade listo' : s.oc === 'error' ? 'Núcleo con error' : `Cargando núcleo ${Math.round(s.ocProgress * 100)}%`}</span>
     </footer>
   );
@@ -68,9 +77,7 @@ function Loader() {
     <div className="loader">
       <div className="loader-card">
         <div className="loader-title">INV3D</div>
-        {s.oc === 'error' ? (
-          <p className="errtxt">No se pudo cargar el núcleo geométrico: {s.ocError}</p>
-        ) : (<>
+        {s.oc === 'error' ? <p className="errtxt">No se pudo cargar el núcleo geométrico: {s.ocError}</p> : (<>
           <p>Cargando el núcleo geométrico OpenCascade (23 MB, solo la primera vez)…</p>
           <div className="bar"><div style={{ width: `${Math.max(6, s.ocProgress * 100)}%` }} /></div>
         </>)}
@@ -79,8 +86,37 @@ function Loader() {
   );
 }
 
+/** Pestañas de documentos abiertos (como la barra inferior de Inventor). */
+function DocTabs() {
+  const s = useStore();
+  const icon = { part: 'part', assembly: 'assembly', drawing: 'drawing' } as const;
+  return (
+    <div className="doc-tabs" role="tablist">
+      {s.docs.map((d) => {
+        const on = d.id === s.active;
+        const dirty = on ? s.dirty : d.dirty;
+        return (
+          <div key={d.id} role="tab" aria-selected={on} className={`doc-tab ${on ? 'on' : ''}`} onClick={() => s.activate(d.id)} title={d.fileName}>
+            <Icon name={icon[d.kind]} size={15} /><span>{d.fileName}{dirty ? ' *' : ''}</span>
+            <button className="doc-x" title="Cerrar" onClick={async (e) => {
+              e.stopPropagation();
+              const used = s.docs.some((o) => o.kind === 'assembly' && (s.docData(o.id) as any)?.occurrences?.some((x: any) => x.part === d.id));
+              if (used) { s.notify('Esta pieza la usa un ensamblaje abierto; cierra antes el ensamblaje', 'error'); return; }
+              if (dirty && !(await s.ask(`${d.fileName} tiene cambios sin guardar. ¿Cerrarlo?`, 'Cerrar sin guardar'))) return;
+              s.closeDocument(d.id);
+            }}>×</button>
+          </div>
+        );
+      })}
+      <button className="doc-new" title="Nuevo documento" onClick={() => s.open({ kind: 'newdoc' })}>+</button>
+    </div>
+  );
+}
+
 export default function App() {
   useEffect(() => { startCad(); }, []);
+  const kind = useStore((s) => s.kind);
+  const active = useStore((s) => s.active);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -92,9 +128,8 @@ export default function App() {
         if (k === 'z') { e.preventDefault(); s.undo(); }
         else if (k === 'y') { e.preventDefault(); s.redo(); }
         else if (k === 's') { e.preventDefault(); saveDoc(); }
-        else if (k === 'o') { e.preventDefault(); confirmDiscard().then((ok) => { if (ok) openFile(); }); }
-        else if (k === 'n') { e.preventDefault(); confirmDiscard().then((ok) => ok && s.load(newDoc(), 'Pieza1.i3p')); }
-        else if (k === 'k' && e.shiftKey) { e.preventDefault(); s.openFeatureDialog('chamfer'); }
+        else if (k === 'o') { e.preventDefault(); openFile(); }
+        else if (k === 'n') { e.preventDefault(); s.open({ kind: 'newdoc' }); }
         return;
       }
       if (s.confirmBox || (s.dialog && !('draft' in s.dialog))) return;
@@ -103,28 +138,49 @@ export default function App() {
         if (s.dialog) return s.closeDialog();
         if (s.tool) return s.setTool(null);
         if (s.mode === 'sketch') return s.finishSketch();
-        return s.set({ selFeature: null });
+        if (s.mode === 'present') return s.set({ mode: 'model', explodeT: 0 });
+        return s.set({ selFeature: null, selItem: null });
       }
       if (e.key === 'F6') { e.preventDefault(); return s.setView('home'); }
       if (e.key === 'Home') return s.setView('fit');
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (s.mode === 'sketch' && s.selEntity) return s.deleteEntity(s.selEntity);
-        if (s.mode === 'model' && s.selFeature && !s.dialog) return s.deleteFeature(s.selFeature);
+        if (s.kind === 'part') {
+          if (s.mode === 'sketch' && s.selEntity) return s.deleteEntity(s.selEntity);
+          if (s.mode === 'model' && s.selFeature && !s.dialog) return s.deleteFeature(s.selFeature);
+        }
+        if (s.kind === 'assembly' && s.selItem && !s.dialog) {
+          const id = s.selItem;
+          return s.commitAsm((a) => {
+            a.occurrences = a.occurrences.filter((x) => x.id !== id); a.joints = a.joints.filter((j) => j.id !== id && j.a.occ !== id && j.b.occ !== id);
+            a.frames = a.frames.filter((x) => x.id !== id); for (const f of a.frames) f.ends = f.ends.map((en) => (en.other === id ? { type: 'none' } : en)) as typeof f.ends;
+            a.welds = a.welds.filter((x) => x.id !== id); a.bolts = a.bolts.filter((x) => x.id !== id); a.skeleton = a.skeleton.filter((x) => x.id !== id);
+          });
+        }
+        if (s.kind === 'drawing' && s.selItem) {
+          const id = s.selItem;
+          return s.commitDrw((d) => { d.dims = d.dims.filter((x) => x.id !== id); d.notes = d.notes.filter((x) => x.id !== id); });
+        }
       }
-      if (s.mode === 'sketch') {
-        const map: Record<string, typeof s.tool> = { l: 'line', r: 'rect', c: 'circle', p: 'npoly' };
+      if (s.kind === 'part' && s.mode === 'sketch') {
+        const map: Record<string, typeof s.tool> = { l: 'line', r: 'rect', c: 'circle', p: 'npoly', a: 'arc' };
         if (map[k]) { e.preventDefault(); s.setTool(map[k]); }
         return;
       }
       if (s.dialog) return;
       // preventDefault: la tecla no debe llegar al campo que recibe el foco al abrir el diálogo
-      if (k === 's') { e.preventDefault(); s.setTool('pickPlane'); }
-      else if (k === 'e') { e.preventDefault(); s.openFeatureDialog('extrude'); }
-      else if (k === 'r') { e.preventDefault(); s.openFeatureDialog('revolve'); }
-      else if (k === 'f' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('fillet'); }
+      if (s.kind === 'part') {
+        if (k === 's') { e.preventDefault(); s.setTool('pickPlane'); }
+        else if (k === 'e') { e.preventDefault(); s.openFeatureDialog('extrude'); }
+        else if (k === 'r') { e.preventDefault(); s.openFeatureDialog('revolve'); }
+        else if (k === 'h' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('hole'); }
+        else if (k === 'f' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('fillet'); }
+      } else if (s.kind === 'assembly') {
+        if (k === 'p') { e.preventDefault(); s.open({ kind: 'place' }); }
+        else if (k === 'j') { e.preventDefault(); asmActions.openJoint(); }
+      } else if (k === 'd') { e.preventDefault(); s.setTool('drwDim'); }
     };
     window.addEventListener('keydown', onKey);
-    const onBefore = (e: BeforeUnloadEvent) => { if (useStore.getState().dirty) { e.preventDefault(); } };
+    const onBefore = (e: BeforeUnloadEvent) => { const s = useStore.getState(); if (s.dirty || s.docs.some((d) => d.dirty)) e.preventDefault(); };
     window.addEventListener('beforeunload', onBefore);
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('beforeunload', onBefore); };
   }, []);
@@ -134,11 +190,16 @@ export default function App() {
     <div className="app"
       onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }}
-      onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) confirmDiscard().then((ok) => { if (ok) openFile(f); }); }}>
+      onDrop={(e) => { e.preventDefault(); setDrag(false); for (const f of e.dataTransfer.files) openFile(f); }}>
       <Ribbon />
       <main className="work">
         <Browser />
-        <Viewport />
+        <section className="center">
+          {kind === 'part' && <PartViewport key={active} />}
+          {kind === 'assembly' && <AsmViewport key={active} />}
+          {kind === 'drawing' && <DrawingView key={active} />}
+          <DocTabs />
+        </section>
         <PropertyPanel />
       </main>
       <StatusBar />
@@ -146,7 +207,7 @@ export default function App() {
       <ConfirmBox />
       <Toast />
       <Loader />
-      {drag && <div className="dropzone">Suelta un .i3p, .step, .ipj, .ipt, .iam, .idw o .dwg</div>}
+      {drag && <div className="dropzone">Suelta .i3p, .i3a, .i3d, .step, .ipj, .ipt, .iam, .idw, .dwg o .dxf</div>}
     </div>
   );
 }

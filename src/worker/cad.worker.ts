@@ -2,19 +2,19 @@
 // Núcleo geométrico: OpenCascade (vía replicad) ejecutándose fuera del hilo de la interfaz.
 import opencascade from 'replicad-opencascadejs';
 import {
-  setOC, Plane, draw, drawRectangle, drawCircle, importSTEP, compoundShapes,
+  setOC, importSTEP, exportSTEP, compoundShapes, drawProjection, ProjectionCamera,
   measureShapeVolumeProperties, measureShapeSurfaceProperties,
 } from 'replicad';
-import type { Drawing, Shape3D, EdgeFinder } from 'replicad';
-import { makeEval } from '../core/expr';
-import {
-  planeFrame, entityArea, entityOutline, npolyPoints, toWorld, v3,
-  type PartDoc, type SkEntity, type SketchF, type Feature, type EdgeSel, type Frame, type V3,
-} from '../core/doc';
+import type { Shape3D } from 'replicad';
+import { v3, type PartDoc, type V3 } from '../core/doc';
+import type { AsmDoc } from '../core/asm';
+import { buildPart, flatPattern, type FeatStatus } from './part';
+import { buildAsmGeometry, xfShape, cutHolesLocal } from './asm';
 
 let ready: Promise<void> | null = null;
-let lastShape: Shape3D | null = null;
 let ocBase = '';
+let lastPart: Shape3D | null = null;
+let lastAsm: { shape: Shape3D; name: string }[] = [];
 
 async function loadWasm(): Promise<ArrayBuffer> {
   const base = new URL(ocBase || './oc/', self.location.href);
@@ -31,97 +31,26 @@ async function loadWasm(): Promise<ArrayBuffer> {
 }
 
 function init() {
-  if (!ready) {
-    ready = (async () => {
-      const wasmBinary = await loadWasm();
-      const OC = await (opencascade as unknown as (o: object) => Promise<unknown>)({ wasmBinary });
-      setOC(OC as never);
-    })();
-  }
+  ready ??= (async () => {
+    const wasmBinary = await loadWasm();
+    const OC = await (opencascade as unknown as (o: object) => Promise<unknown>)({ wasmBinary });
+    setOC(OC as never);
+  })();
   return ready;
 }
 
 const post = (m: unknown, transfer: Transferable[] = []) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m, transfer);
 
-function entityDrawing(e: SkEntity, ev: (s: string) => number): Drawing | null {
-  switch (e.type) {
-    case 'rect': {
-      const x = ev(e.x), y = ev(e.y), w = ev(e.w), h = ev(e.h);
-      if (!(Math.abs(w) > 1e-6 && Math.abs(h) > 1e-6)) throw new Error('Rectángulo de tamaño nulo');
-      return drawRectangle(Math.abs(w), Math.abs(h)).translate(x + w / 2, y + h / 2);
-    }
-    case 'circle': {
-      const d = ev(e.d);
-      if (!(d > 1e-6)) throw new Error('Círculo de diámetro nulo');
-      return drawCircle(d / 2).translate(ev(e.cx), ev(e.cy));
-    }
-    case 'poly': case 'npoly': {
-      const pts = e.type === 'poly' ? e.pts.map((p) => [ev(p[0]), ev(p[1])] as [number, number]) : npolyPoints(ev(e.cx), ev(e.cy), ev(e.d), Math.round(ev(e.n)), ev(e.rot));
-      if (pts.length < 3) throw new Error('Contorno con menos de 3 puntos');
-      let pen = draw(pts[0]);
-      for (let i = 1; i < pts.length; i++) pen = pen.lineTo(pts[i]);
-      return pen.close();
-    }
-    default: return null;
-  }
+export function hashStr(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(36) + s.length.toString(36);
 }
 
-/** Perfil de un boceto: une contornos y resta los que quedan dentro de otros (islas/taladros). */
-function sketchProfile(sk: SketchF, ev: (s: string) => number): Drawing {
-  const closed = sk.entities.filter((e) => e.type !== 'line')
-    .map((e) => {
-      const o = entityOutline(e, ev);
-      const xs = o.pts.map((p) => p[0]), ys = o.pts.map((p) => p[1]);
-      return { e, area: entityArea(e, ev), bb: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
-    })
-    .sort((a, b) => b.area - a.area);
-  if (!closed.length) throw new Error(`${sk.name} no tiene perfiles cerrados`);
-  let result: Drawing | null = null;
-  const placed: { bb: number[]; hole: boolean }[] = [];
-  for (const c of closed) {
-    const d = entityDrawing(c.e, ev)!;
-    const inside = placed.filter((p) => c.bb[0] >= p.bb[0] - 1e-6 && c.bb[1] >= p.bb[1] - 1e-6 && c.bb[2] <= p.bb[2] + 1e-6 && c.bb[3] <= p.bb[3] + 1e-6);
-    // Dentro de un número impar de contornos → agujero; par → isla.
-    const hole = inside.length % 2 === 1;
-    result = result ? (hole ? result.cut(d) : result.fuse(d)) : d;
-    placed.push({ bb: c.bb, hole });
-  }
-  return result!;
-}
-
-const makePlane = (f: Frame, shift = 0) => new Plane(v3.add(f.origin, v3.mul(f.normal, shift)), f.xDir, f.normal);
-
-function combine(base: Shape3D | null, tool: Shape3D, op: string): Shape3D {
-  if (!base) {
-    if (op === 'cut' || op === 'intersect') throw new Error('No hay sólido sobre el que operar');
-    return tool;
-  }
-  switch (op) {
-    case 'cut': return base.cut(tool);
-    case 'intersect': return base.intersect(tool) as Shape3D;
-    case 'new': return compoundShapes([base, tool]) as unknown as Shape3D;
-    default: return base.fuse(tool);
-  }
-}
-
-function edgeFilter(sel: EdgeSel) {
-  return (f: EdgeFinder) => {
-    switch (sel.mode) {
-      case 'X': case 'Y': case 'Z': return f.inDirection(sel.mode);
-      case 'circle': return f.ofCurveType('CIRCLE');
-      case 'picked':
-        if (!sel.points.length) throw new Error('No hay aristas seleccionadas');
-        return f.either(sel.points.map((p) => (g: EdgeFinder) => g.withinDistance(1e-3, p)));
-      default: return f;
-    }
-  };
-}
-
-interface FeatStatus { ok: boolean; error?: string }
-
-function meshShape(shape: Shape3D) {
-  const faces = shape.mesh({ tolerance: 0.05, angularTolerance: 12 });
-  const edges = shape.meshEdges({ tolerance: 0.05, angularTolerance: 12 });
+function meshShape(shape: Shape3D, fine = false) {
+  const tol = fine ? 0.02 : 0.05;
+  const faces = shape.mesh({ tolerance: tol, angularTolerance: 12 });
+  const edges = shape.meshEdges({ tolerance: tol, angularTolerance: 12 });
   const vertices = new Float32Array(faces.vertices);
   const normals = new Float32Array(faces.normals);
   const triangles = new Uint32Array(faces.triangles);
@@ -144,6 +73,103 @@ function props(shape: Shape3D) {
   } catch { return null; }
 }
 
+// ---- Caché de piezas por contenido ----
+interface PartEntry { shape: Shape3D | null; status: Record<string, FeatStatus>; props: ReturnType<typeof props> }
+const partCache = new Map<string, PartEntry>();
+async function getPart(doc: PartDoc): Promise<{ key: string; entry: PartEntry }> {
+  const key = hashStr(JSON.stringify(doc));
+  let entry = partCache.get(key);
+  if (!entry) {
+    const b = await buildPart(doc);
+    entry = { shape: b.shape, status: b.status, props: b.shape ? props(b.shape) : null };
+    partCache.set(key, entry);
+    if (partCache.size > 60) partCache.delete(partCache.keys().next().value!);
+  }
+  return { key, entry };
+}
+
+/** Longitud de corte de una barra: extensión de sus vértices sobre el eje. */
+function extentAlong(mesh: { vertices: Float32Array }, axis: V3): number {
+  let lo = Infinity, hi = -Infinity;
+  const v = mesh.vertices;
+  for (let i = 0; i < v.length; i += 3) { const d = v[i] * axis[0] + v[i + 1] * axis[1] + v[i + 2] * axis[2]; if (d < lo) lo = d; if (d > hi) hi = d; }
+  return hi - lo;
+}
+
+async function regenAsm(asm: AsmDoc, parts: Record<string, PartDoc>, have: string[]) {
+  const t0 = performance.now();
+  const transfer: Transferable[] = [];
+  const known = new Set(have);
+  const outParts: Record<string, { key: string; mesh?: unknown; props: unknown; ok: boolean; error?: string }> = {};
+  const shapes: Record<string, Shape3D | null> = {};
+  for (const [id, doc] of Object.entries(parts)) {
+    const { key, entry } = await getPart(doc);
+    shapes[id] = entry.shape;
+    const bad = Object.values(entry.status).find((s) => !s.ok);
+    const rec: (typeof outParts)[string] = { key, props: entry.props, ok: !bad, error: bad?.error };
+    if (entry.shape && !known.has(key)) { const m = meshShape(entry.shape); rec.mesh = m.mesh; transfer.push(...m.transfer); }
+    outParts[id] = rec;
+  }
+  const g = buildAsmGeometry(asm);
+  const allHoles = asm.bolts.filter((b) => b.cutHoles && !b.suppressed).flatMap((b) => g.bolts.find((x) => x.id === b.id)?.holes ?? []);
+  const occCut: Record<string, unknown> = {};
+  lastAsm = [];
+  for (const o of asm.occurrences) {
+    if (o.suppressed) continue;
+    const base = shapes[o.part];
+    if (!base) continue;
+    const xf = g.xf[o.id];
+    let local = base;
+    if (allHoles.length) {
+      try {
+        const cut = cutHolesLocal(base, xf, allHoles);
+        if (cut) { local = cut; const m = meshShape(cut); occCut[o.id] = { mesh: m.mesh, props: props(cut) }; transfer.push(...m.transfer); }
+      } catch { /* sin taladros */ }
+    }
+    lastAsm.push({ shape: xfShape(local, xf), name: o.name });
+  }
+  const members = g.members.map((m) => {
+    const mm = meshShape(m.shape);
+    transfer.push(...mm.transfer);
+    const fr = asm.frames.find((f) => f.id === m.id)!;
+    const axis = v3.norm(v3.sub(fr.b, fr.a));
+    const p = props(m.shape);
+    lastAsm.push({ shape: m.shape, name: fr.name });
+    return { id: m.id, mesh: mm.mesh, length: extentAlong(mm.mesh, axis), cutAngles: m.cutAngles, volume: p?.volume ?? 0 };
+  });
+  const welds = g.welds.map((w) => {
+    const mm = meshShape(w.shape); transfer.push(...mm.transfer);
+    lastAsm.push({ shape: w.shape, name: asm.welds.find((x) => x.id === w.id)?.name ?? 'Cordón' });
+    return { id: w.id, mesh: mm.mesh, length: w.length, area: w.area };
+  });
+  const bolts = g.bolts.map((b) => {
+    const mm = meshShape(b.shape); transfer.push(...mm.transfer);
+    lastAsm.push({ shape: b.shape, name: asm.bolts.find((x) => x.id === b.id)?.name ?? 'Tornillería' });
+    return { id: b.id, mesh: mm.mesh, length: b.length, count: b.count };
+  });
+  return {
+    result: {
+      parts: outParts, xf: g.xf, occCut, members, welds, bolts,
+      errors: { ...g.jointErrors, ...g.memberErrors, ...g.weldErrors, ...g.boltErrors },
+      ms: performance.now() - t0,
+    },
+    transfer,
+  };
+}
+
+async function sourceShape(src: { kind: 'part'; doc: PartDoc } | { kind: 'asm'; asm: AsmDoc; parts: Record<string, PartDoc> }): Promise<Shape3D> {
+  if (src.kind === 'part') {
+    const { entry } = await getPart(src.doc);
+    if (!entry.shape) throw new Error('La pieza no tiene sólido');
+    return entry.shape;
+  }
+  await regenAsm(src.asm, src.parts, []);
+  if (!lastAsm.length) throw new Error('El ensamblaje está vacío');
+  return compoundShapes(lastAsm.map((x) => x.shape)) as unknown as Shape3D;
+}
+
+const projCache = new Map<string, unknown>();
+
 self.onmessage = async (ev: MessageEvent) => {
   const { id, type } = ev.data;
   if (ev.data.ocBase) ocBase = ev.data.ocBase;
@@ -153,108 +179,62 @@ self.onmessage = async (ev: MessageEvent) => {
     if (type === 'regen') {
       const t0 = performance.now();
       const doc = ev.data.doc as PartDoc;
-      const { shape, status } = await regen(doc);
-      if (!ev.data.preview) lastShape = shape;
+      let shape: Shape3D | null, status: Record<string, FeatStatus>;
+      if (ev.data.upTo !== undefined) { const b = await buildPart(doc, ev.data.upTo); shape = b.shape; status = b.status; }
+      else { const { entry } = await getPart(doc); shape = entry.shape; status = entry.status; }
+      if (!ev.data.preview) lastPart = shape;
       if (!shape) return post({ id, ok: true, result: { mesh: null, status, props: null, ms: performance.now() - t0 } });
       const { mesh, transfer } = meshShape(shape);
       return post({ id, ok: true, result: { mesh, status, props: props(shape), ms: performance.now() - t0 } }, transfer);
     }
-    if (type === 'exportSTEP') {
-      if (!lastShape) throw new Error('No hay sólido que exportar');
-      return post({ id, ok: true, result: await lastShape.blobSTEP().text() });
+    if (type === 'asm') {
+      const { result, transfer } = await regenAsm(ev.data.asm, ev.data.parts, ev.data.have ?? []);
+      return post({ id, ok: true, result }, transfer);
     }
-    if (type === 'exportSTL') {
-      if (!lastShape) throw new Error('No hay sólido que exportar');
-      const buf = await lastShape.blobSTL({ binary: true, tolerance: 0.02, angularTolerance: 5 } as any).arrayBuffer();
+    if (type === 'exportSTEP' || type === 'exportSTL') {
+      let shape: Shape3D;
+      if (ev.data.target === 'asm') {
+        if (!lastAsm.length) throw new Error('El ensamblaje está vacío');
+        if (type === 'exportSTEP') return post({ id, ok: true, result: await exportSTEP(lastAsm.map((x) => ({ shape: x.shape, name: x.name }))).text() });
+        shape = compoundShapes(lastAsm.map((x) => x.shape)) as unknown as Shape3D;
+      } else {
+        if (!lastPart) throw new Error('No hay sólido que exportar');
+        shape = lastPart;
+      }
+      if (type === 'exportSTEP') return post({ id, ok: true, result: await shape.blobSTEP().text() });
+      const buf = await shape.blobSTL({ binary: true, tolerance: 0.02, angularTolerance: 5 } as any).arrayBuffer();
       return post({ id, ok: true, result: buf }, [buf]);
     }
     if (type === 'checkSTEP') {
       const s = await importSTEP(new Blob([ev.data.text])) as Shape3D;
-      const bb = s.boundingBox.bounds;
-      return post({ id, ok: true, result: { bbox: bb } });
+      return post({ id, ok: true, result: { bbox: s.boundingBox.bounds, solids: s.solids.length } });
     }
+    if (type === 'splitSTEP') {
+      const s = await importSTEP(new Blob([ev.data.text])) as Shape3D;
+      const solids = s.solids;
+      if (!solids.length) throw new Error('El STEP no contiene sólidos');
+      const out: string[] = [];
+      for (const so of solids) out.push(await exportSTEP([{ shape: so }]).text());
+      return post({ id, ok: true, result: out });
+    }
+    if (type === 'project') {
+      const key = hashStr(JSON.stringify([ev.data.source, ev.data.dir, ev.data.x]));
+      if (projCache.has(key)) return post({ id, ok: true, result: projCache.get(key) });
+      const shape = await sourceShape(ev.data.source);
+      const dir = v3.norm(ev.data.dir as V3), x = v3.norm(ev.data.x as V3);
+      const bb = shape.boundingBox;
+      const c = bb.center as V3;
+      const cam = new ProjectionCamera(v3.sub(c, v3.mul(dir, 10000)), dir, x);
+      const { visible, hidden } = drawProjection(shape, cam);
+      const flat = (p: string[] | string[][]) => (Array.isArray(p[0]) ? (p as string[][]).flat() : (p as string[]));
+      const result = { visible: flat(visible.toSVGPaths()), hidden: flat(hidden.toSVGPaths()) };
+      projCache.set(key, result);
+      if (projCache.size > 40) projCache.delete(projCache.keys().next().value!);
+      return post({ id, ok: true, result });
+    }
+    if (type === 'flat') return post({ id, ok: true, result: flatPattern(ev.data.doc) });
     throw new Error(`Mensaje desconocido: ${type}`);
   } catch (e) {
     post({ id, ok: false, error: (e as Error)?.message || String(e) });
   }
 };
-
-/** Reconstrucción completa en orden, con soporte de sólidos importados. */
-async function regen(doc: PartDoc) {
-  const ev = makeEval(doc.parameters);
-  const evs = (s: string) => ev(s);
-  const status: Record<string, FeatStatus> = {};
-  const sketches = new Map<string, SketchF>();
-  let shape: Shape3D | null = null;
-  for (const f of doc.features) {
-    if (f.suppressed) { status[f.id] = { ok: true }; continue; }
-    try {
-      if (f.type === 'import') {
-        const s = (await importSTEP(new Blob([f.step]))) as Shape3D;
-        shape = shape ? shape.fuse(s) : s;
-      } else {
-        shape = applyFeature(f, shape, sketches, ev, evs);
-      }
-      status[f.id] = { ok: true };
-    } catch (e) {
-      status[f.id] = { ok: false, error: (e as Error)?.message || 'Error de geometría (OpenCascade)' };
-    }
-  }
-  return { shape, status };
-}
-
-function applyFeature(f: Feature, shape: Shape3D | null, sketches: Map<string, SketchF>, ev: (s: string) => number, evs: (s: string) => number): Shape3D | null {
-  switch (f.type) {
-    case 'sketch': {
-      for (const e of f.entities) entityOutline(e, evs);
-      planeFrame(f.plane, evs);
-      sketches.set(f.id, f);
-      return shape;
-    }
-    case 'extrude': {
-      const sk = sketches.get(f.profile);
-      if (!sk) throw new Error('Boceto de perfil no encontrado o con errores');
-      const fr = planeFrame(sk.plane, evs);
-      const d = ev(f.distance);
-      if (!(d > 1e-6)) throw new Error('La distancia debe ser mayor que 0');
-      const prof = sketchProfile(sk, evs);
-      let solid: Shape3D;
-      if (f.dir === 'symmetric') solid = (prof.sketchOnPlane(makePlane(fr, -d / 2)) as any).extrude(d);
-      else if (f.dir === 'reverse') solid = (prof.sketchOnPlane(makePlane(fr)) as any).extrude(d, { extrusionDirection: v3.mul(fr.normal, -1) });
-      else solid = (prof.sketchOnPlane(makePlane(fr)) as any).extrude(d);
-      return combine(shape, solid, f.op);
-    }
-    case 'revolve': {
-      const sk = sketches.get(f.profile);
-      if (!sk) throw new Error('Boceto de perfil no encontrado o con errores');
-      const fr = planeFrame(sk.plane, evs);
-      const ang = ev(f.angle);
-      if (!(ang > 0 && ang <= 360)) throw new Error('Ángulo entre 0 y 360°');
-      let origin: V3 = fr.origin, dir: V3;
-      if (f.axis === 'sx') dir = fr.xDir;
-      else if (f.axis === 'sy') dir = fr.yDir;
-      else {
-        const ln = sk.entities.find((e) => e.id === f.axis);
-        if (!ln || ln.type !== 'line') throw new Error('Eje de revolución no encontrado');
-        const a = toWorld(fr, ev(ln.a[0]), ev(ln.a[1])), b = toWorld(fr, ev(ln.b[0]), ev(ln.b[1]));
-        origin = a; dir = v3.norm(v3.sub(b, a));
-      }
-      const prof = sketchProfile(sk, evs);
-      const solid = (prof.sketchOnPlane(makePlane(fr)) as any).revolve(dir, { origin, angle: ang });
-      return combine(shape, solid, f.op);
-    }
-    case 'fillet': {
-      if (!shape) throw new Error('No hay sólido');
-      const r = ev(f.radius);
-      if (!(r > 0)) throw new Error('Radio no válido');
-      return shape.fillet(r, edgeFilter(f.edges) as any);
-    }
-    case 'chamfer': {
-      if (!shape) throw new Error('No hay sólido');
-      const r = ev(f.distance);
-      if (!(r > 0)) throw new Error('Distancia no válida');
-      return shape.chamfer(r, edgeFilter(f.edges) as any);
-    }
-    default: return shape;
-  }
-}
