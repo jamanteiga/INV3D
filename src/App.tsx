@@ -13,6 +13,10 @@ import { asmActions } from './ui/actions';
 
 const TOOL_MSG: Record<string, string> = {
   pickPlane: 'Selecciona un plano de origen, un plano de trabajo o una cara plana para el boceto',
+  arc3: 'Arco: punto inicial, punto final y punto intermedio', arctan: 'Arco tangente: desde el extremo de una línea', rect3: 'Rectángulo: dos puntos de un lado y la anchura',
+  rectc: 'Rectángulo: centro y esquina', circle3: 'Círculo: tres puntos', ellipse: 'Elipse: centro, eje mayor y eje menor', text: 'Texto: clic para colocar',
+  skdim: 'Cota: geometría y posición del texto', constrain: 'Restricción: selecciona la geometría', trim: 'Recortar', extend: 'Alargar',
+  fillet2d: 'Empalme: clic cerca del vértice', chamfer2d: 'Chaflán: clic cerca del vértice', projectGeom: 'Proyectar aristas del modelo', measure: 'Medir: clic en aristas',
   line: 'Línea: clic en puntos sucesivos · cerrar en el primer punto crea un contorno · doble clic o Esc termina',
   rect: 'Rectángulo: clic en dos esquinas opuestas', circle: 'Círculo: centro y radio', npoly: 'Polígono: centro y vértice',
   arc: 'Arco: centro, punto inicial y punto final (sentido antihorario)', slot: 'Ranura: centro 1, centro 2 y anchura', point: 'Punto: clic para colocar',
@@ -30,8 +34,10 @@ function StatusBar() {
   return (
     <footer className="status">
       <span className="st-msg">{msg}</span>
+      {s.mode === 'sketch' && s.skInfo && <span className={`st-item dofs ${s.skInfo.dof === 0 ? 'full' : ''}`}>{s.skInfo.dof === 0 ? 'Totalmente restringido' : `Se necesitan ${s.skInfo.dof} cotas`}</span>}
       <span className="grow" />
       {s.cursor && s.mode === 'sketch' && <span className="st-item mono">X {fmt(s.cursor[0], 2)} · Y {fmt(s.cursor[1], 2)} mm</span>}
+      {s.spaceMouse && <span className="st-item sm" title="Ratón 3D conectado">⬤ {s.spaceMouse}</span>}
       {s.busy && <span className="st-item">Regenerando…</span>}
       {!s.busy && ms !== undefined && <span className="st-item">{fmt(ms, 0)} ms</span>}
       <span className={`st-item oc ${s.oc}`}>{s.oc === 'ready' ? 'OpenCascade listo' : s.oc === 'error' ? 'Núcleo con error' : `Cargando núcleo ${Math.round(s.ocProgress * 100)}%`}</span>
@@ -132,11 +138,12 @@ export default function App() {
         else if (k === 'n') { e.preventDefault(); s.open({ kind: 'newdoc' }); }
         return;
       }
-      if (s.confirmBox || (s.dialog && !('draft' in s.dialog))) return;
+      if (s.confirmBox || (s.dialog && !('draft' in s.dialog) && s.dialog.kind !== 'skop')) return;
       if (e.key === 'Escape') {
         if (s.menuOpen) return s.set({ menuOpen: false });
         if (s.dialog) return s.closeDialog();
         if (s.tool) return s.setTool(null);
+        if (s.mode === 'sketch' && (s.selEntity || s.selCon || s.selEntities.length)) return s.set({ selEntity: null, selCon: null, selEntities: [] });
         if (s.mode === 'sketch') return s.finishSketch();
         if (s.mode === 'present') return s.set({ mode: 'model', explodeT: 0 });
         return s.set({ selFeature: null, selItem: null });
@@ -145,7 +152,8 @@ export default function App() {
       if (e.key === 'Home') return s.setView('fit');
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (s.kind === 'part') {
-          if (s.mode === 'sketch' && s.selEntity) return s.deleteEntity(s.selEntity);
+          if (s.mode === 'sketch' && s.selCon) return s.deleteConstraint(s.selCon);
+          if (s.mode === 'sketch' && (s.selEntity || s.selEntities.length)) return s.deleteEntity(s.selEntity ?? s.selEntities[0]);
           if (s.mode === 'model' && s.selFeature && !s.dialog) return s.deleteFeature(s.selFeature);
         }
         if (s.kind === 'assembly' && s.selItem && !s.dialog) {
@@ -158,11 +166,16 @@ export default function App() {
         }
         if (s.kind === 'drawing' && s.selItem) {
           const id = s.selItem;
-          return s.commitDrw((d) => { d.dims = d.dims.filter((x) => x.id !== id); d.notes = d.notes.filter((x) => x.id !== id); });
+          return s.commitDrw((d) => {
+            d.dims = d.dims.filter((x) => x.id !== id); d.notes = d.notes.filter((x) => x.id !== id); d.anns = (d.anns ?? []).filter((x) => x.id !== id);
+            if (d.views.some((v) => v.id === id)) { const gone = new Set([id, ...d.views.filter((v) => v.parent === id).map((v) => v.id)]); d.views = d.views.filter((v) => !gone.has(v.id)); d.dims = d.dims.filter((x) => !gone.has(x.view)); }
+          });
         }
       }
       if (s.kind === 'part' && s.mode === 'sketch') {
-        const map: Record<string, typeof s.tool> = { l: 'line', r: 'rect', c: 'circle', p: 'npoly', a: 'arc' };
+        if (e.key === 'F8' || e.key === 'F9') { e.preventDefault(); return s.set({ showCons: !s.showCons }); }
+        if (s.dialog) return;
+        const map: Record<string, typeof s.tool> = { l: 'line', r: 'rect', c: 'circle', p: 'npoly', a: 'arc3', d: 'skdim', x: 'trim', t: 'text' };
         if (map[k]) { e.preventDefault(); s.setTool(map[k]); }
         return;
       }

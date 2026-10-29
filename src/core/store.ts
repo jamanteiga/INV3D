@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import {
-  newDoc, uid, nextName, consumedSketches, newSheetDoc,
-  type PartDoc, type Feature, type PlaneRef, type SkEntity, type SketchF, type V3,
+  newDoc, uid, nextName, consumedSketches, newSheetDoc, docParams,
+  type PartDoc, type Feature, type PlaneRef, type SkEntity, type SketchF, type V3, type ConstraintType, type SkConstraint,
 } from './doc';
-import { newAsm, type AsmDoc } from './asm';
+import { makeEval } from './expr';
+import { solve, applySolution, checkNew } from './sketch';
+import { newAsm, solveAssembly, type AsmDoc } from './asm';
 import { newDrawing, type DrawingDoc } from './drawing';
 import { cad, type RegenResult, type AsmResult, type MeshData } from './cadClient';
 
@@ -14,18 +16,23 @@ export interface DocEntry { id: string; kind: DocKind; fileName: string; data: A
 export type Mode = 'model' | 'sketch' | 'present';
 export type Tool = null
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
+  | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
+  | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
   | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge'
   | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember'
-  | 'drwDim' | 'drwNote';
+  | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail';
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
-  | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange';
+  | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange' | 'rib' | 'coil' | 'split' | 'draft' | 'thicken' | 'thread' | 'workaxis' | 'workpoint';
 export type AsmDialogKind = 'joint' | 'frame' | 'weld' | 'bolt' | 'skel' | 'endtreat';
 export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' }
-  | { kind: 'fileinfo'; title: string; info: FileInfo };
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drwsection' | 'drwdetail' }
+  | { kind: 'fileinfo'; title: string; info: FileInfo }
+  | { kind: 'skop'; op: SkOp; params: Record<string, string>; step: number; base?: string };
+export type SkOp = 'offset' | 'mirror' | 'rpattern' | 'cpattern' | 'move' | 'copy' | 'rotate' | 'scale' | 'fillet' | 'chamfer' | 'text';
+export interface SketchInfo { dof: number; under: string[]; ok: boolean }
 
 export interface FileInfo {
   fileName: string; kind: string; message: string;
@@ -53,6 +60,19 @@ export interface State {
   tool: Tool;
   selFeature: string | null;
   selEntity: string | null;
+  /** Selección múltiple de geometría de boceto (Ctrl+clic) */
+  selEntities: string[];
+  /** Restricción o cota seleccionada */
+  selCon: string | null;
+  conType: ConstraintType;
+  showCons: boolean;
+  skInfo: SketchInfo | null;
+  /** Grados de libertad de los componentes del ensamblaje activo */
+  asmDof: Record<string, number> | null;
+  /** Resultado del análisis de interferencias (resaltado en el visor) */
+  interf: { a: string; b: string; volume: number; mesh: MeshData }[] | null;
+  /** Parámetros de la herramienta de boceto activa (radio de empalme, etc.) */
+  toolParam: string;
   selItem: string | null;        // ensamblaje: componente/barra/cordón/tornillo/unión; plano: vista
   dialog: Dialog;
   result: RegenResult | null;
@@ -66,6 +86,11 @@ export interface State {
   ocError: string;
   view: { name: string; n: number };
   showEdges: boolean;
+  /** Estilo visual: alámbrico y vista de corte 3D (plano X, Y o Z por el centro) */
+  wire: boolean;
+  /** Nombre del ratón 3D conectado ('' si no hay) */
+  spaceMouse: string;
+  clip: '' | 'X' | 'Y' | 'Z';
   project: ProjectInfo | null;
   toast: { text: string; kind: 'info' | 'error'; n: number } | null;
   cursor: [number, number] | null;
@@ -94,6 +119,10 @@ export interface State {
   addEntity: (e: SkEntity) => void;
   updateEntity: (id: string, patch: Partial<SkEntity>) => void;
   deleteEntity: (id: string) => void;
+  /** Modifica el boceto activo y lo resuelve; si no converge se descarta el cambio. */
+  sketchCommit: (fn: (sk: SketchF) => SketchF | void, msgOnFail?: string) => boolean;
+  addConstraint: (c: SkConstraint, opts?: { force?: boolean }) => boolean;
+  deleteConstraint: (id: string) => void;
   openFeatureDialog: (kind: FeatDialogKind, editId?: string) => void;
   openAsmDialog: (kind: AsmDialogKind, draft: any, editId?: string, tool?: Tool) => void;
   updateDraft: (patch: Record<string, unknown>) => void;
@@ -118,7 +147,7 @@ export const activeSketch = (s: State): SketchF | null => {
 
 function defaultProfile(doc: PartDoc): string {
   const used = consumedSketches(doc);
-  const sks = doc.features.filter((f): f is SketchF => f.type === 'sketch' && f.entities.some((e) => e.type !== 'line' && e.type !== 'point' && e.type !== 'arc'));
+  const sks = doc.features.filter((f): f is SketchF => f.type === 'sketch' && f.entities.some((e) => e.type !== 'point' && !e.construction));
   const free = sks.filter((s) => !used.has(s.id));
   return (free[free.length - 1] ?? sks[sks.length - 1])?.id ?? '';
 }
@@ -128,7 +157,25 @@ function lastSketch(doc: PartDoc, pred: (s: SketchF) => boolean): string {
   const free = sks.filter((s) => !used.has(s.id));
   return (free[free.length - 1] ?? sks[sks.length - 1])?.id ?? '';
 }
-const lastBody = (doc: PartDoc) => [...doc.features].reverse().find((f) => ['extrude', 'revolve', 'hole', 'loft', 'sweep'].includes(f.type))?.id;
+const lastBody = (doc: PartDoc) => [...doc.features].reverse().find((f) => ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil'].includes(f.type))?.id;
+
+function makeSafeEval(doc: PartDoc) { const e = makeEval(docParams(doc)); return (x: string) => { try { return e(x); } catch { return NaN; } }; }
+/** Vuelve a resolver los bocetos con restricciones (p. ej. tras cambiar un parámetro). */
+function resolveAll(doc: PartDoc, skip?: string) {
+  let ev: ((x: string) => number) | null = null;
+  for (const f of doc.features) {
+    if (f.type !== 'sketch' || !f.constraints?.length || f.id === skip) continue;
+    ev ??= makeSafeEval(doc);
+    const r = solve(f, ev, { analyse: false, maxIt: 40 });
+    if (r.ok) applySolution(f, r);
+  }
+}
+/** Grados de libertad del boceto activo (para colores y barra de estado). */
+export function sketchInfo(s: State): SketchInfo | null {
+  const sk = activeSketch(s); if (!sk) return null;
+  const r = solve(sk, makeSafeEval(s.doc), { maxIt: 0, tol: 1e-3 });
+  return { dof: r.dof, under: [...r.underIds], ok: r.ok };
+}
 
 const firstPart = newDoc();
 const FIRST_ID = 'd1';
@@ -151,12 +198,12 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null,
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '',
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
   view: { name: 'home', n: 0 },
-  showEdges: true,
+  showEdges: true, wire: false, spaceMouse: '', clip: '',
   project: null,
   toast: null,
   cursor: null,
@@ -178,6 +225,7 @@ export const useStore = create<State>((set, get) => ({
   },
   addDocument: (kind, data, fileName, activate = true, id) => {
     const nid = id ?? uid('d');
+    if (kind === 'part') { data = clone(data); resolveAll(data as PartDoc); }
     set({ docs: [...get().docs, { id: nid, kind, fileName, data, past: [], future: [], dirty: false }] });
     if (activate) get().activate(nid);
     return nid;
@@ -234,12 +282,50 @@ export const useStore = create<State>((set, get) => ({
     const { doc, past } = get();
     const next = clone(doc);
     fn(next);
+    resolveAll(next);
     set({ doc: next, past: [...past.slice(-99), doc], future: [], dirty: true });
   },
+  sketchCommit: (fn, msgOnFail) => {
+    const s = get(), sid = s.sketchId;
+    if (!sid) return false;
+    const next = clone(s.doc);
+    const i = next.features.findIndex((f) => f.id === sid);
+    if (i < 0) return false;
+    let sk = next.features[i] as SketchF;
+    try { const r = fn(sk); if (r) { sk = r; next.features[i] = r; } }
+    catch (e) { s.notify((e as Error).message, 'error'); return false; }
+    if (sk.constraints?.length) {
+      const res = solve(sk, makeSafeEval(next), { analyse: false });
+      if (!res.ok) { s.notify(msgOnFail ?? 'El boceto no se puede resolver con esta modificación', 'error'); return false; }
+      applySolution(sk, res);
+    }
+    resolveAll(next, sid);
+    set({ doc: next, past: [...s.past.slice(-99), s.doc], future: [], dirty: true });
+    return true;
+  },
+  addConstraint: (c, opts = {}) => {
+    const s = get(); const sk = activeSketch(s); if (!sk) return false;
+    if (!opts.force) {
+      const chk = checkNew(sk, makeSafeEval(s.doc), c);
+      if (!chk.ok) {
+        if (c.type === 'dim') { c.driven = true; s.notify('Cota de referencia (la geometría ya está restringida)'); }
+        else { s.notify(chk.reason!, 'error'); return false; }
+      }
+    }
+    const ok = get().sketchCommit((k) => { (k.constraints ??= []).push(c); });
+    if (ok) set({ selCon: c.id });
+    return ok;
+  },
+  deleteConstraint: (id) => { get().sketchCommit((k) => { k.constraints = (k.constraints ?? []).filter((c) => c.id !== id); }); set({ selCon: null }); },
   commitAsm: (fn) => {
     const { asm, past } = get();
     const next = clone(asm);
     fn(next);
+    // Restricciones: se resuelven aquí y se guardan las posiciones resultantes
+    if (next.joints.some((j) => !j.suppressed)) {
+      const r = solveAssembly(next, (x) => { try { return makeEval([])(x); } catch { return NaN; } });
+      for (const o of next.occurrences) if (r.xf[o.id] && !o.grounded) o.xf = { pos: r.xf[o.id].pos.map((v) => Number(v.toFixed(6))) as V3, quat: r.xf[o.id].quat.map((v) => Number(v.toFixed(9))) as [number, number, number, number] };
+    }
     set({ asm: next, past: [...past.slice(-99), asm], future: [], dirty: true });
   },
   commitDrw: (fn) => {
@@ -266,6 +352,7 @@ export const useStore = create<State>((set, get) => ({
   /** Sustituye el documento de pieza activo (abrir fichero) o crea uno nuevo si el activo no es pieza. */
   load: (doc, fileName) => {
     const s = get();
+    doc = clone(doc); resolveAll(doc);
     const cur = s.docs.find((d) => d.id === s.active);
     const pristine = s.kind === 'part' && !s.dirty && cur && (s.doc.features.length === 0);
     if (!pristine) { get().addDocument('part', doc, fileName); return; }
@@ -281,8 +368,8 @@ export const useStore = create<State>((set, get) => ({
     get().commit((d) => { d.features.push({ id, name: nextName(d, 'sketch'), type: 'sketch', plane, entities: [] }); });
     set({ mode: 'sketch', sketchId: id, tool: 'line', selFeature: id, selEntity: null, view: { name: 'sketch', n: get().view.n + 1 } });
   },
-  editSketch: (id) => set({ mode: 'sketch', sketchId: id, tool: null, selFeature: id, selEntity: null, dialog: null, view: { name: 'sketch', n: get().view.n + 1 } }),
-  finishSketch: () => set({ mode: 'model', sketchId: null, tool: null, selEntity: null, view: { name: 'restore', n: get().view.n + 1 } }),
+  editSketch: (id) => set({ mode: 'sketch', sketchId: id, tool: null, selFeature: id, selEntity: null, selEntities: [], selCon: null, dialog: null, view: { name: 'sketch', n: get().view.n + 1 } }),
+  finishSketch: () => set({ mode: 'model', sketchId: null, tool: null, selEntity: null, selEntities: [], selCon: null, skInfo: null, view: { name: 'restore', n: get().view.n + 1 } }),
   setTool: (tool) => set({ tool }),
 
   addEntity: (e) => {
@@ -292,17 +379,18 @@ export const useStore = create<State>((set, get) => ({
     set({ selEntity: e.id });
   },
   updateEntity: (id, patch) => {
-    const sid = get().sketchId;
-    get().commit((d) => {
-      const s = d.features.find((f) => f.id === sid) as SketchF;
+    get().sketchCommit((s) => {
       const e = s?.entities.find((x) => x.id === id);
       if (e) Object.assign(e, patch);
     });
   },
   deleteEntity: (id) => {
-    const sid = get().sketchId;
-    get().commit((d) => { const s = d.features.find((f) => f.id === sid) as SketchF; s.entities = s.entities.filter((x) => x.id !== id); });
-    set({ selEntity: null });
+    const ids = new Set([id, ...get().selEntities]);
+    get().sketchCommit((s) => {
+      s.entities = s.entities.filter((x) => !ids.has(x.id));
+      s.constraints = (s.constraints ?? []).filter((c) => ![c.a, c.b, c.c].some((r) => r && ids.has(r.e)));
+    });
+    set({ selEntity: null, selEntities: [] });
   },
 
   openFeatureDialog: (kind, editId) => {
@@ -338,6 +426,18 @@ export const useStore = create<State>((set, get) => ({
         }
         case 'sm_face': draft = { id, name, type: 'sm_face', profile }; break;
         case 'sm_flange': draft = { id, name, type: 'sm_flange', edge: null, length: '20 mm', angle: '90 deg', dir: 'up' }; break;
+        case 'rib': draft = { id, name, type: 'rib', profile: lastSketch(doc, (s) => s.entities.some((e) => e.type === 'line' && !e.construction)), thickness: '5 mm', depth: '30 mm', flip: false, op: 'join' }; break;
+        case 'coil': {
+          const sk = doc.features.find((f) => f.id === profile) as SketchF | undefined;
+          const line = sk?.entities.find((e) => e.type === 'line' && e.construction) ?? sk?.entities.find((e) => e.type === 'line');
+          draft = { id, name, type: 'coil', profile, axis: line?.id ?? 'sy', pitch: '10 mm', turns: '5', left: false, op: 'join' }; break;
+        }
+        case 'split': draft = { id, name, type: 'split', plane: { kind: 'std', name: 'XY', offset: '0' }, keep: 'pos' }; break;
+        case 'draft': draft = { id, name, type: 'draft', faces: [], angle: '3 deg', plane: { kind: 'std', name: 'XY', offset: '0' } }; break;
+        case 'thicken': draft = { id, name, type: 'thicken', faces: [], distance: '2 mm', op: 'join' }; break;
+        case 'thread': draft = { id, name, type: 'thread', faces: [], designation: 'M10x1.5', length: '20 mm', full: true }; break;
+        case 'workaxis': draft = { id, name, type: 'workaxis', origin: ['0', '0', '0'], dir: ['0', '0', '1'] }; break;
+        case 'workpoint': draft = { id, name, type: 'workpoint', origin: ['0', '0', '0'] }; break;
       }
     }
     const tool = toolFor(draft);
@@ -407,7 +507,7 @@ export const useStore = create<State>((set, get) => ({
 
 function toolFor(f: Feature): Tool {
   if ((f.type === 'fillet' || f.type === 'chamfer') && f.edges.mode === 'picked') return 'pickEdges';
-  if (f.type === 'shell') return 'pickFaces';
+  if (f.type === 'shell' || f.type === 'draft' || f.type === 'thicken' || f.type === 'thread') return 'pickFaces';
   if (f.type === 'sm_flange') return 'pickFlangeEdge';
   return null;
 }
@@ -482,7 +582,17 @@ async function runPreview() {
   } catch { /* la vista previa es opcional */ }
 }
 
+let infoTimer: ReturnType<typeof setTimeout> | undefined;
+let dofTimer: ReturnType<typeof setTimeout> | undefined;
 useStore.subscribe((s, prev) => {
+  if (s.kind === 'part' && s.mode === 'sketch' && (s.doc !== prev.doc || s.sketchId !== prev.sketchId || s.mode !== prev.mode)) {
+    clearTimeout(infoTimer);
+    infoTimer = setTimeout(() => { const st = useStore.getState(); if (st.mode === 'sketch') useStore.setState({ skInfo: sketchInfo(st) }); }, 20);
+  }
+  if (s.kind === 'assembly' && (s.asm !== prev.asm || s.active !== prev.active)) {
+    clearTimeout(dofTimer);
+    dofTimer = setTimeout(() => { const st = useStore.getState(); if (st.kind === 'assembly') useStore.setState({ asmDof: solveAssembly(st.asm, (x) => { try { return makeEval([])(x); } catch { return NaN; } }, { dof: true }).dof }); }, 200);
+  }
   const ocNow = s.oc === 'ready' && prev.oc !== 'ready';
   if (s.kind === 'part' && (s.doc !== prev.doc || ocNow || s.active !== prev.active)) {
     clearTimeout(regenTimer); regenTimer = setTimeout(runRegen, 30);

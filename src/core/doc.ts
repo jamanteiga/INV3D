@@ -11,23 +11,51 @@ export type PlaneRef =
   | { kind: 'custom'; label: string; origin: V3; xDir: V3; normal: V3 }
   | { kind: 'work'; id: string };
 
-export type SkEntity =
-  | { id: string; type: 'line'; a: E2; b: E2; construction?: boolean }
+/** Banderas comunes: construcción (no forma perfiles) y referencia (geometría proyectada, fija). */
+interface EFlags { construction?: boolean; ref?: boolean; center?: boolean }
+export type SkEntity = EFlags & (
+  | { id: string; type: 'line'; a: E2; b: E2 }
   | { id: string; type: 'rect'; x: string; y: string; w: string; h: string }
   | { id: string; type: 'circle'; cx: string; cy: string; d: string }
   | { id: string; type: 'poly'; pts: E2[] }
   | { id: string; type: 'npoly'; cx: string; cy: string; d: string; n: string; rot: string }
   | { id: string; type: 'point'; cx: string; cy: string }
-  | { id: string; type: 'arc'; cx: string; cy: string; r: string; a0: string; a1: string; construction?: boolean }
-  | { id: string; type: 'slot'; x1: string; y1: string; x2: string; y2: string; w: string };
+  | { id: string; type: 'arc'; cx: string; cy: string; r: string; a0: string; a1: string }
+  | { id: string; type: 'slot'; x1: string; y1: string; x2: string; y2: string; w: string }
+  | { id: string; type: 'spline'; pts: E2[]; closed?: boolean }
+  | { id: string; type: 'ellipse'; cx: string; cy: string; rx: string; ry: string; rot: string }
+  | { id: string; type: 'text'; x: string; y: string; text: string; size: string; rot: string });
+
+/** Referencia a geometría de boceto: entidad + subelemento (punto 'a','b','c','s','e','p0'… o tramo 's0'…).
+ *  Entidades especiales: 'O' (origen), 'X' y 'Y' (ejes del boceto). */
+export interface GRef { e: string; k?: string }
+export type DimKind = 'dist' | 'hdist' | 'vdist' | 'len' | 'radius' | 'diameter' | 'angle' | 'pldist' | 'lldist';
+export type ConstraintType = 'coincident' | 'onobject' | 'horizontal' | 'vertical' | 'parallel' | 'perpendicular' | 'collinear'
+  | 'equal' | 'tangent' | 'concentric' | 'midpoint' | 'symmetric' | 'fix' | 'dim';
+export interface SkConstraint {
+  id: string; type: ConstraintType;
+  a: GRef; b?: GRef; c?: GRef;
+  /** Cotas: tipo, expresión (admite parámetros), posición del texto en coordenadas del boceto, nombre (d0, d1…) */
+  kind?: DimKind; expr?: string; pos?: V2; name?: string;
+  /** Sentido/variante fijados al crear (signo de distancias, tangencia interior, punto fijo) */
+  sense?: number; inner?: boolean; at?: V2;
+  /** Cota conducida (de referencia, entre paréntesis): no restringe */
+  driven?: boolean;
+}
 
 export type BoolOp = 'join' | 'cut' | 'intersect' | 'new';
 export type EdgeMode = 'all' | 'X' | 'Y' | 'Z' | 'circle' | 'picked';
 export interface EdgeSel { mode: EdgeMode; points: V3[] }
 
 interface FBase { id: string; name: string; suppressed?: boolean }
-export interface SketchF extends FBase { type: 'sketch'; plane: PlaneRef; entities: SkEntity[] }
-export interface ExtrudeF extends FBase { type: 'extrude'; profile: string; distance: string; dir: 'normal' | 'reverse' | 'symmetric'; op: BoolOp }
+export interface SketchF extends FBase { type: 'sketch'; plane: PlaneRef; entities: SkEntity[]; constraints?: SkConstraint[] }
+export interface ExtrudeF extends FBase {
+  type: 'extrude'; profile: string; distance: string; dir: 'normal' | 'reverse' | 'symmetric' | 'two'; op: BoolOp;
+  /** Extensión: distancia o «a través de todo» */
+  extent?: 'distance' | 'through';
+  /** Segunda distancia (dos direcciones) y ángulo de inclinación */
+  distance2?: string; taper?: string;
+}
 export interface RevolveF extends FBase { type: 'revolve'; profile: string; axis: string; angle: string; op: BoolOp }
 export interface FilletF extends FBase { type: 'fillet'; radius: string; edges: EdgeSel }
 export interface ChamferF extends FBase { type: 'chamfer'; distance: string; edges: EdgeSel }
@@ -41,7 +69,8 @@ export type AxisName = 'X' | 'Y' | 'Z';
 export interface PatternF extends FBase {
   type: 'pattern'; ptype: 'rect' | 'circ'; features: string[];
   dir1: AxisName; n1: string; d1: string; dir2: AxisName | ''; n2: string; d2: string;
-  axis: AxisName; count: string; angle: string;
+  /** X, Y, Z o id de un eje de trabajo */
+  axis: AxisName | string; count: string; angle: string;
 }
 export interface MirrorF extends FBase { type: 'mirror'; features: string[]; plane: StdPlane }
 export interface ShellF extends FBase { type: 'shell'; thickness: string; faces: V3[] }
@@ -49,10 +78,19 @@ export interface WorkPlaneF extends FBase { type: 'workplane'; base: PlaneRef; o
 export interface LoftF extends FBase { type: 'loft'; sections: string[]; ruled: boolean; op: BoolOp }
 export interface SweepF extends FBase { type: 'sweep'; profile: string; path: string; op: BoolOp }
 export interface SmFaceF extends FBase { type: 'sm_face'; profile: string }
+export type E3 = [string, string, string];
+export interface RibF extends FBase { type: 'rib'; profile: string; thickness: string; depth: string; flip: boolean; op: BoolOp }
+export interface CoilF extends FBase { type: 'coil'; profile: string; axis: string; pitch: string; turns: string; left: boolean; op: BoolOp }
+export interface SplitF extends FBase { type: 'split'; plane: PlaneRef; keep: 'pos' | 'neg' }
+export interface DraftF extends FBase { type: 'draft'; faces: V3[]; angle: string; plane: PlaneRef }
+export interface ThickenF extends FBase { type: 'thicken'; faces: V3[]; distance: string; op: BoolOp }
+export interface ThreadF extends FBase { type: 'thread'; faces: V3[]; designation: string; length: string; full: boolean }
+export interface WorkAxisF extends FBase { type: 'workaxis'; origin: E3; dir: E3 }
+export interface WorkPointF extends FBase { type: 'workpoint'; origin: E3 }
 export interface EdgeRef { p0: V3; p1: V3; n: V3; w: V3 }
 export interface SmFlangeF extends FBase { type: 'sm_flange'; edge: EdgeRef | null; length: string; angle: string; dir: 'up' | 'down' }
 export type Feature = SketchF | ExtrudeF | RevolveF | FilletF | ChamferF | ImportF | HoleF | PatternF | MirrorF | ShellF
-  | WorkPlaneF | LoftF | SweepF | SmFaceF | SmFlangeF;
+  | WorkPlaneF | LoftF | SweepF | SmFaceF | SmFlangeF | RibF | CoilF | SplitF | DraftF | ThickenF | ThreadF | WorkAxisF | WorkPointF;
 export type FeatureType = Feature['type'];
 
 export interface IProps { partNumber: string; description: string; designer: string; material: string; revision: string }
@@ -66,6 +104,17 @@ export interface PartDoc {
   features: Feature[];
   /** Pieza de chapa: espesor, radio de plegado interior y factor K */
   sheet?: { t: string; r: string; k: string };
+}
+
+/** Parámetros del documento: de usuario + parámetros del modelo (cotas de boceto d0, d1…). */
+export function docParams(doc: PartDoc): Param[] {
+  const out: Param[] = [...doc.parameters];
+  const names = new Set(out.map((p) => p.name));
+  for (const f of doc.features) {
+    if (f.type !== 'sketch') continue;
+    for (const c of f.constraints ?? []) if (c.type === 'dim' && c.name && !c.driven && c.expr && !names.has(c.name)) { out.push({ name: c.name, expr: c.expr, comment: '' }); names.add(c.name); }
+  }
+  return out;
 }
 
 export const MATERIALS: { name: string; density: number; color: string }[] = [
@@ -176,7 +225,43 @@ export function entityOutline(e: SkEntity, ev: (s: string) => number): { pts: V2
       return { pts, closed: false };
     }
     case 'slot': return { pts: slotPoints(ev(e.x1), ev(e.y1), ev(e.x2), ev(e.y2), ev(e.w)), closed: true };
+    case 'spline': {
+      const P = e.pts.map((p) => [ev(p[0]), ev(p[1])] as V2);
+      return { pts: splineSample(P, !!e.closed), closed: !!e.closed };
+    }
+    case 'ellipse': {
+      const cx = ev(e.cx), cy = ev(e.cy), rx = ev(e.rx), ry = ev(e.ry), rot = (ev(e.rot) * Math.PI) / 180, pts: V2[] = [];
+      for (let i = 0; i < 96; i++) { const t = (i / 96) * Math.PI * 2, x = rx * Math.cos(t), y = ry * Math.sin(t); pts.push([cx + x * Math.cos(rot) - y * Math.sin(rot), cy + x * Math.sin(rot) + y * Math.cos(rot)]); }
+      return { pts, closed: true };
+    }
+    case 'text': { const x = ev(e.x), y = ev(e.y), h = ev(e.size); const w = h * 0.62 * e.text.length, r = (ev(e.rot) * Math.PI) / 180;
+      const R = (u: number, v: number): V2 => [x + u * Math.cos(r) - v * Math.sin(r), y + u * Math.sin(r) + v * Math.cos(r)];
+      return { pts: [R(0, 0), R(w, 0), R(w, h), R(0, h)], closed: true }; }
   }
+}
+
+/** Tramos de Bézier cúbica de una spline de interpolación (Catmull-Rom) por los puntos dados. */
+export function splineBeziers(P: V2[], closed: boolean): [V2, V2, V2, V2][] {
+  const n = P.length, out: [V2, V2, V2, V2][] = [];
+  if (n < 2) return out;
+  const at = (i: number): V2 => closed ? P[(i + n) % n] : P[Math.max(0, Math.min(n - 1, i))];
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    out.push([p1, [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6], [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6], p2]);
+  }
+  return out;
+}
+export function splineSample(P: V2[], closed: boolean, per = 16): V2[] {
+  const out: V2[] = [];
+  splineBeziers(P, closed).forEach(([a, b, c, d], i) => {
+    for (let k = i === 0 ? 0 : 1; k <= per; k++) {
+      const t = k / per, u = 1 - t;
+      out.push([u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0], u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1]]);
+    }
+  });
+  if (closed && out.length) out.pop();
+  return out.length ? out : P;
 }
 
 /** Ranura (colisa) de centro a centro, anchura w. */
@@ -197,7 +282,7 @@ export function npolyPoints(cx: number, cy: number, d: number, n: number, rotDeg
   return pts;
 }
 
-export const isClosedEntity = (e: SkEntity) => e.type !== 'line' && e.type !== 'point' && e.type !== 'arc';
+export const isClosedEntity = (e: SkEntity) => e.type !== 'line' && e.type !== 'point' && e.type !== 'arc' && !(e.type === 'spline' && !e.closed);
 
 export function entityArea(e: SkEntity, ev: (s: string) => number): number {
   const o = entityOutline(e, ev);
@@ -212,12 +297,14 @@ export function entityArea(e: SkEntity, ev: (s: string) => number): number {
 
 export const ENTITY_NAMES: Record<SkEntity['type'], string> = {
   line: 'Línea', rect: 'Rectángulo', circle: 'Círculo', poly: 'Contorno', npoly: 'Polígono', point: 'Punto', arc: 'Arco', slot: 'Ranura',
+  spline: 'Spline', ellipse: 'Elipse', text: 'Texto',
 };
 
 export const FEATURE_NAMES: Record<FeatureType, string> = {
   sketch: 'Boceto', extrude: 'Extrusión', revolve: 'Revolución', fillet: 'Empalme', chamfer: 'Chaflán', import: 'Sólido importado',
   hole: 'Agujero', pattern: 'Patrón', mirror: 'Simetría', shell: 'Vaciado', workplane: 'Plano de trabajo', loft: 'Solevación',
-  sweep: 'Barrido', sm_face: 'Cara', sm_flange: 'Pestaña',
+  sweep: 'Barrido', sm_face: 'Cara', sm_flange: 'Pestaña', rib: 'Nervio', coil: 'Bobina', split: 'División', draft: 'Inclinación',
+  thicken: 'Engrosar', thread: 'Rosca', workaxis: 'Eje de trabajo', workpoint: 'Punto de trabajo',
 };
 
 export const OP_NAMES: Record<BoolOp, string> = { join: 'Unir', cut: 'Cortar', intersect: 'Intersección', new: 'Nuevo sólido' };
@@ -246,7 +333,7 @@ export function nextName(doc: PartDoc, type: FeatureType): string {
 export function consumedSketches(doc: PartDoc): Set<string> {
   const s = new Set<string>();
   for (const f of doc.features) {
-    if (f.type === 'extrude' || f.type === 'revolve' || f.type === 'sm_face') s.add(f.profile);
+    if (f.type === 'extrude' || f.type === 'revolve' || f.type === 'sm_face' || f.type === 'rib' || f.type === 'coil') s.add(f.profile);
     if (f.type === 'sweep') { s.add(f.profile); s.add(f.path); }
     if (f.type === 'loft') f.sections.forEach((x) => s.add(x));
     if (f.type === 'hole') s.add(f.sketch);
@@ -255,7 +342,7 @@ export function consumedSketches(doc: PartDoc): Set<string> {
 }
 
 /** Operaciones que generan o quitan material (las que se pueden repetir en patrones y simetrías). */
-export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep'];
+export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil'];
 
 export function newSheetDoc(): PartDoc {
   const d = newDoc();

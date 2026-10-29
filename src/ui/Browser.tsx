@@ -5,11 +5,13 @@ import { planeLabel, ENTITY_NAMES, type Feature, type StdPlane, type PartDoc } f
 import { profileLabel } from '../core/catalog';
 import { scaleLabel } from '../core/drawing';
 import { asmActions } from './actions';
+import { JOINT_NAMES } from '../core/asm';
 
 const ICON: Record<Feature['type'], string> = {
   sketch: 'sketch', extrude: 'extrude', revolve: 'revolve', fillet: 'fillet', chamfer: 'chamfer', import: 'import',
   hole: 'hole', pattern: 'prect', mirror: 'mirror', shell: 'shell', workplane: 'workplane', loft: 'loft', sweep: 'sweep',
-  sm_face: 'smface', sm_flange: 'smflange',
+  sm_face: 'smface', sm_flange: 'smflange', rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken',
+  thread: 'thread', workaxis: 'axis', workpoint: 'point',
 };
 
 type Menu = { x: number; y: number; items: { label: string; danger?: boolean; run: () => void }[] } | null;
@@ -146,7 +148,7 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
             { label: j.suppressed ? 'Activar' : 'Suprimir', run: () => s.commitAsm((a) => { const t = a.joints.find((x) => x.id === j.id); if (t) t.suppressed = !t.suppressed; }) },
             { label: 'Eliminar', danger: true, run: () => del('joints', j.id) },
           ] }); }}>
-          <Icon name="joint" size={15} /><span className="tree-name">{j.name} ({({ mate: 'coincidente', flush: 'al ras', rigid: 'rígida' } as const)[j.type]})</span><Err id={j.id} />
+          <Icon name="joint" size={15} /><span className="tree-name">{j.name} ({JOINT_NAMES[j.type]})</span><Err id={j.id} />
         </div>
       ))}
     </Folder>
@@ -177,6 +179,7 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
           title={bad ? s.asmResult?.parts[o.part]?.error : e?.fileName}>
           <Icon name="part" size={17} /><span className="tree-name">{o.name}</span>
           {o.grounded && <span className="pin" title="Fijo"><Icon name="ground" size={13} /></span>}
+          {!o.grounded && s.asmDof && s.asmDof[o.id] !== undefined && <span className={`gdl ${s.asmDof[o.id] === 0 ? 'zero' : ''}`} title="Grados de libertad">{s.asmDof[o.id]} GDL</span>}
           {bad && <span className="tree-err"><Icon name="error" size={14} /></span>}
         </div>
       );

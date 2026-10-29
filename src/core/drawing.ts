@@ -20,6 +20,7 @@ export const VIEW_CAMERAS: Record<ViewDir, { dir: V3; x: V3 }> = {
   iso: { dir: [-0.5774, 0.5774, -0.5774], x: [0.7071, 0.7071, 0] },
 };
 
+export type P2d = [number, number];
 export interface DView {
   id: string; name: string;
   source: string;           // id del documento (pieza o ensamblaje)
@@ -28,9 +29,27 @@ export interface DView {
   x: number; y: number;     // centro en la hoja (mm)
   hidden: boolean;          // mostrar aristas ocultas
   parent?: string;          // vista base de la que se proyecta
+  kind?: 'base' | 'proj' | 'iso' | 'section' | 'detail';
+  label?: string;           // A, B… (secciones y detalles)
+  /** Sección: plano de corte (punto y normal = dirección de la mirada) y ejes de la vista */
+  section?: { origin: V3; normal: V3; x: V3; a: P2d; b: P2d; n2: P2d };
+  /** Detalle: centro y radio en coordenadas de la vista padre (relativas a su centro, mm de hoja) */
+  detail?: { c: P2d; r: number };
+  /** Marcas de centro automáticas en círculos */
+  centers?: boolean;
 }
-export interface DDim { id: string; view: string; a: [number, number]; b: [number, number]; offset: number; kind: 'h' | 'v' | 'a'; text?: string }
+export type DimKind2 = 'h' | 'v' | 'a' | 'r' | 'd' | 'ang';
+export interface DDim {
+  id: string; view: string; a: P2d; b: P2d; offset: number; kind: DimKind2; text?: string;
+  /** Radio/diámetro: radio en la hoja; ángulo: tercer punto */
+  r?: number; c?: P2d;
+  /** Tolerancia: «±0.1», «+0.2/-0», «H7»… */
+  tol?: string;
+}
 export interface DNote { id: string; x: number; y: number; text: string; size: number }
+export type AnnKind = 'balloon' | 'leader' | 'surface' | 'weld' | 'centerline' | 'centermark' | 'hole';
+/** Anotaciones con posición absoluta en la hoja (mm). */
+export interface DAnn { id: string; kind: AnnKind; pts: P2d[]; text?: string; r?: number; side?: 'arrow' | 'other' | 'both'; allAround?: boolean }
 export interface TitleBlock { title: string; partNumber: string; material: string; designer: string; checker: string; date: string; company: string; revision: string; scale: string }
 
 export interface DrawingDoc {
@@ -40,13 +59,14 @@ export interface DrawingDoc {
   views: DView[];
   dims: DDim[];
   notes: DNote[];
+  anns?: DAnn[];
   title: TitleBlock;
   bom?: { view: string; x: number; y: number } | null;
 }
 
 export function newDrawing(): DrawingDoc {
   return {
-    format: 'inv3d.drawing', version: 1, sheet: 'A3', views: [], dims: [], notes: [],
+    format: 'inv3d.drawing', version: 1, sheet: 'A3', views: [], dims: [], notes: [], anns: [],
     title: { title: '', partNumber: '', material: '', designer: '', checker: '', date: new Date().toLocaleDateString('es-ES'), company: '', revision: 'A', scale: '1:1' },
     bom: null,
   };
@@ -54,7 +74,7 @@ export function newDrawing(): DrawingDoc {
 export function validateDrawing(x: unknown): DrawingDoc {
   const d = x as DrawingDoc;
   if (!d || d.format !== 'inv3d.drawing') throw new Error('No es un plano INV3D (.i3d) válido');
-  d.dims ??= []; d.notes ??= []; d.views ??= [];
+  d.dims ??= []; d.notes ??= []; d.views ??= []; d.anns ??= [];
   return d;
 }
 
@@ -66,4 +86,11 @@ export function projectedDir(base: ViewDir, side: 'right' | 'left' | 'up' | 'dow
   if (base === 'front') return side === 'right' ? 'left' : side === 'left' ? 'right' : side === 'down' ? 'top' : 'bottom';
   if (base === 'top') return side === 'up' ? 'front' : side === 'down' ? 'back' : side === 'right' ? 'left' : 'right';
   return 'iso';
+}
+
+/** Siguiente letra libre para secciones y detalles. */
+export function nextLabel(views: DView[]): string {
+  const used = new Set(views.map((v) => v.label).filter(Boolean));
+  for (const c of 'ABCDEFGHJKLMNPRSTUVWXYZ') if (!used.has(c)) return c;
+  return 'Z';
 }

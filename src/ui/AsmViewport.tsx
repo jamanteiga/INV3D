@@ -3,12 +3,41 @@ import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { useStore, type State } from '../core/store';
 import { makeEval } from '../core/expr';
-import { planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
+import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
 import { xfPoint, xfInvPoint, xfInvDir, type Xform, type AsmDoc } from '../core/asm';
 import type { MeshData } from '../core/cadClient';
 import { View3D, css, tv, vArr, planarFaceAt, faceVertices } from './view3d';
 
-export interface PickedFace { owner: string; ownerKind: 'occ' | 'member'; pointW: V3; normalW: V3; pointL: V3; normalL: V3; vertsW: V3[] }
+export interface PickedFace { owner: string; ownerKind: 'occ' | 'member'; pointW: V3; normalW: V3; pointL: V3; normalL: V3; vertsW: V3[]; kind: 'plane' | 'axis'; radius?: number; convex?: boolean }
+
+/** Ajuste de cilindro a un grupo de caras de la malla: eje (punto, dirección), radio y extensión axial. */
+export function cylinderOf(m: MeshData, group: number) {
+  const g = m.faceGroups[group];
+  const vs: THREE.Vector3[] = [], ns: THREE.Vector3[] = [];
+  for (let i = g.start; i < g.start + g.count; i++) { const vi = m.triangles[i]; vs.push(new THREE.Vector3(m.vertices[vi * 3], m.vertices[vi * 3 + 1], m.vertices[vi * 3 + 2])); ns.push(new THREE.Vector3(m.normals[vi * 3], m.normals[vi * 3 + 1], m.normals[vi * 3 + 2])); }
+  let axis: THREE.Vector3 | null = null, best = 0;
+  for (let i = 1; i < ns.length; i++) { const c = ns[0].clone().cross(ns[i]); if (c.length() > best) { best = c.length(); axis = c; } if (best > 0.7) break; }
+  if (!axis || best < 0.05) return null;
+  axis.normalize();
+  if (ns.some((n) => Math.abs(n.dot(axis!)) > 0.05)) return null;
+  // centro: intersección (mínimos cuadrados) de las rectas normal de cada vértice en el plano perpendicular al eje
+  const u = new THREE.Vector3(1, 0, 0); if (Math.abs(u.dot(axis)) > 0.9) u.set(0, 1, 0); u.sub(axis.clone().multiplyScalar(u.dot(axis))).normalize();
+  const w = axis.clone().cross(u);
+  let a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0;
+  vs.forEach((v, i) => {
+    const px = v.dot(u), py = v.dot(w), nx = ns[i].dot(u), ny = ns[i].dot(w), nl = Math.hypot(nx, ny) || 1, ux = nx / nl, uy = ny / nl;
+    const m11 = 1 - ux * ux, m12 = -ux * uy, m22 = 1 - uy * uy;
+    a11 += m11; a12 += m12; a22 += m22; b1 += m11 * px + m12 * py; b2 += m12 * px + m22 * py;
+  });
+  const det = a11 * a22 - a12 * a12; if (Math.abs(det) < 1e-12) return null;
+  const cx = (b1 * a22 - b2 * a12) / det, cy = (a11 * b2 - a12 * b1) / det;
+  const center = u.clone().multiplyScalar(cx).add(w.clone().multiplyScalar(cy));
+  const r = vs.reduce((acc, v) => acc + Math.hypot(v.dot(u) - cx, v.dot(w) - cy), 0) / vs.length;
+  const ts = vs.map((v) => v.dot(axis!));
+  // convexo (eje, tornillo) si las normales apuntan hacia fuera del eje; cóncavo (taladro) si hacia dentro
+  const v0 = vs[0], radial = new THREE.Vector3(v0.dot(u) - cx, v0.dot(w) - cy, 0), nr = new THREE.Vector3(ns[0].dot(u), ns[0].dot(w), 0);
+  return { point: center, axis, radius: r, tmin: Math.min(...ts), tmax: Math.max(...ts), convex: radial.dot(nr) > 0 };
+}
 export interface CandLine { key: string; a: V3; b: V3; label: string }
 
 /** Líneas candidatas para estructura: esqueleto del ensamblaje + líneas de bocetos de los componentes. */
@@ -18,7 +47,7 @@ export function candidateLines(s: State): CandLine[] {
   for (const o of s.asm.occurrences) {
     if (o.suppressed) continue;
     const doc = s.docData(o.part) as PartDoc | null; if (!doc || doc.format !== 'inv3d.part') continue;
-    const ev0 = makeEval(doc.parameters); const ev = (x: string) => { try { return ev0(x); } catch { return NaN; } };
+    const ev0 = makeEval(docParams(doc)); const ev = (x: string) => { try { return ev0(x); } catch { return NaN; } };
     const work = resolveWorkPlanes(doc, ev);
     const used = consumedSketches(doc);
     const X = xf[o.id] ?? o.xf;
@@ -117,10 +146,16 @@ export default function AsmViewport() {
           add('member', m.id, m.mesh, color, e[0] || e[1] || e[2] ? new THREE.Matrix4().makeTranslation(...e) : null);
         }
         for (const w of r.welds) add('weld', w.id, w.mesh, '#c7843a', null);
+        for (const it of s.interf ?? []) {
+          const { grp } = V.meshFromData(it.mesh, '#e03131', { edges: false, emissive: '#ff0000' });
+          grp.traverse((o: any) => { if (o.material) { o.material.depthTest = false; o.material.transparent = true; o.material.opacity = 0.85; } o.renderOrder = 8; });
+          modelGroup.add(grp);
+        }
         for (const b of r.bolts) add('bolt', b.id, b.mesh, '#7d858f', null);
       }
       V.hasModel = !box.isEmpty();
       if (V.hasModel) V.bbox.copy(box);
+      V.applyVisual(s.clip, s.wire, pickables.map((m) => m.parent!).filter(Boolean));
       // Gizmo de movimiento
       tc.detach();
       if (s.tool === 'move' && s.selItem) {
@@ -165,19 +200,30 @@ export default function AsmViewport() {
       if (kind !== 'occ' && kind !== 'member') return null;
       const m = meshOf(kind, id); if (!m || hit.faceIndex == null) return null;
       const pf = planarFaceAt(m, hit.faceIndex);
-      if (!pf?.planar) return null;
+      if (!pf) return null;
       const mw = hit.object.matrixWorld;
-      const nW = pf.normal.clone().transformDirection(mw);
-      const vertsW = faceVertices(m, pf.group).map((v) => vArr(v.applyMatrix4(mw)));
       const s = useStore.getState();
-      let pointL: V3 = vArr(hit.point), normalL: V3 = vArr(nW);
-      if (kind === 'occ') {
+      const toL = (pW: V3, nWv: V3): [V3, V3] => {
+        if (kind !== 'occ') return [pW, nWv];
         const o = s.asm.occurrences.find((x) => x.id === id)!;
         const xf = s.asmResult?.xf[id] ?? o.xf;
-        pointL = vArr(tv(xfInvPoint(xf, vArr(hit.point))));
-        normalL = vArr(tv(xfInvDir(xf, vArr(nW))).normalize());
+        return [vArr(tv(xfInvPoint(xf, pW))), vArr(tv(xfInvDir(xf, nWv)).normalize())];
+      };
+      const vertsW = faceVertices(m, pf.group).map((v) => vArr(v.clone().applyMatrix4(mw)));
+      if (!pf.planar) {
+        // cara cilíndrica: eje, con el punto en el extremo más cercano al clic y la dirección hacia fuera por ese extremo
+        const cyl = cylinderOf(m, pf.group); if (!cyl) return null;
+        const local = hit.point.clone().applyMatrix4(mw.clone().invert());
+        const t = local.dot(cyl.axis), end = Math.abs(t - cyl.tmax) < Math.abs(t - cyl.tmin) ? cyl.tmax : cyl.tmin;
+        const dir = cyl.axis.clone().multiplyScalar(end === cyl.tmax ? 1 : -1);
+        const pAx = cyl.point.clone().sub(cyl.axis.clone().multiplyScalar(cyl.point.dot(cyl.axis))).add(cyl.axis.clone().multiplyScalar(end));
+        const pW = vArr(pAx.applyMatrix4(mw)), dW = vArr(dir.transformDirection(mw));
+        const [pointL, normalL] = toL(pW, dW);
+        return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: pW, normalW: dW, pointL, normalL, vertsW, kind: 'axis', radius: cyl.radius, convex: cyl.convex };
       }
-      return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: vArr(hit.point), normalW: vArr(nW), pointL, normalL, vertsW };
+      const nW = pf.normal.clone().transformDirection(mw);
+      const [pointL, normalL] = toL(vArr(hit.point), vArr(nW));
+      return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: vArr(hit.point), normalW: vArr(nW), pointL, normalL, vertsW, kind: 'plane' };
     };
     const nearestCand = (ev: MouseEvent): CandLine | null => {
       const P = V.local(ev);
@@ -251,12 +297,12 @@ export default function AsmViewport() {
       if (s.tool === 'asmFace' || s.tool === 'weldFace' || s.tool === 'boltFace') {
         const hit = hitAt(ev); if (!hit) return;
         const f = faceFromHit(hit);
-        if (!f) { s.notify('Selecciona una cara plana', 'error'); return; }
+        if (!f || (f.kind === 'axis' && s.tool !== 'asmFace')) { s.notify(s.tool === 'asmFace' ? 'Selecciona una cara plana o cilíndrica' : 'Selecciona una cara plana', 'error'); return; }
         if (s.tool === 'asmFace' && dlg?.kind === 'joint') {
           if (f.ownerKind !== 'occ') { s.notify('Las uniones se hacen entre componentes', 'error'); return; }
-          const ref = { occ: f.owner, point: f.pointL, normal: f.normalL };
+          const ref = { occ: f.owner, point: f.pointL, normal: f.normalL, kind: f.kind, radius: f.radius, convex: f.convex };
           if ((dlg.step ?? 0) === 0) useStore.setState({ dialog: { ...dlg, draft: { ...d, a: ref, aW: f.pointW }, step: 1 } });
-          else useStore.setState({ dialog: { ...dlg, draft: { ...d, b: ref, bW: f.pointW }, step: 0 } });
+          else useStore.setState({ dialog: { ...dlg, draft: { ...d, b: ref, bW: f.pointW, aligned: d.a?.kind === 'axis' && ref.kind === 'axis' ? d.a.convex !== ref.convex : d.aligned }, step: 0 } });
         } else if (s.tool === 'weldFace' && dlg?.kind === 'weld') {
           if ((dlg.step ?? 0) === 0) useStore.setState({ dialog: { ...dlg, draft: { ...d, fA: f }, step: 1 } });
           else useStore.setState({ dialog: { ...dlg, draft: { ...d, fB: f }, step: 0 } });
@@ -319,7 +365,7 @@ export default function AsmViewport() {
     let first = !s0.asmResult;
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
-      if (s.asmResult !== p.asmResult || s.selItem !== p.selItem || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode) {
+      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode) {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }

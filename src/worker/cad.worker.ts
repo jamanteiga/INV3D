@@ -2,19 +2,19 @@
 // Núcleo geométrico: OpenCascade (vía replicad) ejecutándose fuera del hilo de la interfaz.
 import opencascade from 'replicad-opencascadejs';
 import {
-  setOC, importSTEP, exportSTEP, compoundShapes, drawProjection, ProjectionCamera,
+  setOC, importSTEP, exportSTEP, compoundShapes, drawProjection, ProjectionCamera, drawRectangle, Plane,
   measureShapeVolumeProperties, measureShapeSurfaceProperties,
 } from 'replicad';
 import type { Shape3D } from 'replicad';
 import { v3, type PartDoc, type V3 } from '../core/doc';
 import type { AsmDoc } from '../core/asm';
-import { buildPart, flatPattern, type FeatStatus } from './part';
+import { buildPart, flatPattern, ensureFont, type FeatStatus } from './part';
 import { buildAsmGeometry, xfShape, cutHolesLocal } from './asm';
 
 let ready: Promise<void> | null = null;
 let ocBase = '';
 let lastPart: Shape3D | null = null;
-let lastAsm: { shape: Shape3D; name: string }[] = [];
+let lastAsm: { shape: Shape3D; name: string; id?: string }[] = [];
 
 async function loadWasm(): Promise<ArrayBuffer> {
   const base = new URL(ocBase || './oc/', self.location.href);
@@ -48,9 +48,12 @@ export function hashStr(s: string): string {
 }
 
 function meshShape(shape: Shape3D, fine = false) {
-  const tol = fine ? 0.02 : 0.05;
-  const faces = shape.mesh({ tolerance: tol, angularTolerance: 12 });
-  const edges = shape.meshEdges({ tolerance: tol, angularTolerance: 12 });
+  // Tolerancia de cuerda relativa al tamaño (mín. 0,005 mm) y angular de 0,06 rad (≈3,4°): curvas lisas
+  let diag = 100;
+  try { const b = shape.boundingBox.bounds; diag = Math.hypot(b[1][0] - b[0][0], b[1][1] - b[0][1], b[1][2] - b[0][2]) || 100; } catch { /* sin caja */ }
+  const tol = Math.max(0.005, Math.min(fine ? 0.02 : 0.04, diag / 6000));
+  const faces = shape.mesh({ tolerance: tol, angularTolerance: 0.06 });
+  const edges = shape.meshEdges({ tolerance: tol, angularTolerance: 0.06 });
   const vertices = new Float32Array(faces.vertices);
   const normals = new Float32Array(faces.normals);
   const triangles = new Uint32Array(faces.triangles);
@@ -126,7 +129,7 @@ async function regenAsm(asm: AsmDoc, parts: Record<string, PartDoc>, have: strin
         if (cut) { local = cut; const m = meshShape(cut); occCut[o.id] = { mesh: m.mesh, props: props(cut) }; transfer.push(...m.transfer); }
       } catch { /* sin taladros */ }
     }
-    lastAsm.push({ shape: xfShape(local, xf), name: o.name });
+    lastAsm.push({ shape: xfShape(local, xf), name: o.name, id: o.id });
   }
   const members = g.members.map((m) => {
     const mm = meshShape(m.shape);
@@ -134,7 +137,7 @@ async function regenAsm(asm: AsmDoc, parts: Record<string, PartDoc>, have: strin
     const fr = asm.frames.find((f) => f.id === m.id)!;
     const axis = v3.norm(v3.sub(fr.b, fr.a));
     const p = props(m.shape);
-    lastAsm.push({ shape: m.shape, name: fr.name });
+    lastAsm.push({ shape: m.shape, name: fr.name, id: m.id });
     return { id: m.id, mesh: mm.mesh, length: extentAlong(mm.mesh, axis), cutAngles: m.cutAngles, volume: p?.volume ?? 0 };
   });
   const welds = g.welds.map((w) => {
@@ -176,6 +179,9 @@ self.onmessage = async (ev: MessageEvent) => {
   try {
     await init();
     if (type === 'init') return post({ id, ok: true });
+    if ((type === 'regen' || type === 'asm' || type === 'project' || type === 'flat') && JSON.stringify(ev.data).includes('"type":"text"')) {
+      try { await ensureFont(new URL(ocBase || './oc/', self.location.href).href); } catch { /* sin tipografía */ }
+    }
     if (type === 'regen') {
       const t0 = performance.now();
       const doc = ev.data.doc as PartDoc;
@@ -218,21 +224,61 @@ self.onmessage = async (ev: MessageEvent) => {
       return post({ id, ok: true, result: out });
     }
     if (type === 'project') {
-      const key = hashStr(JSON.stringify([ev.data.source, ev.data.dir, ev.data.x]));
+      const key = hashStr(JSON.stringify([ev.data.source, ev.data.dir, ev.data.x, ev.data.section ?? null]));
       if (projCache.has(key)) return post({ id, ok: true, result: projCache.get(key) });
-      const shape = await sourceShape(ev.data.source);
+      let shape = await sourceShape(ev.data.source);
       const dir = v3.norm(ev.data.dir as V3), x = v3.norm(ev.data.x as V3);
+      const up = v3.cross(dir, x);
+      let cutSegs: number[] = [];
+      let secC: V3 | null = null;
+      if (ev.data.section) {
+        const o = ev.data.section.origin as V3, n = v3.norm(ev.data.section.normal as V3);
+        const b0 = shape.boundingBox.bounds as [V3, V3];
+        const L = v3.len(v3.sub(b0[1], b0[0])) * 4 + 100;
+        let xs = v3.cross(n, [0, 0, 1]); if (v3.len(xs) < 1e-6) xs = v3.cross(n, [1, 0, 0]); xs = v3.norm(xs);
+        const box = (drawRectangle(L, L).sketchOnPlane(new Plane(o, xs, v3.mul(n, -1))) as any).extrude(L) as Shape3D;
+        const kept = shape.cut(box);
+        try {
+          const face = (drawRectangle(L, L).sketchOnPlane(new Plane(o, xs, n)) as any).face();
+          const sec = shape.intersect(face) as any;
+          const em = sec.meshEdges({ tolerance: 0.01, angularTolerance: 0.05 });
+          cutSegs = Array.from(em.lines as number[]);
+        } catch { /* sin caras de sección */ }
+        shape = kept;
+        secC = shape.boundingBox.center as V3;
+      }
       const bb = shape.boundingBox;
       const c = bb.center as V3;
       const cam = new ProjectionCamera(v3.sub(c, v3.mul(dir, 10000)), dir, x);
       const { visible, hidden } = drawProjection(shape, cam);
       const flat = (p: string[] | string[][]) => (Array.isArray(p[0]) ? (p as string[][]).flat() : (p as string[]));
-      const result = { visible: flat(visible.toSVGPaths()), hidden: flat(hidden.toSVGPaths()) };
+      // Caras de sección en coordenadas de la vista (x, arriba), relativas al centro usado por la cámara
+      const cut: number[] = [];
+      for (let i = 0; i + 2 < cutSegs.length; i += 3) { const d = v3.sub([cutSegs[i], cutSegs[i + 1], cutSegs[i + 2]], c); cut.push(v3.dot(d, x), v3.dot(d, up)); }
+      void secC;
+      const result = { visible: flat(visible.toSVGPaths()), hidden: flat(hidden.toSVGPaths()), center: c, cut };
       projCache.set(key, result);
-      if (projCache.size > 40) projCache.delete(projCache.keys().next().value!);
+      if (projCache.size > 60) projCache.delete(projCache.keys().next().value!);
       return post({ id, ok: true, result });
     }
     if (type === 'flat') return post({ id, ok: true, result: flatPattern(ev.data.doc) });
+    if (type === 'interf') {
+      await regenAsm(ev.data.asm, ev.data.parts, Object.keys(ev.data.parts).map(() => '*'));
+      const items = lastAsm.filter((x) => x.id).map((x) => ({ ...x, id: x.id!, bb: x.shape.boundingBox.bounds as [V3, V3] }));
+      const out: { a: string; b: string; volume: number; mesh: unknown }[] = [];
+      const transfer: Transferable[] = [];
+      for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+        const A = items[i], B = items[j];
+        if (![0, 1, 2].every((k) => A.bb[0][k] < B.bb[1][k] - 1e-6 && B.bb[0][k] < A.bb[1][k] - 1e-6)) continue;
+        try {
+          const c = A.shape.intersect(B.shape) as Shape3D;
+          const vol = measureShapeVolumeProperties(c).volume;
+          if (vol > 1e-3) { const m = meshShape(c); out.push({ a: A.id, b: B.id, volume: vol, mesh: m.mesh }); transfer.push(...m.transfer); }
+        } catch { /* sin intersección */ }
+        if (out.length > 60) break;
+      }
+      return post({ id, ok: true, result: out }, transfer);
+    }
     throw new Error(`Mensaje desconocido: ${type}`);
   } catch (e) {
     post({ id, ok: false, error: (e as Error)?.message || String(e) });

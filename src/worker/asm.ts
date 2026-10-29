@@ -4,7 +4,7 @@ import type { Drawing, Shape3D } from 'replicad';
 import { makeEval } from '../core/expr';
 import { v3, type V3, type V2 } from '../core/doc';
 import { getProfile, profileHalf, BOLTS, boltLength, type ProfileShape } from '../core/catalog';
-import { memberFrame, solveJoints, xfInvPoint, xfInvDir, type AsmDoc, type FrameMember, type Xform, type BoltGroup, type Weld } from '../core/asm';
+import { memberFrame, solveAssembly, xfInvPoint, xfInvDir, type AsmDoc, type FrameMember, type Xform, type BoltGroup, type Weld } from '../core/asm';
 
 type Ev = (s: string) => number;
 
@@ -193,7 +193,7 @@ export interface AsmGeometry {
 
 export function buildAsmGeometry(asm: AsmDoc): AsmGeometry {
   const ev = makeEval([]);
-  const { xf, errors } = solveJoints(asm, ev);
+  const { xf, errors } = solveAssembly(asm, ev);
   const out: AsmGeometry = { xf, jointErrors: errors, members: [], memberErrors: {}, welds: [], weldErrors: {}, bolts: [], boltErrors: {} };
   for (const m of asm.frames) {
     if (m.suppressed) continue;

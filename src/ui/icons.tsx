@@ -1,11 +1,15 @@
 // Iconos propios (trazo simple) para la cinta y el navegador.
 import type { ReactNode } from 'react';
 
-const S = ({ children, size = 28 }: { children: ReactNode; size?: number }) => (
-  <svg viewBox="0 0 32 32" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round">{children}</svg>
+// Trazo según tamaño: 1,5 px a 32 px y 1 px a 16 px (líneas nítidas, sin medios píxeles borrosos)
+const S = ({ children, size = 32 }: { children: ReactNode; size?: number }) => (
+  <svg viewBox="0 0 32 32" width={size} height={size} fill="none" stroke="var(--ico-ink)" strokeWidth={2}
+    strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" className="ico">{children}</svg>
 );
 const A = 'var(--ico-accent)';
 const B = 'var(--ico-fill)';
+const W = 'var(--ico-warm)';
+const G = '#2f9a4c';
 
 export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
   sketch: (p) => <S {...p}><path d="M5 25 L5 9 L21 9" /><path d="M9 21h16V7" stroke={A} /><path d="M20 26l7-7 2 2-7 7h-2z" fill={B} /></S>,
@@ -92,6 +96,78 @@ export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
   ilogic: (p) => <S {...p}><path d="M8 4h11l6 6v18H8z" fill={B} /><text x="16.5" y="21" fontSize="9" textAnchor="middle" fill={A} stroke="none" fontWeight="700" fontStyle="italic">iL</text></S>,
   sheetmetal: (p) => <S {...p}><path d="M4 22l10-7h14l-10 7z" fill={B} /><path d="M18 22V10l10-7" /></S>,
   weldment: (p) => <S {...p}><path d="M4 24h24M10 24V10h12v14" /><path d="M10 24l-3-3M22 24l3-3" stroke={A} strokeWidth="2.4" /></S>,
+
+  // ---- Boceto: creación ----
+  arc3: (p) => <S {...p}><path d="M5 24C7 12 19 6 27 14" /><circle cx="5" cy="24" r="2.2" fill={A} stroke="none" /><circle cx="16" cy="9.6" r="2.2" fill={W} stroke="none" /><circle cx="27" cy="14" r="2.2" fill={A} stroke="none" /></S>,
+  arctan: (p) => <S {...p}><path d="M3 25h11" /><path d="M14 25a9 9 0 0 0 9-9V6" stroke={A} strokeWidth="2" /><circle cx="14" cy="25" r="2.2" fill={W} stroke="none" /></S>,
+  rect3: (p) => <S {...p}><path d="M5 20L17 6l10 8-12 14z" /><circle cx="5" cy="20" r="2" fill={A} stroke="none" /><circle cx="17" cy="6" r="2" fill={A} stroke="none" /><circle cx="27" cy="14" r="2" fill={W} stroke="none" /></S>,
+  rectc: (p) => <S {...p}><rect x="5" y="8" width="22" height="16" /><circle cx="16" cy="16" r="2" fill={W} stroke="none" /><circle cx="27" cy="8" r="2" fill={A} stroke="none" /><path d="M16 16l11-8" stroke={A} strokeDasharray="2 2" /></S>,
+  circle3: (p) => <S {...p}><circle cx="16" cy="16" r="10" /><circle cx="6" cy="16" r="2" fill={A} stroke="none" /><circle cx="22" cy="8" r="2" fill={A} stroke="none" /><circle cx="22" cy="24" r="2" fill={A} stroke="none" /></S>,
+  splinetool: (p) => <S {...p}><path d="M4 22C8 6 14 6 16 16s8 10 12-6" /><circle cx="4" cy="22" r="2" fill={A} stroke="none" /><circle cx="16" cy="16" r="2" fill={A} stroke="none" /><circle cx="28" cy="10" r="2" fill={A} stroke="none" /></S>,
+  ellipsetool: (p) => <S {...p}><ellipse cx="16" cy="16" rx="12" ry="7" /><path d="M16 16h12M16 16V9" stroke={A} strokeDasharray="2 2" /><circle cx="16" cy="16" r="1.8" fill={W} stroke="none" /></S>,
+  text: (p) => <S {...p}><path d="M7 7h18M16 7v19" strokeWidth="2.6" /><path d="M11 26h10" stroke={A} /></S>,
+  projectgeom: (p) => <S {...p}><path d="M6 6l10-3 10 3-10 3z" fill={B} /><path d="M6 6v4M26 6v4" /><path d="M6 13v10M16 9v14M26 13v10" stroke={A} strokeDasharray="2 2" /><path d="M3 26l13-3 13 3" stroke={W} strokeWidth="2" /></S>,
+  fillet2d: (p) => <S {...p}><path d="M5 27V14" /><path d="M5 14a8 8 0 0 1 8-8" stroke={W} strokeWidth="2.2" /><path d="M13 6h14" /></S>,
+  chamfer2d: (p) => <S {...p}><path d="M5 27V14" /><path d="M5 14l8-8" stroke={W} strokeWidth="2.2" /><path d="M13 6h14" /></S>,
+  // ---- Boceto: modificar ----
+  offset2d: (p) => <S {...p}><rect x="5" y="5" width="22" height="22" rx="3" /><rect x="10" y="10" width="12" height="12" stroke={A} /></S>,
+  copy2d: (p) => <S {...p}><rect x="4" y="12" width="14" height="14" fill={B} /><rect x="14" y="4" width="14" height="14" stroke={A} /></S>,
+  rotate2d: (p) => <S {...p}><rect x="11" y="11" width="10" height="10" fill={B} /><path d="M26 16a10 10 0 1 1-4-8" stroke={A} /><path d="M22 3v5h5" stroke={A} /></S>,
+  scale2d: (p) => <S {...p}><rect x="4" y="16" width="12" height="12" fill={B} /><rect x="4" y="4" width="24" height="24" stroke={A} strokeDasharray="3 2" /><path d="M16 16l9-9M25 7h-5M25 7v5" stroke={A} /></S>,
+  trimtool: (p) => <S {...p}><path d="M4 16h8" /><path d="M12 16h16" stroke={W} strokeDasharray="2 2" /><path d="M12 5v22" /><path d="M21 11l4 4m0-4l-4 4" stroke="#d64545" /></S>,
+  extendtool: (p) => <S {...p}><path d="M4 16h12" /><path d="M16 16h10" stroke={A} strokeDasharray="2 2" /><path d="M26 5v22" /><path d="M20 13l3 3-3 3" stroke={A} /></S>,
+  showcons: (p) => <S {...p}><path d="M5 25L25 7" /><rect x="15" y="17" width="10" height="10" rx="2" fill={B} /><path d="M18 22h4" stroke={A} strokeWidth="2" /></S>,
+  // ---- Restricciones ----
+  c_coincident: (p) => <S {...p}><path d="M4 26L16 16M16 16L28 22" /><circle cx="16" cy="16" r="3.5" fill={W} stroke="none" /></S>,
+  c_onobject: (p) => <S {...p}><path d="M4 26L28 8" /><circle cx="16" cy="17" r="3.5" fill={W} stroke="none" /></S>,
+  c_collinear: (p) => <S {...p}><path d="M3 22l11-6" /><path d="M18 14l11-6" stroke={A} /><path d="M14 16l4-2" strokeDasharray="1.5 1.5" /></S>,
+  c_concentric: (p) => <S {...p}><circle cx="16" cy="16" r="11" /><circle cx="16" cy="16" r="5" stroke={A} /><circle cx="16" cy="16" r="1.5" fill={W} stroke="none" /></S>,
+  c_fix: (p) => <S {...p}><rect x="8" y="14" width="16" height="12" rx="2" fill={W} stroke="none" /><path d="M11 14v-3a5 5 0 0 1 10 0v3" /></S>,
+  c_parallel: (p) => <S {...p}><path d="M5 24L19 6" /><path d="M13 26L27 8" stroke={A} /></S>,
+  c_perpendicular: (p) => <S {...p}><path d="M6 26h20" /><path d="M16 26V6" stroke={A} /><path d="M16 21h5v5" /></S>,
+  c_horizontal: (p) => <S {...p}><path d="M4 16h24" stroke={A} strokeWidth="2.4" /><circle cx="4" cy="16" r="2" fill="var(--ico-ink)" stroke="none" /><circle cx="28" cy="16" r="2" fill="var(--ico-ink)" stroke="none" /></S>,
+  c_vertical: (p) => <S {...p}><path d="M16 4v24" stroke={A} strokeWidth="2.4" /><circle cx="16" cy="4" r="2" fill="var(--ico-ink)" stroke="none" /><circle cx="16" cy="28" r="2" fill="var(--ico-ink)" stroke="none" /></S>,
+  c_tangent: (p) => <S {...p}><circle cx="16" cy="18" r="8" /><path d="M3 10h26" stroke={A} /><circle cx="16" cy="10" r="1.8" fill={W} stroke="none" /></S>,
+  c_symmetric: (p) => <S {...p}><path d="M16 3v26" strokeDasharray="3 2" /><path d="M5 10l7 6-7 6" stroke={A} /><path d="M27 10l-7 6 7 6" stroke={A} /></S>,
+  c_equal: (p) => <S {...p}><path d="M8 12h16M8 20h16" stroke={A} strokeWidth="2.4" /></S>,
+  c_midpoint: (p) => <S {...p}><path d="M4 24h24" /><path d="M16 24l-4-7h8z" fill={W} stroke="none" /></S>,
+  // ---- Pieza ----
+  rib: (p) => <S {...p}><path d="M4 26h24M6 26V8" /><path d="M6 10l18 14H6z" fill={B} stroke={A} /></S>,
+  coil: (p) => <S {...p}><path d="M8 6c16 0 16 5 0 5s-16 5 0 5 16 5 0 5-16 5 0 5" stroke={A} /><path d="M16 3v26" strokeDasharray="2 2" /></S>,
+  split: (p) => <S {...p}><path d="M5 12l11-6 11 6v10l-11 6-11-6z" fill={B} /><path d="M2 19l14-6 14 6" stroke={W} strokeWidth="2" /></S>,
+  draft: (p) => <S {...p}><path d="M8 26l3-20h10l3 20z" fill={B} /><path d="M11 6l-3 20" stroke={A} strokeWidth="2" /><path d="M8 6v20" strokeDasharray="2 2" /></S>,
+  thicken: (p) => <S {...p}><path d="M4 20l10-8h14l-10 8z" fill={B} /><path d="M4 20v5l10-8v-5M4 25h14l10-8v-5" stroke={A} /></S>,
+  thread: (p) => <S {...p}><rect x="9" y="4" width="14" height="24" rx="2" fill={B} /><path d="M9 9l14-3M9 14l14-3M9 19l14-3M9 24l14-3" stroke={A} /></S>,
+  emboss: (p) => <S {...p}><path d="M4 22l12-6 12 6-12 6z" fill={B} /><path d="M11 18l5-9 5 9M13 15h6" stroke={A} strokeWidth="2" /></S>,
+  workpoint: (p) => <S {...p}><path d="M6 6l20 20M26 6L6 26" stroke={A} /><circle cx="16" cy="16" r="3" fill={W} stroke="none" /></S>,
+  workaxis: (p) => <S {...p}><path d="M4 28L28 4" stroke={A} strokeDasharray="4 2" strokeWidth="2" /><circle cx="16" cy="16" r="2" fill={W} stroke="none" /></S>,
+  measure: (p) => <S {...p}><path d="M3 20l17-17 9 9-17 17z" fill={B} /><path d="M8 15l3 3M12 11l2 2M16 7l3 3M20 3l2 2" /></S>,
+  interf: (p) => <S {...p}><rect x="4" y="10" width="14" height="14" fill={B} /><rect x="13" y="5" width="14" height="14" /><rect x="13" y="10" width="5" height="9" fill="#d64545" stroke="none" /></S>,
+  pattern_comp: (p) => <S {...p}><path d="M4 10l5-3 5 3-5 3z" fill={B} /><path d="M18 10l5-3 5 3-5 3zM4 22l5-3 5 3-5 3zM18 22l5-3 5 3-5 3z" stroke={A} /></S>,
+  constraint3d: (p) => <S {...p}><rect x="4" y="16" width="12" height="10" fill={B} /><rect x="16" y="6" width="12" height="10" /><path d="M16 12v8" stroke={W} strokeWidth="2.4" /></S>,
+  angle3d: (p) => <S {...p}><path d="M4 26h24M4 26L22 8" /><path d="M14 26a10 10 0 0 0-3-7" stroke={A} /></S>,
+  insert3d: (p) => <S {...p}><rect x="6" y="18" width="20" height="8" fill={B} /><ellipse cx="16" cy="18" rx="5" ry="2" /><path d="M11 6h10v10H11z" stroke={A} /><path d="M16 2v26" strokeDasharray="2 2" /></S>,
+  content: (p) => <S {...p}><path d="M5 5h22v22H5z" fill={B} /><path d="M10 10h5v5h-5zM17 10h5v5h-5zM10 17h5v5h-5z" /><circle cx="19.5" cy="19.5" r="3" stroke={A} /></S>,
+  section: (p) => <S {...p}><rect x="4" y="6" width="24" height="20" /><path d="M4 6l24 20" stroke={W} strokeWidth="2" strokeDasharray="5 2 1 2" /><path d="M9 26l6-6M14 26l9-9M19 26l9-9M4 21l5-5" stroke={A} /></S>,
+  detail: (p) => <S {...p}><rect x="3" y="6" width="17" height="17" /><circle cx="14" cy="15" r="5" stroke={W} strokeWidth="2" /><circle cx="24" cy="22" r="6" fill={B} /></S>,
+  centermark: (p) => <S {...p}><circle cx="16" cy="16" r="9" /><path d="M16 3v26M3 16h26" stroke={A} strokeDasharray="6 2 2 2" /></S>,
+  centerline: (p) => <S {...p}><rect x="6" y="9" width="20" height="14" /><path d="M2 16h28" stroke={A} strokeDasharray="6 2 2 2" /></S>,
+  dimrad: (p) => <S {...p}><circle cx="13" cy="17" r="9" /><path d="M13 17l12-12" stroke={A} /><path d="M25 5h4" /><text x="22" y="28" fontSize="8" fill="currentColor" stroke="none">R</text></S>,
+  dimdia: (p) => <S {...p}><circle cx="16" cy="16" r="10" /><path d="M8 24l16-16" stroke={A} /><text x="3" y="9" fontSize="8" fill="currentColor" stroke="none">Ø</text></S>,
+  dimang: (p) => <S {...p}><path d="M4 27h24M4 27L20 6" /><path d="M18 27a14 14 0 0 0-5-11" stroke={A} /></S>,
+  dimbase: (p) => <S {...p}><path d="M5 26V6M5 10h20M5 16h14M5 22h8" /><path d="M25 7v6M19 13v6M13 19v6" stroke={A} /></S>,
+  leader: (p) => <S {...p}><path d="M5 26l10-10h12" /><path d="M5 26l2-6M5 26l6-2" stroke={A} /><path d="M17 12h10" stroke={A} /></S>,
+  balloon: (p) => <S {...p}><circle cx="20" cy="12" r="8" /><text x="20" y="15.5" fontSize="9" textAnchor="middle" fill="currentColor" stroke="none">1</text><path d="M14 18L5 27" stroke={A} /><circle cx="5" cy="27" r="1.6" fill={A} stroke="none" /></S>,
+  surface: (p) => <S {...p}><path d="M4 24h7l5-14 5 14h7" /><path d="M16 10V4" stroke={A} /></S>,
+  weldsym: (p) => <S {...p}><path d="M3 24l8-8h18" /><path d="M18 16l4-6 4 6" fill={B} stroke={A} /></S>,
+  holenote: (p) => <S {...p}><circle cx="9" cy="22" r="5" /><path d="M13 18l7-7h9" stroke={A} /><text x="18" y="9" fontSize="7" fill="currentColor" stroke="none">Ø8</text></S>,
+  tolerance: (p) => <S {...p}><rect x="3" y="10" width="26" height="12" /><path d="M11 10v12M19 10v12" /><circle cx="7" cy="16" r="2.5" stroke={A} /></S>,
+  sheetadd: (p) => <S {...p}><rect x="5" y="4" width="18" height="24" fill={B} /><path d="M24 20v8M20 24h8" stroke={A} strokeWidth="2" /></S>,
+  breakview: (p) => <S {...p}><rect x="3" y="10" width="26" height="12" /><path d="M13 6c-2 4 2 6 0 10s2 6 0 10M19 6c-2 4 2 6 0 10s2 6 0 10" stroke={W} /></S>,
+  hatch: (p) => <S {...p}><rect x="5" y="5" width="22" height="22" /><path d="M5 13l8-8M5 21l16-16M9 27l18-18M17 27l10-10" stroke={A} /></S>,
+  dof: (p) => <S {...p}><path d="M16 4v24M4 16h24M7 7l18 18" stroke={A} /><circle cx="16" cy="16" r="3" fill={W} stroke="none" /></S>,
+  spacemouse: (p) => <S {...p}><path d="M5 25c0-4 4-6 11-6s11 2 11 6v1H5z" fill={B} /><ellipse cx="16" cy="14" rx="7" ry="3" fill="var(--panel)" stroke={A} /><path d="M9 14v5M23 14v5" stroke={A} /><path d="M16 4v4M13 6l3-2 3 2" stroke={W} /></S>,
+  axisfill: (p) => <S {...p}><path d="M4 28L28 4" stroke={A} strokeDasharray="4 2" /></S>,
 };
 
 export const Icon = ({ name, size }: { name: string; size?: number }) => (Icons[name] ?? Icons.part)({ size });
