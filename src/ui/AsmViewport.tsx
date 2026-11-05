@@ -8,7 +8,7 @@ import { xfPoint, xfInvPoint, xfInvDir, type Xform, type AsmDoc } from '../core/
 import type { MeshData } from '../core/cadClient';
 import { View3D, css, tv, vArr, planarFaceAt, faceVertices } from './view3d';
 
-export interface PickedFace { owner: string; ownerKind: 'occ' | 'member'; pointW: V3; normalW: V3; pointL: V3; normalL: V3; vertsW: V3[]; kind: 'plane' | 'axis'; radius?: number; convex?: boolean }
+export interface PickedFace { owner: string; ownerKind: 'occ' | 'member'; pointW: V3; normalW: V3; pointL: V3; normalL: V3; vertsW: V3[]; kind: 'plane' | 'axis'; radius?: number; convex?: boolean; centerL?: V3; xdirL?: V3 }
 
 /** Ajuste de cilindro a un grupo de caras de la malla: eje (punto, dirección), radio y extensión axial. */
 export function cylinderOf(m: MeshData, group: number) {
@@ -219,11 +219,18 @@ export default function AsmViewport() {
         const pAx = cyl.point.clone().sub(cyl.axis.clone().multiplyScalar(cyl.point.dot(cyl.axis))).add(cyl.axis.clone().multiplyScalar(end));
         const pW = vArr(pAx.applyMatrix4(mw)), dW = vArr(dir.transformDirection(mw));
         const [pointL, normalL] = toL(pW, dW);
-        return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: pW, normalW: dW, pointL, normalL, vertsW, kind: 'axis', radius: cyl.radius, convex: cyl.convex };
+        const xr = new THREE.Vector3(1, 0, 0); if (Math.abs(xr.dot(cyl.axis)) > 0.9) xr.set(0, 1, 0); xr.sub(cyl.axis.clone().multiplyScalar(xr.dot(cyl.axis))).normalize();
+        const [, xdirL] = toL(pW, vArr(xr.clone().transformDirection(mw)));
+        return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: pW, normalW: dW, pointL, normalL, vertsW, kind: 'axis', radius: cyl.radius, convex: cyl.convex, centerL: pointL, xdirL };
       }
       const nW = pf.normal.clone().transformDirection(mw);
       const [pointL, normalL] = toL(vArr(hit.point), vArr(nW));
-      return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: vArr(hit.point), normalW: vArr(nW), pointL, normalL, vertsW, kind: 'plane' };
+      // centro de la cara (media de vértices) y dirección X: arista más larga de la cara
+      const cW: V3 = vertsW.reduce((a, v) => [a[0] + v[0] / vertsW.length, a[1] + v[1] / vertsW.length, a[2] + v[2] / vertsW.length], [0, 0, 0] as V3);
+      let xd = new THREE.Vector3(1, 0, 0), best = 0;
+      for (let i = 0; i + 1 < Math.min(vertsW.length, 400); i++) { const d = tv(vertsW[i + 1]).sub(tv(vertsW[i])); d.sub(nW.clone().multiplyScalar(d.dot(nW))); if (d.length() > best) { best = d.length(); xd = d.normalize(); } }
+      const [centerL, xdirL] = toL(cW, vArr(xd));
+      return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: vArr(hit.point), normalW: vArr(nW), pointL, normalL, vertsW, kind: 'plane', centerL, xdirL };
     };
     const nearestCand = (ev: MouseEvent): CandLine | null => {
       const P = V.local(ev);
@@ -300,7 +307,7 @@ export default function AsmViewport() {
         if (!f || (f.kind === 'axis' && s.tool !== 'asmFace')) { s.notify(s.tool === 'asmFace' ? 'Selecciona una cara plana o cilíndrica' : 'Selecciona una cara plana', 'error'); return; }
         if (s.tool === 'asmFace' && dlg?.kind === 'joint') {
           if (f.ownerKind !== 'occ') { s.notify('Las uniones se hacen entre componentes', 'error'); return; }
-          const ref = { occ: f.owner, point: f.pointL, normal: f.normalL, kind: f.kind, radius: f.radius, convex: f.convex };
+          const ref = { occ: f.owner, point: f.pointL, normal: f.normalL, kind: f.kind, radius: f.radius, convex: f.convex, center: f.centerL, xdir: f.xdirL };
           if ((dlg.step ?? 0) === 0) useStore.setState({ dialog: { ...dlg, draft: { ...d, a: ref, aW: f.pointW }, step: 1 } });
           else useStore.setState({ dialog: { ...dlg, draft: { ...d, b: ref, bW: f.pointW, aligned: d.a?.kind === 'axis' && ref.kind === 'axis' ? d.a.convex !== ref.convex : d.aligned }, step: 0 } });
         } else if (s.tool === 'weldFace' && dlg?.kind === 'weld') {

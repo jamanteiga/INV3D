@@ -29,7 +29,13 @@ export interface DView {
   x: number; y: number;     // centro en la hoja (mm)
   hidden: boolean;          // mostrar aristas ocultas
   parent?: string;          // vista base de la que se proyecta
-  kind?: 'base' | 'proj' | 'iso' | 'section' | 'detail';
+  kind?: 'base' | 'proj' | 'iso' | 'section' | 'detail' | 'aux' | 'flat';
+  /** Vista auxiliar: dirección hacia el observador y eje X de la vista */
+  aux?: { toward: V3; x: V3; a: P2d; n2: P2d };
+  /** Vista partida: tramos suprimidos en coordenadas del modelo relativas al centro (mm reales) */
+  breaks?: DBreak[];
+  /** Vista recortada: rectángulo relativo al centro de la vista (mm de hoja) */
+  crop?: [number, number, number, number];
   label?: string;           // A, B… (secciones y detalles)
   /** Sección: plano de corte (punto y normal = dirección de la mirada) y ejes de la vista */
   section?: { origin: V3; normal: V3; x: V3; a: P2d; b: P2d; n2: P2d };
@@ -38,19 +44,41 @@ export interface DView {
   /** Marcas de centro automáticas en círculos */
   centers?: boolean;
 }
-export type DimKind2 = 'h' | 'v' | 'a' | 'r' | 'd' | 'ang';
+export interface DBreak { axis: 'x' | 'y'; a: number; b: number }
+export type DimKind2 = 'h' | 'v' | 'a' | 'r' | 'd' | 'ang' | 'ord';
 export interface DDim {
   id: string; view: string; a: P2d; b: P2d; offset: number; kind: DimKind2; text?: string;
   /** Radio/diámetro: radio en la hoja; ángulo: tercer punto */
   r?: number; c?: P2d;
   /** Tolerancia: «±0.1», «+0.2/-0», «H7»… */
   tol?: string;
+  /** Cota por coordenadas: eje medido (a = origen, b = punto, c = posición del texto) */
+  axis?: 'x' | 'y';
 }
 export interface DNote { id: string; x: number; y: number; text: string; size: number }
-export type AnnKind = 'balloon' | 'leader' | 'surface' | 'weld' | 'centerline' | 'centermark' | 'hole';
+export type AnnKind = 'balloon' | 'leader' | 'surface' | 'weld' | 'centerline' | 'centermark' | 'hole' | 'fcf' | 'datum';
+export type GdtSym = 'straight' | 'flat' | 'circ' | 'cyl' | 'profl' | 'profs' | 'perp' | 'angle' | 'par' | 'pos' | 'conc' | 'sym' | 'runout' | 'truns';
+export const GDT_NAMES: Record<GdtSym, string> = {
+  straight: 'Rectitud', flat: 'Planitud', circ: 'Redondez', cyl: 'Cilindricidad', profl: 'Forma de una línea', profs: 'Forma de una superficie',
+  perp: 'Perpendicularidad', angle: 'Inclinación', par: 'Paralelismo', pos: 'Posición', conc: 'Concentricidad', sym: 'Simetría', runout: 'Oscilación circular', truns: 'Oscilación total',
+};
+export const GDT_DATUM: Record<GdtSym, boolean> = { straight: false, flat: false, circ: false, cyl: false, profl: false, profs: false, perp: true, angle: true, par: true, pos: true, conc: true, sym: true, runout: true, truns: true };
 /** Anotaciones con posición absoluta en la hoja (mm). */
-export interface DAnn { id: string; kind: AnnKind; pts: P2d[]; text?: string; r?: number; side?: 'arrow' | 'other' | 'both'; allAround?: boolean }
-export interface TitleBlock { title: string; partNumber: string; material: string; designer: string; checker: string; date: string; company: string; revision: string; scale: string }
+export interface DAnn {
+  id: string; kind: AnnKind; pts: P2d[]; text?: string; r?: number; side?: 'arrow' | 'other' | 'both'; allAround?: boolean;
+  /** Tolerancia geométrica: símbolo, Ø delante del valor y referencias («A», «A|B»…) */
+  sym?: GdtSym; dia?: boolean; datums?: string;
+}
+export type TableKind = 'hole' | 'rev' | 'bend';
+/** Tablas colocadas en la hoja (x, y = esquina superior izquierda). */
+export interface DTable { id: string; kind: TableKind; view?: string; x: number; y: number }
+export interface DRev { rev: string; desc: string; date: string; by: string }
+/** Contenido propio de cada hoja. */
+export interface SheetPage { name: string; sheet: SheetSize; views: DView[]; dims: DDim[]; notes: DNote[]; anns: DAnn[]; tables: DTable[]; bom: DrawingDoc['bom'] }
+export interface TitleBlock {
+  title: string; partNumber: string; material: string; designer: string; checker: string; date: string; company: string; revision: string; scale: string;
+  project?: string; description?: string; approved?: string; approvedDate?: string; generalTol?: string; finish?: string; mass?: string; stock?: string;
+}
 
 export interface DrawingDoc {
   format: 'inv3d.drawing';
@@ -62,19 +90,39 @@ export interface DrawingDoc {
   anns?: DAnn[];
   title: TitleBlock;
   bom?: { view: string; x: number; y: number } | null;
+  tables?: DTable[];
+  revisions?: DRev[];
+  /** Varias hojas: la activa vive en los campos de arriba; pages guarda todas (la activa puede estar desfasada). */
+  pages?: SheetPage[];
+  page?: number;
+}
+
+export function extractPage(d: DrawingDoc, name?: string): SheetPage {
+  return { name: name ?? d.pages?.[d.page ?? 0]?.name ?? `Hoja${(d.page ?? 0) + 1}`, sheet: d.sheet, views: d.views, dims: d.dims, notes: d.notes, anns: d.anns ?? [], tables: d.tables ?? [], bom: d.bom ?? null };
+}
+/** Todas las hojas con la activa al día. */
+export function allPages(d: DrawingDoc): SheetPage[] {
+  const pages = d.pages?.length ? [...d.pages] : [extractPage(d, 'Hoja1')];
+  pages[d.page ?? 0] = extractPage(d);
+  return pages;
+}
+export function loadPage(d: DrawingDoc, i: number) {
+  const pages = allPages(d); const p = pages[i]; if (!p) return;
+  d.pages = pages; d.page = i;
+  d.sheet = p.sheet; d.views = p.views; d.dims = p.dims; d.notes = p.notes; d.anns = p.anns; d.tables = p.tables; d.bom = p.bom;
 }
 
 export function newDrawing(): DrawingDoc {
   return {
     format: 'inv3d.drawing', version: 1, sheet: 'A3', views: [], dims: [], notes: [], anns: [],
-    title: { title: '', partNumber: '', material: '', designer: '', checker: '', date: new Date().toLocaleDateString('es-ES'), company: '', revision: 'A', scale: '1:1' },
-    bom: null,
+    title: { title: '', partNumber: '', material: '', designer: '', checker: '', date: new Date().toLocaleDateString('es-ES'), company: '', revision: 'A', scale: '1:1', generalTol: 'ISO 2768-m' },
+    bom: null, tables: [], revisions: [{ rev: 'A', desc: 'Primera edición', date: new Date().toLocaleDateString('es-ES'), by: '' }],
   };
 }
 export function validateDrawing(x: unknown): DrawingDoc {
   const d = x as DrawingDoc;
   if (!d || d.format !== 'inv3d.drawing') throw new Error('No es un plano INV3D (.i3d) válido');
-  d.dims ??= []; d.notes ??= []; d.views ??= []; d.anns ??= [];
+  d.dims ??= []; d.notes ??= []; d.views ??= []; d.anns ??= []; d.tables ??= []; d.revisions ??= [];
   return d;
 }
 
@@ -89,8 +137,9 @@ export function projectedDir(base: ViewDir, side: 'right' | 'left' | 'up' | 'dow
 }
 
 /** Siguiente letra libre para secciones y detalles. */
-export function nextLabel(views: DView[]): string {
+export function nextLabel(views: DView[], extraUsed: string[] = []): string {
   const used = new Set(views.map((v) => v.label).filter(Boolean));
+  for (const a of extraUsed) used.add(a);
   for (const c of 'ABCDEFGHJKLMNPRSTUVWXYZ') if (!used.has(c)) return c;
   return 'Z';
 }

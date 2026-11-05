@@ -458,3 +458,12 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .st-item.sm { color: var(--ok); }
 /* Visores: el lienzo ocupa píxeles físicos exactos */
 .vp-canvas { image-rendering: auto; }
+
+.vr-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.vr-row { display: flex; gap: 4px; }
+.rev-row { display: flex; gap: 3px; margin-bottom: 3px; }
+.rev-row input { min-width: 0; }
+.rev-rev { width: 34px; flex: none; }
+.rev-desc { flex: 2; }
+.rev-date, .rev-by { flex: 1; }
+.tree-row.cur-sheet .tree-name { font-weight: 600; }

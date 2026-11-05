@@ -179,11 +179,22 @@ export default function Ribbon() {
           <Group label="Configuración"><Big icon="style" label="Estilo de chapa" onClick={() => s.open({ kind: 'sheetstyle' })} title="Espesor, radio de plegado y factor K" /></Group>
           <Group label="Crear">
             <Big icon="smface" label="Cara" onClick={() => s.openFeatureDialog('sm_face')} />
+            <Big icon="smcontour" label="Pestaña de contorno" onClick={() => s.openFeatureDialog('sm_contour')} title="Perfil abierto de líneas con pliegues automáticos" />
             <Big icon="smflange" label="Pestaña" disabled={!hasSolid} onClick={() => s.openFeatureDialog('sm_flange')} />
+            <Col>
+              <Small icon="hem" label="Dobladillo" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('sm_flange'); s.updateDraft({ angle: '180 deg', length: '10 mm', name: 'Dobladillo' }); }} title="Pestaña plegada a 180°" />
+              <Small icon="fillet" label="Redondeo de esquina" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('fillet'); s.updateDraft({ radius: '5 mm' }); }} />
+              <Small icon="chamfer" label="Chaflán de esquina" disabled={!hasSolid} onClick={() => s.openFeatureDialog('chamfer')} />
+            </Col>
           </Group>
           <Group label="Modificar">
-            <Big icon="hole" label="Agujero" disabled={!hasSolid} onClick={() => s.openFeatureDialog('hole')} />
-            <Big icon="extrude" label="Corte" disabled={!hasSolid} title="Extrusión de corte a través de la chapa" onClick={() => { s.openFeatureDialog('extrude'); s.updateDraft({ op: 'cut', dir: 'symmetric', distance: '50 mm' }); }} />
+            <Big icon="extrude" label="Corte" disabled={!hasSolid} title="Corte a través de la chapa" onClick={() => { s.openFeatureDialog('extrude'); s.updateDraft({ op: 'cut', dir: 'symmetric', extent: 'through' }); }} />
+            <Big icon="punch" label="Punzonado" disabled={!hasSolid} onClick={() => s.openFeatureDialog('sm_punch')} title="Punzonado redondo, cuadrado, rectangular o coliso en puntos de boceto" />
+            <Col>
+              <Small icon="hole" label="Agujero" disabled={!hasSolid} onClick={() => s.openFeatureDialog('hole')} />
+              <Small icon="mirror" label="Simetría" disabled={!hasSolid} onClick={() => s.openFeatureDialog('mirror')} />
+              <Small icon="prect" label="Patrón" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pattern')} />
+            </Col>
           </Group>
           <Group label="Desarrollo"><Big icon="flat" label="Desarrollo" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Patrón desarrollado y DXF para corte" /></Group>
         </>)}
@@ -202,6 +213,9 @@ export default function Ribbon() {
               <Small icon="emboss" label="Relieve" onClick={P.emboss} title="Grabar o dar relieve a un texto o perfil" />
               <Small icon="import" label="Importar" onClick={() => importStep().catch((e) => s.notify(e.message, 'error'))} title="Importar STEP en la pieza" />
             </Col>
+            <Col>
+              <Small icon="derive" label="Derivar" onClick={() => s.openFeatureDialog('derive')} title="Pieza derivada: copia de otra pieza con escala y simetría" />
+            </Col>
           </Group>
           <Group label="Modificar">
             <Big icon="hole" label="Agujero" kbd="H" disabled={!hasSolid} onClick={() => s.openFeatureDialog('hole')} />
@@ -216,6 +230,11 @@ export default function Ribbon() {
               <Small icon="split" label="Dividir" disabled={!hasSolid} onClick={() => s.openFeatureDialog('split')} title="Divide el sólido por un plano y conserva un lado" />
               <Small icon="thicken" label="Engrosar" disabled={!hasSolid} onClick={() => s.openFeatureDialog('thicken')} />
             </Col>
+            <Col>
+              <Small icon="combine" label="Combinar" disabled={!hasSolid} onClick={() => s.openFeatureDialog('combine')} title="Unir, cortar o intersecar cuerpos" />
+              <Small icon="move" label="Mover cuerpo" disabled={!hasSolid} onClick={() => s.openFeatureDialog('movebody')} />
+              <Small icon="copy2d" label="Copiar cuerpo" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('movebody'); s.updateDraft({ copy: true, name: 'Copiar cuerpo' }); }} />
+            </Col>
           </Group>
           <Group label="Operaciones de trabajo">
             <Big icon="workplane" label="Plano" onClick={() => s.openFeatureDialog('workplane')} title="Plano de trabajo desfasado o girado" />
@@ -229,6 +248,9 @@ export default function Ribbon() {
               <Small icon="prect" label="Rectangular" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pattern')} />
               <Small icon="pcirc" label="Circular" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('pattern'); s.updateDraft({ ptype: 'circ' }); }} />
               <Small icon="mirror" label="Simetría" disabled={!hasSolid} onClick={() => s.openFeatureDialog('mirror')} />
+            </Col>
+            <Col>
+              <Small icon="pathpattern" label="Por trayectoria" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pathpattern')} />
             </Col>
           </Group>
           <Group label="Parámetros"><Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} /></Group>
@@ -248,6 +270,11 @@ export default function Ribbon() {
             <Col>
               <Small icon="pattern_comp" label="Patrón" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={() => s.open({ kind: 'cpattern' })} title="Patrón rectangular o circular del componente seleccionado" />
               <Small icon="content" label="Centro de contenido" onClick={() => s.open({ kind: 'content' })} />
+              <Small icon="mirror" label="Simetría" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={() => A.mirrorComponent(s.selItem!, 'YZ')} title="Componente simétrico respecto al plano YZ (más planos con clic derecho en el navegador)" />
+            </Col>
+            <Col>
+              <Small icon="replace" label="Sustituir" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={() => s.open({ kind: 'replace' })} />
+              <Small icon="eye" label="Representaciones" onClick={() => s.open({ kind: 'viewreps' })} title="Representaciones de vista (componentes ocultos)" />
             </Col>
           </Group>
           <Group label="Posición">
@@ -258,7 +285,9 @@ export default function Ribbon() {
           </Group>
           <Group label="Relaciones">
             <Big icon="constraint3d" label="Restringir" kbd="J" onClick={() => A.openJoint()} title="Coincidir, al ras, ángulo, tangente, insertar o rígida (J)" />
+            <Big icon="joint" label="Unión" onClick={() => { A.openJoint(); s.updateDraft({ type: 'rot', name: 'Unión' }); }} title="Unión de rotación, corredera, cilíndrica, planar o bola" />
             <Col>
+              <Small icon="drive" label="Conducir" disabled={!s.asm.joints.some((j) => j.type === 'rot' || j.type === 'slider')} onClick={() => s.open({ kind: 'drive' })} title="Animar una unión de rotación o corredera" />
               <Small icon="insert3d" label="Insertar" onClick={() => { A.openJoint(); s.updateDraft({ type: 'insert' }); }} />
               <Small icon="angle3d" label="Ángulo" onClick={() => { A.openJoint(); s.updateDraft({ type: 'angle', angle: '90 deg' }); }} />
               <Small icon="c_tangent" label="Tangente" onClick={() => { A.openJoint(); s.updateDraft({ type: 'tangent' }); }} />
@@ -314,14 +343,23 @@ export default function Ribbon() {
               { key: 'left', icon: 'projview', label: 'Proyectada izquierda' }, { key: 'up', icon: 'projview', label: 'Proyectada arriba' }, { key: 'iso', icon: 'iso', label: 'Isométrica' }]} />
             <Big icon="section" label="Sección" active={tool === 'drwSection'} onClick={T('drwSection')} title="Vista de sección con rayado: dibuja la línea de corte sobre una vista" />
             <Big icon="detail" label="Detalle" active={tool === 'drwDetail'} onClick={T('drwDetail')} title="Vista de detalle ampliada (2:1) de una zona circular" />
+            <Col>
+              <Small icon="auxview" label="Auxiliar" active={tool === 'drwAux'} onClick={T('drwAux')} title="Vista auxiliar perpendicular a una arista (verdadera magnitud)" />
+              <Small icon="flat" label="Desarrollo" onClick={() => { const p = s.docs.find((d) => d.kind === 'part' && ((s.docData(d.id) as any)?.features ?? []).some((f: any) => String(f.type).startsWith('sm_'))); if (!p) s.notify('Abre una pieza de chapa', 'error'); else D.placeFlat(p.id); }} title="Vista del desarrollo de chapa con líneas de pliegue" />
+            </Col>
           </Group>
           <Group label="Modificar">
+            <Col>
+              <Small icon="breakview" label="Partir" active={tool === 'drwBreak'} onClick={T('drwBreak')} title="Vista partida: suprime un tramo largo" />
+              <Small icon="cropview" label="Recortar" active={tool === 'drwCrop'} onClick={T('drwCrop')} title="Recorta la vista a un rectángulo" />
+            </Col>
             <Col>
               <Small icon="centermark" label="Marcas de centro auto." disabled={!D.selView()} active={!!D.selView()?.centers} onClick={D.autoCenters} />
               <Small icon="section" label="Invertir sección" disabled={D.selView()?.kind !== 'section'} onClick={D.flipSection} />
             </Col>
           </Group>
           <Group label="Hoja">
+            <Big icon="sheets" label="Nueva hoja" onClick={D.addSheet} title="Añade una hoja al plano (cambia de hoja en el navegador)" />
             <div className="rb-grid sheets">
               {(['A4', 'A3', 'A2', 'A1', 'A0'] as const).map((z) => <button key={z} className={`rb-txt ${s.drw.sheet === z ? 'on' : ''}`} onClick={() => s.commitDrw((d) => { d.sheet = z; })}>{z}</button>)}
             </div>
@@ -334,6 +372,10 @@ export default function Ribbon() {
               <Small icon="dimdia" label="Diámetro" active={tool === 'drwDimD'} onClick={T('drwDimD')} />
               <Small icon="dimrad" label="Radio" active={tool === 'drwDimR'} onClick={T('drwDimR')} />
               <Small icon="dimang" label="Ángulo" active={tool === 'drwDimA'} onClick={T('drwDimA')} />
+            </Col>
+            <Col>
+              <Small icon="dimbase" label="Línea base" active={tool === 'drwBaseline'} onClick={T('drwBaseline')} title="Varias cotas desde un mismo punto base (Intro para crear)" />
+              <Small icon="dimord" label="Coordenadas" active={tool === 'drwOrd'} onClick={T('drwOrd')} title="Cotas por coordenadas desde un origen" />
             </Col>
           </Group>
           <Group label="Notas de taladro y rosca"><Big icon="holenote" label="Taladro / rosca" active={tool === 'drwHole'} onClick={T('drwHole')} /></Group>
@@ -352,10 +394,19 @@ export default function Ribbon() {
               <Small icon="surface" label="Acabado superficial" active={tool === 'drwSurface'} onClick={T('drwSurface')} />
               <Small icon="weldsym" label="Soldadura" active={tool === 'drwWeld'} onClick={T('drwWeld')} title="Símbolo de soldadura ISO 2553" />
             </Col>
+            <Col>
+              <Small icon="fcf" label="Tolerancia geom." active={tool === 'drwFcf'} onClick={T('drwFcf')} title="Marco de tolerancia geométrica ISO 1101" />
+              <Small icon="datum" label="Referencia" active={tool === 'drwDatum'} onClick={T('drwDatum')} title="Símbolo de referencia (datum)" />
+            </Col>
           </Group>
           <Group label="Tabla">
             <Big icon="bom" label="Lista de piezas" active={!!s.drw.bom} onClick={D.toggleBom} title="Lista de piezas del ensamblaje sobre el cajetín" />
             <Big icon="balloon" label="Globo" active={tool === 'drwBalloon'} onClick={T('drwBalloon')} title="Referencia a la lista de piezas" />
+            <Col>
+              <Small icon="holetable" label="Taladros" onClick={() => D.addTable('hole')} title="Tabla de taladros de la vista seleccionada" />
+              <Small icon="revtable" label="Revisiones" onClick={() => D.addTable('rev')} title="Tabla de revisiones" />
+              <Small icon="flat" label="Pliegues" onClick={() => D.addTable('bend')} title="Tabla de pliegues de la vista de desarrollo" />
+            </Col>
           </Group>
         </>)}
         {k === 'drawing' && cur === 'export' && (<>

@@ -240,6 +240,81 @@ function flangeSolid(f: SmFlangeF, sh: { t: number; r: number }, ev: Ev): Shape3
   return (dr.sketchOnPlane(pl) as any).extrude(len);
 }
 
+/** Polilínea ordenada de una cadena abierta de líneas de boceto. */
+function lineChain(sk: SketchF, ev: Ev): V2[] {
+  const segs = openSegments(sk, ev);
+  if (segs.some((x) => x.kind !== 'line')) throw new Error('La pestaña de contorno usa solo líneas: los pliegues se redondean solos con el radio de la chapa');
+  if (!segs.length) throw new Error(`${sk.name} no tiene líneas`);
+  const near = (p: V2, q: V2) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-4;
+  const deg = (p: V2) => segs.filter((x) => near(x.a, p) || near(x.b, p)).length;
+  const first = segs.find((x) => deg(x.a) === 1 || deg(x.b) === 1);
+  if (!first) throw new Error('El contorno debe ser abierto');
+  let cur: V2 = deg(first.a) === 1 ? first.a : first.b;
+  const pts: V2[] = [cur]; const used = new Set<typeof first>();
+  for (;;) {
+    const n = segs.find((x) => !used.has(x) && (near(x.a, cur) || near(x.b, cur)));
+    if (!n) break;
+    used.add(n); cur = near(n.a, cur) ? n.b : n.a; pts.push(cur);
+  }
+  if (used.size !== segs.length) throw new Error('Las líneas del contorno no forman una única cadena');
+  return pts;
+}
+
+/** Pestaña de contorno: perfil grueso con pliegues de radio interior R y su desarrollo. */
+export function contourGeometry(pts: V2[], t: number, R: number, K: number, side: 'in' | 'out') {
+  const s = side === 'in' ? 1 : -1;
+  const sub = (a: V2, b: V2): V2 => [a[0] - b[0], a[1] - b[1]];
+  const add = (a: V2, b: V2): V2 => [a[0] + b[0], a[1] + b[1]];
+  const mul = (a: V2, k: number): V2 => [a[0] * k, a[1] * k];
+  const unit = (a: V2): V2 => { const l = Math.hypot(a[0], a[1]) || 1; return [a[0] / l, a[1] / l]; };
+  const left = (u: V2): V2 => [-u[1], u[0]];
+  type It = { kind: 'L'; to: V2 } | { kind: 'A'; to: V2; mid: V2; c: V2; r: number; dir: number };
+  const A: It[] = [], B: It[] = [];
+  const n = pts.length;
+  const us: V2[] = []; for (let i = 0; i + 1 < n; i++) us.push(unit(sub(pts[i + 1], pts[i])));
+  const off = (p: V2, u: V2) => add(p, mul(left(u), t * s));
+  const A0 = pts[0], B0 = off(pts[0], us[0]);
+  const straight: number[] = []; const bends: { angle: number; up: boolean }[] = [];
+  let prevT: V2 = A0;
+  for (let i = 1; i < n - 1; i++) {
+    const uin = us[i - 1], uout = us[i];
+    const cr = uin[0] * uout[1] - uin[1] * uout[0], th = Math.atan2(cr, uin[0] * uout[0] + uin[1] * uout[1]);
+    if (Math.abs(th) < 1e-6) continue;
+    const dir = Math.sign(th);
+    const rA = dir === s ? R + t : R;
+    const d = rA * Math.tan(Math.abs(th) / 2);
+    const T1 = sub(pts[i], mul(uin, d)), T2 = add(pts[i], mul(uout, d));
+    const C = add(T1, mul(left(uin), rA * dir));
+    const M = add(C, mul(unit(sub(mul(add(T1, T2), 0.5), C)), rA));
+    const rB = rA - t * s * dir;
+    const T1b = off(T1, uin), T2b = off(T2, uout), Mb = add(C, mul(unit(sub(M, C)), rB));
+    const along = (T1[0] - prevT[0]) * uin[0] + (T1[1] - prevT[1]) * uin[1];
+    if (along < -1e-6) throw new Error('Tramo demasiado corto para el radio de pliegue');
+    straight.push(along);
+    A.push({ kind: 'L', to: T1 }, { kind: 'A', to: T2, mid: M, c: C, r: rA, dir });
+    B.push({ kind: 'L', to: T1b }, { kind: 'A', to: T2b, mid: Mb, c: C, r: rB, dir });
+    bends.push({ angle: Math.abs(th), up: dir === s });
+    prevT = T2;
+  }
+  const An = pts[n - 1], Bn = off(pts[n - 1], us[n - 2]);
+  const lastU = us[n - 2], alongN = (An[0] - prevT[0]) * lastU[0] + (An[1] - prevT[1]) * lastU[1];
+  if (alongN < -1e-6) throw new Error('Tramo demasiado corto para el radio de pliegue');
+  straight.push(alongN);
+  A.push({ kind: 'L', to: An }); B.push({ kind: 'L', to: Bn });
+  let pen: any = draw(A0);
+  for (const it of A) pen = it.kind === 'L' ? pen.lineTo(it.to) : pen.threePointsArcTo(it.to, it.mid);
+  pen = pen.lineTo(Bn);
+  const Brev: { to: V2; mid?: V2 }[] = [];
+  for (let i = B.length - 1; i >= 0; i--) { const start = i > 0 ? B[i - 1].to : B0; const it = B[i]; Brev.push(it.kind === 'L' ? { to: start } : { to: start, mid: it.mid }); }
+  for (const it of Brev) pen = it.mid ? pen.threePointsArcTo(it.to, it.mid) : pen.lineTo(it.to);
+  const profile = pen.close() as Drawing;
+  // Desarrollo: tramos rectos + márgenes de pliegue θ(R + K·t)
+  let x = 0;
+  const flatBends: { x: number; angle: number; up: boolean; ba: number }[] = [];
+  straight.forEach((L, i) => { x += L; if (i < bends.length) { const ba = bends[i].angle * (R + K * t); flatBends.push({ x: x + ba / 2, angle: bends[i].angle, up: bends[i].up, ba }); x += ba; } });
+  return { profile, flatLength: x, flatBends };
+}
+
 function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D; op: BoolOp } | null {
   const { ev, sketches, work } = ctx;
   const getSk = (id: string) => { const s = sketches.get(id); if (!s) throw new Error('Boceto no encontrado o con errores'); return s; };
@@ -405,6 +480,35 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
       if (!ctx.sheet) throw new Error('La pieza no es de chapa');
       return { solid: flangeSolid(f, ctx.sheet, ev), op: 'join' };
     }
+    case 'sm_contour': {
+      if (!ctx.sheet) throw new Error('La pieza no es de chapa');
+      const sk = getSk(f.profile), fr = planeFrame(sk.plane, ev, work);
+      const W = ev(f.width); if (!(W > 0)) throw new Error('Anchura no válida');
+      const g = contourGeometry(lineChain(sk, ev), ctx.sheet.t, ctx.sheet.r, ctx.sheet.k, f.side);
+      const solid = f.dir === 'symmetric' ? (g.profile.sketchOnPlane(makePlane(fr, -W / 2)) as any).extrude(W)
+        : f.dir === 'reverse' ? (g.profile.sketchOnPlane(makePlane(fr)) as any).extrude(W, { extrusionDirection: v3.mul(fr.normal, -1) })
+          : (g.profile.sketchOnPlane(makePlane(fr)) as any).extrude(W);
+      return { solid, op: 'join' };
+    }
+    case 'sm_punch': {
+      const sk = getSk(f.sketch), fr = planeFrame(sk.plane, ev, work);
+      const pts: V2[] = [];
+      for (const e of sk.entities) { if (e.type === 'point' && !e.construction) pts.push([ev(e.cx), ev(e.cy)]); }
+      if (!pts.length) throw new Error(`${sk.name}: coloca puntos de boceto como centros de punzonado`);
+      const d = ev(f.d), w = ev(f.w), h = ev(f.h), rot = ev(f.rot);
+      const one = (): Drawing => {
+        switch (f.shape) {
+          case 'round': if (!(d > 0)) throw new Error('Diámetro no válido'); return drawCircle(d / 2);
+          case 'square': if (!(w > 0)) throw new Error('Lado no válido'); return drawRectangle(w, w);
+          case 'rect': if (!(w > 0 && h > 0)) throw new Error('Medidas no válidas'); return drawRectangle(w, h);
+          case 'slot': { if (!(w > h && h > 0)) throw new Error('Ranura: longitud mayor que anchura'); const L = w - h; return draw([-L / 2, -h / 2]).lineTo([L / 2, -h / 2]).threePointsArcTo([L / 2, h / 2], [L / 2 + h / 2, 0]).lineTo([-L / 2, h / 2]).threePointsArcTo([-L / 2, -h / 2], [-L / 2 - h / 2, 0]).close(); }
+        }
+      };
+      let dr: Drawing | null = null;
+      for (const p of pts) { const x = one().rotate(rot, [0, 0]).translate(p[0], p[1]); dr = dr ? dr.fuse(x) : x; }
+      let L = 1000; if (shape) { const b = shape.boundingBox.bounds; L = v3.len(v3.sub(b[1] as V3, b[0] as V3)) * 2 + 10; }
+      return { solid: (dr!.sketchOnPlane(makePlane(fr, -L / 2)) as any).extrude(L), op: 'cut' };
+    }
     default: return null;
   }
 }
@@ -477,6 +581,72 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
           break;
         }
         case 'workaxis': case 'workpoint': break;
+        case 'combine': {
+          if (!shape) throw new Error('No hay sólidos');
+          const solids = ((shape as any).solids ?? [shape]) as Shape3D[];
+          if (f.faces.length < 2) throw new Error('Selecciona el cuerpo base y al menos un cuerpo herramienta');
+          const owner = (p: V3) => solids.findIndex((so) => (new FaceFinder().containsPoint(p).find(so) as any[]).length > 0);
+          const bi = owner(f.faces[0]); if (bi < 0) throw new Error('Cuerpo base no encontrado');
+          const ti = [...new Set(f.faces.slice(1).map(owner))].filter((i) => i >= 0 && i !== bi);
+          if (!ti.length) throw new Error('Cuerpos herramienta no encontrados (deben ser cuerpos distintos del base)');
+          let res: Shape3D = solids[bi];
+          for (const i of ti) res = f.op === 'cut' ? res.cut(solids[i]) : f.op === 'intersect' ? (res.intersect(solids[i]) as Shape3D) : res.fuse(solids[i]);
+          const rest = solids.filter((_, i) => i !== bi && (f.keep || !ti.includes(i)));
+          shape = rest.length ? (compoundShapes([res, ...rest]) as unknown as Shape3D) : res;
+          break;
+        }
+        case 'movebody': {
+          if (!shape) throw new Error('No hay sólidos');
+          const solids = ((shape as any).solids ?? [shape]) as Shape3D[];
+          const sel = f.faces.length ? [...new Set(f.faces.map((p) => solids.findIndex((so) => (new FaceFinder().containsPoint(p).find(so) as any[]).length > 0)))].filter((i) => i >= 0) : solids.map((_, i) => i);
+          if (!sel.length) throw new Error('Cuerpo no encontrado');
+          const T: V3 = [ev(f.dx), ev(f.dy), ev(f.dz)], ang = ev(f.angle);
+          const moved = sel.map((i) => { let x = solids[i].clone(); if (Math.abs(ang) > 1e-9) x = x.rotate(ang, [0, 0, 0], AXES[f.axis]); if (v3.len(T) > 1e-9) x = x.translate(T); return x; });
+          const others = solids.filter((_, i) => f.copy || !sel.includes(i));
+          const all = [...others, ...moved];
+          shape = all.length > 1 ? (compoundShapes(all) as unknown as Shape3D) : all[0];
+          break;
+        }
+        case 'derive': {
+          if (!f.doc) throw new Error('Pieza de origen no disponible');
+          const sub = await buildPart(f.doc);
+          if (!sub.shape) throw new Error('La pieza de origen no tiene sólido');
+          let x = sub.shape.clone();
+          const k = ev(f.scale);
+          if (!(k > 0)) throw new Error('Escala no válida');
+          if (Math.abs(k - 1) > 1e-9) x = x.scale(k, [0, 0, 0]);
+          if (f.mirror) x = x.mirror(f.mirror as any);
+          ctx.tools.set(f.id, { solid: x.clone(), op: f.op });
+          shape = combine(shape, x, f.op);
+          break;
+        }
+        case 'pathpattern': {
+          if (!shape) throw new Error('No hay sólido');
+          const sk = ctx.sketches.get(f.path); if (!sk) throw new Error('Trayectoria no encontrada');
+          const wire = (sketchPath(sk, ev).sketchOnPlane(makePlane(planeFrame(sk.plane, ev, ctx.work))) as any).wire;
+          const n = Math.round(ev(f.count)); if (n < 2 || n > 400) throw new Error('Número de elementos no válido');
+          const P = (u: number): V3 => { const p = wire.pointAt(u); return [p.x, p.y, p.z]; };
+          const Tn = (u: number): V3 => { const p = wire.tangentAt(u); return v3.norm([p.x, p.y, p.z]); };
+          const p0 = P(0), t0 = Tn(0);
+          const srcs = f.features.map((id) => ctx.tools.get(id)).filter(Boolean) as { solid: Shape3D; op: BoolOp }[];
+          if (!srcs.length) throw new Error('Selecciona operaciones a repetir');
+          for (const src of srcs) {
+            let tool: Shape3D | null = null;
+            for (let i = 1; i < n; i++) {
+              const u = i / (n - 1), pi = P(u);
+              let c = src.solid.clone();
+              if (f.align) {
+                const ti = Tn(u), ax = v3.cross(t0, ti), sn = v3.len(ax), cs = v3.dot(t0, ti);
+                const ang = (Math.atan2(sn, cs) * 180) / Math.PI;
+                if (sn > 1e-9 && Math.abs(ang) > 1e-6) c = c.rotate(ang, p0, v3.norm(ax));
+              }
+              c = c.translate(v3.sub(pi, p0));
+              tool = tool ? tool.fuse(c) : c;
+            }
+            if (tool) shape = combine(shape, tool, src.op === 'new' ? 'join' : src.op);
+          }
+          break;
+        }
         case 'shell': {
           if (!shape) throw new Error('No hay sólido');
           const t = ev(f.thickness); if (!(t > 0)) throw new Error('Espesor no válido');
@@ -557,6 +727,14 @@ export function flatPattern(doc: PartDoc) {
     if (f.suppressed) continue;
     if (f.type === 'sketch') sketches.set(f.id, f);
     if (f.type === 'workplane') work.set(f.id, workPlaneFrame(f, ev, work));
+    if (f.type === 'sm_contour' && !base && !flat) {
+      const sk = sketches.get(f.profile); if (!sk) continue;
+      const W = ev(f.width);
+      const g = contourGeometry(lineChain(sk, ev), t, r, k, f.side);
+      flat = polyDrawing([[0, 0], [g.flatLength, 0], [g.flatLength, W], [0, W]]);
+      for (const b of g.flatBends) bends.push({ a: [b.x, 0], b: [b.x, W], label: `${b.up ? 'ARRIBA' : 'ABAJO'} ${Math.round((b.angle * 180) / Math.PI)}° R${r}` });
+      continue;
+    }
     if (f.type === 'sm_face' && !base) {
       const sk = sketches.get(f.profile); if (!sk) continue;
       base = { fr: planeFrame(sk.plane, ev, work), prof: sketchProfile(sk, ev) };

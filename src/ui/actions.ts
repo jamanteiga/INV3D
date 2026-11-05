@@ -1,15 +1,16 @@
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
 import { useStore, type SkOp } from '../core/store';
-import { uid, v3, newDoc, type V3, type SketchF } from '../core/doc';
-import { IDENTITY, q as qq, type FrameMember, type BoltGroup, type EndType } from '../core/asm';
+import { uid, v3, newDoc, MATERIALS, type V3, type SketchF, type PartDoc } from '../core/doc';
+import { IDENTITY, solveAssembly, q as qq, type FrameMember, type BoltGroup, type EndType } from '../core/asm';
 import { CONTENT } from '../core/content';
 import { makeEval } from '../core/expr';
 import { cad } from '../core/cadClient';
-import { projectedDir, SHEETS, SCALES, VIEW_NAMES, scaleLabel, type DView } from '../core/drawing';
+import { projectedDir, SHEETS, SCALES, VIEW_NAMES, scaleLabel, allPages, loadPage, extractPage, type DView, type TableKind } from '../core/drawing';
 import { writeDxf, type DxfDoc } from '../core/dxf';
 import { saveText } from '../core/files';
 import { getProjection, viewGeom, sheetPrims } from './DrawingView';
-import { hatchLines } from '../core/sheet';
+import { hatchLines, TB_H } from '../core/sheet';
+
 import type { P2 } from '../core/svgpath';
 import type { CandLine } from './AsmViewport';
 
@@ -107,6 +108,51 @@ export const asmActions = {
     });
     s.notify(`Patrón: ${copies.length} copias (fijas)`);
   },
+  /** Componente simétrico respecto a un plano de origen del ensamblaje (pieza derivada en espejo). */
+  mirrorComponent: (occId: string, plane: 'YZ' | 'XZ' | 'XY') => {
+    const s = S();
+    const o = s.asm.occurrences.find((x) => x.id === occId); if (!o) return;
+    const src = s.docData(o.part) as PartDoc | null; if (!src) return s.notify('Pieza de origen no disponible', 'error');
+    const srcName = s.docs.find((d) => d.id === o.part)?.fileName ?? 'Pieza.i3p';
+    const name = srcName.replace(/\.i3p$/i, '') + `_SIM_${plane}.i3p`;
+    const nd = newDoc();
+    nd.iProperties = { ...src.iProperties, partNumber: src.iProperties.partNumber + '-SIM', description: `${src.iProperties.description} (simétrica)` };
+    nd.features = [{ id: uid('f'), name: 'Derivada', type: 'derive', source: o.part, sourceName: srcName, doc: structuredClone(src), scale: '1', mirror: plane, op: 'join' }];
+    const pid = s.addDocument('part', nd, name, false);
+    const M = plane === 'YZ' ? [-1, 1, 1] : plane === 'XZ' ? [1, -1, 1] : [1, 1, -1];
+    const R = qq.toMatrix(o.xf.quat);
+    const R2 = R.map((row, i) => row.map((v, j) => M[i] * v * M[j]));
+    const xf = { pos: o.xf.pos.map((v, i) => v * M[i]) as V3, quat: qq.fromMatrix(R2) };
+    s.commitAsm((a) => { a.occurrences.push({ id: uid('o'), name: name.replace(/\.i3p$/i, '') + ':1', part: pid, xf, grounded: true }); });
+    s.notify('Componente simétrico creado (pieza derivada en espejo)');
+  },
+  replaceComponent: (occId: string, partId: string, all: boolean) => {
+    const s = S();
+    const o = s.asm.occurrences.find((x) => x.id === occId); if (!o) return;
+    const name = (s.docs.find((d) => d.id === partId)?.fileName ?? 'Pieza').replace(/\.i3p$/i, '');
+    s.commitAsm((a) => { let k = 0; for (const t of a.occurrences) if (t.id === occId || (all && t.part === o.part)) { t.part = partId; t.name = `${name}:${++k}`; } });
+    s.notify('Componente sustituido: revisa las restricciones que usaban sus caras');
+  },
+  /** Conduce una unión de rotación o corredera entre dos valores (animación sin historial). */
+  drive: async (jid: string, from: number, to: number, steps: number, ms: number) => {
+    const s = S();
+    const base = s.asm;
+    const j = base.joints.find((x) => x.id === jid); if (!j) return;
+    const ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+    for (let i = 0; i <= steps; i++) {
+      const v = from + ((to - from) * i) / steps;
+      const a = structuredClone(base);
+      const t = a.joints.find((x) => x.id === jid)!;
+      t.lock = true;
+      if (t.type === 'rot') t.angle = `${v} deg`; else t.offset = `${v} mm`;
+      const r = solveAssembly(a, ev);
+      for (const o of a.occurrences) if (r.xf[o.id] && !o.grounded) o.xf = r.xf[o.id];
+      useStore.setState({ asm: a });
+      await new Promise((res) => setTimeout(res, ms));
+    }
+  },
+  saveViewRep: (name: string) => S().commitAsm((a) => { (a.viewReps ??= []).push({ id: uid('vr'), name, hidden: a.occurrences.filter((o) => o.hidden).map((o) => o.id) }); }),
+  applyViewRep: (id: string) => S().commitAsm((a) => { const r = a.viewReps?.find((x) => x.id === id); if (!r) return; for (const o of a.occurrences) o.hidden = r.hidden.includes(o.id); }),
   interference: async () => {
     const s = S();
     const ids = [...new Set(s.asm.occurrences.map((o) => o.part))];
@@ -249,8 +295,9 @@ export function autoMiter(frames: FrameMember[], newIds: string[]) {
 const selView = () => { const s = S(); return s.drw.views.find((v) => v.id === s.selItem) ?? null; };
 
 /** Polilíneas, textos y rellenos de la hoja para PDF y DXF (el rayado se convierte en líneas). */
-async function sheetEntities() {
-  const s = S();
+const pageFields = (p: ReturnType<typeof extractPage>) => ({ sheet: p.sheet, views: p.views, dims: p.dims, notes: p.notes, anns: p.anns, tables: p.tables, bom: p.bom });
+async function sheetEntities(st?: ReturnType<typeof S>) {
+  const s = st ?? S();
   const { W, H, prims } = await sheetPrims(s);
   const out = { W, H, lines: [] as { cls: string; pts: P2[] }[], fills: [] as P2[][], texts: [] as { x: number; y: number; h: number; text: string; rot?: number; anchor?: string; bold?: boolean }[] };
   for (const p of prims) {
@@ -276,6 +323,14 @@ export const drwActions = {
         d.title.partNumber = src.iProperties.partNumber;
         d.title.material = src.format === 'inv3d.part' ? src.iProperties.material : 'Varios';
         d.title.designer = src.iProperties.designer;
+        d.title.project ||= src.iProperties.project ?? '';
+        d.title.description ||= src.iProperties.description ?? '';
+        d.title.finish ||= src.iProperties.finish ?? '';
+        d.title.approved ||= src.iProperties.approvedBy ?? '';
+        if (src.format === 'inv3d.part' && s.active === source && s.result?.props) {
+          const dens = MATERIALS.find((m: { name: string }) => m.name === src.iProperties.material)?.density ?? 7850;
+          d.title.mass = `${(s.result.props.volume * 1e-9 * dens).toFixed(3).replace('.', ',')} kg`;
+        }
       }
       d.title.scale = scaleLabel(scale);
     });
@@ -314,6 +369,61 @@ export const drwActions = {
     s.commitDrw((d) => { d.views.push(nv); });
     useStore.setState({ selItem: id });
   },
+  // ---------- Hojas ----------
+  addSheet: () => S().commitDrw((d) => {
+    const pages = allPages(d);
+    pages.push({ name: `Hoja${pages.length + 1}`, sheet: d.sheet, views: [], dims: [], notes: [], anns: [], tables: [], bom: null });
+    d.pages = pages; loadPage(d, pages.length - 1);
+  }),
+  gotoSheet: (i: number) => { const s = S(); if ((s.drw.page ?? 0) === i) return; s.commitDrw((d) => loadPage(d, i)); useStore.setState({ selItem: null }); },
+  deleteSheet: (i: number) => S().commitDrw((d) => {
+    const pages = allPages(d); if (pages.length < 2) return;
+    pages.splice(i, 1); d.pages = pages; d.page = Math.min(d.page ?? 0, pages.length - 1);
+    const cur = d.page; d.page = -1 as unknown as number; // forzar recarga
+    d.page = cur; const p = pages[cur]; Object.assign(d, { sheet: p.sheet, views: p.views, dims: p.dims, notes: p.notes, anns: p.anns, tables: p.tables, bom: p.bom });
+  }),
+  renameSheet: (i: number, name: string) => S().commitDrw((d) => { const pages = allPages(d); pages[i].name = name; d.pages = pages; }),
+  // ---------- Vistas especiales ----------
+  placeFlat: async (source: string) => {
+    const s = S();
+    const src = s.docData(source) as PartDoc | null;
+    if (!src || src.format !== 'inv3d.part' || !src.features.some((f) => f.type.startsWith('sm_'))) return s.notify('Elige una pieza de chapa abierta', 'error');
+    const [W, H] = SHEETS[s.drw.sheet];
+    const id = uid('v');
+    s.commitDrw((d) => { d.views.push({ id, name: 'Desarrollo', source, dir: 'top', scale: 1, x: W * 0.35, y: H * 0.45, hidden: false, kind: 'flat' }); });
+    useStore.setState({ selItem: id, dialog: null });
+    const p = getProjection(S(), S().drw.views.find((x) => x.id === id)!);
+    if (!p) return;
+    try {
+      const pd = await p;
+      const bw = pd.bbox[2] - pd.bbox[0], bh = pd.bbox[3] - pd.bbox[1];
+      const sc = SCALES.find((k) => bw * k <= W * 0.5 && bh * k <= H * 0.45) ?? SCALES[SCALES.length - 1];
+      S().commitDrw((d) => { const t = d.views.find((x) => x.id === id); if (t) t.scale = sc; });
+    } catch (e) { s.notify(`Desarrollo: ${(e as Error).message}`, 'error'); }
+  },
+  clearBreaks: () => { const v = selView(); if (v) S().commitDrw((d) => { const t = d.views.find((x) => x.id === v.id)!; delete t.breaks; delete t.crop; }); },
+  // ---------- Tablas ----------
+  addTable: (kind: TableKind) => {
+    const s = S(); const [W, H] = SHEETS[s.drw.sheet];
+    let view: string | undefined;
+    if (kind !== 'rev') {
+      const sv = selView();
+      const ok = (v: DView) => (kind === 'bend' ? v.kind === 'flat' : v.kind !== 'iso' && v.kind !== 'flat');
+      view = (sv && ok(sv) ? sv : s.drw.views.find(ok))?.id;
+      if (!view) return s.notify(kind === 'bend' ? 'Coloca antes una vista de desarrollo (Colocar vistas › Desarrollo)' : 'Selecciona una vista con taladros', 'error');
+    }
+    const id = uid('tb');
+    const pos = kind === 'rev' ? { x: W - 10 - 140, y: H - 10 } : { x: 15, y: 62 };
+    s.commitDrw((d) => { (d.tables ??= []).push({ id, kind, view, ...pos }); if (kind === 'rev') (d.revisions ??= []).length || d.revisions.push({ rev: d.title.revision || 'A', desc: 'Primera edición', date: d.title.date, by: d.title.approved ?? '' }); });
+    useStore.setState({ selItem: id });
+  },
+  addRevision: () => S().commitDrw((d) => {
+    const revs = (d.revisions ??= []);
+    const last = revs[revs.length - 1]?.rev ?? '@';
+    const next = /^[A-Z]$/.test(last) ? String.fromCharCode(last.charCodeAt(0) + 1) : String(revs.length + 1);
+    revs.push({ rev: next, desc: '', date: new Date().toLocaleDateString('es-ES'), by: '' });
+    d.title.revision = next;
+  }),
   autoCenters: () => { const s = S(); const v = selView(); if (!v) return s.notify('Selecciona una vista', 'error'); s.commitDrw((d) => { const t = d.views.find((x) => x.id === v.id)!; t.centers = !t.centers; }); },
   flipSection: () => {
     const s = S(); const v = selView(); if (!v || v.kind !== 'section' || !v.section) return;
@@ -346,9 +456,14 @@ export const drwActions = {
   },
   exportPdf: async () => {
     const s = S();
-    const e = await sheetEntities();
     const { jsPDF } = await import('jspdf');
-    const pdf = new jsPDF({ orientation: e.W > e.H ? 'landscape' : 'portrait', unit: 'mm', format: [e.W, e.H] });
+    const pages = allPages(s.drw);
+    let pdf: InstanceType<typeof jsPDF> | null = null;
+    for (let pi = 0; pi < pages.length; pi++) {
+    const drw = { ...s.drw, page: pi, pages, ...pageFields(pages[pi]) };
+    const e = await sheetEntities({ ...S(), drw } as ReturnType<typeof S>);
+    if (!pdf) pdf = new jsPDF({ orientation: e.W > e.H ? 'landscape' : 'portrait', unit: 'mm', format: [e.W, e.H] });
+    else pdf.addPage([e.W, e.H], e.W > e.H ? 'landscape' : 'portrait');
     const Y = (y: number) => e.H - y;
     const W: Record<string, number> = { frame: 0.5, tb: 0.35, vis: 0.5, hid: 0.25, dim: 0.18, center: 0.18, cutline: 0.18, hatch: 0.13, thin: 0.18, thick: 0.6, ann: 0.35, cutend: 0.7 };
     const DASH: Record<string, number[]> = { hid: [2, 1], center: [6, 1, 1, 1], cutline: [6, 1, 1, 1] };
@@ -362,6 +477,8 @@ export const drwActions = {
       pdf.setFont('helvetica', t.bold ? 'bold' : 'normal'); pdf.setFontSize(t.h * 2.83);
       pdf.text(t.text, t.x, Y(t.y), { angle: t.rot ?? 0, align: (t.anchor === 'middle' ? 'center' : t.anchor === 'end' ? 'right' : 'left') as 'left' });
     }
+    }
+    if (!pdf) return;
     await saveText(pdf.output('arraybuffer'), s.fileName.replace(/\.[^.]+$/, '.pdf'), 'PDF', '.pdf', 'application/pdf');
   },
   exportSvg: async () => {

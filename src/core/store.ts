@@ -20,15 +20,16 @@ export type Tool = null
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
   | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge'
   | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember'
-  | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail';
+  | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum';
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
-  | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange' | 'rib' | 'coil' | 'split' | 'draft' | 'thicken' | 'thread' | 'workaxis' | 'workpoint';
+  | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange' | 'rib' | 'coil' | 'split' | 'draft' | 'thicken' | 'thread' | 'workaxis' | 'workpoint'
+  | 'combine' | 'movebody' | 'derive' | 'pathpattern' | 'sm_contour' | 'sm_punch';
 export type AsmDialogKind = 'joint' | 'frame' | 'weld' | 'bolt' | 'skel' | 'endtreat';
 export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drwsection' | 'drwdetail' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'drwsection' | 'drwdetail' }
   | { kind: 'fileinfo'; title: string; info: FileInfo }
   | { kind: 'skop'; op: SkOp; params: Record<string, string>; step: number; base?: string };
 export type SkOp = 'offset' | 'mirror' | 'rpattern' | 'cpattern' | 'move' | 'copy' | 'rotate' | 'scale' | 'fillet' | 'chamfer' | 'text';
@@ -438,6 +439,16 @@ export const useStore = create<State>((set, get) => ({
         case 'thread': draft = { id, name, type: 'thread', faces: [], designation: 'M10x1.5', length: '20 mm', full: true }; break;
         case 'workaxis': draft = { id, name, type: 'workaxis', origin: ['0', '0', '0'], dir: ['0', '0', '1'] }; break;
         case 'workpoint': draft = { id, name, type: 'workpoint', origin: ['0', '0', '0'] }; break;
+        case 'combine': draft = { id, name, type: 'combine', faces: [], op: 'join', keep: false }; break;
+        case 'movebody': draft = { id, name, type: 'movebody', faces: [], dx: '0 mm', dy: '0 mm', dz: '0 mm', axis: 'Z', angle: '0 deg', copy: false }; break;
+        case 'derive': {
+          const src = get().docs.find((x) => x.kind === 'part' && x.id !== get().active);
+          const sd = src ? (get().docData(src.id) as PartDoc) : null;
+          draft = { id, name, type: 'derive', source: src?.id ?? '', sourceName: src?.fileName ?? '', doc: sd ? clone(sd) : null, scale: '1', mirror: '', op: 'join' }; break;
+        }
+        case 'pathpattern': draft = { id, name, type: 'pathpattern', features: body ? [body] : [], path: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')), count: '5', align: false }; break;
+        case 'sm_contour': draft = { id, name, type: 'sm_contour', profile: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line' && !e.construction)), width: '100 mm', dir: 'normal', side: 'in' }; break;
+        case 'sm_punch': draft = { id, name, type: 'sm_punch', sketch: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'point')), shape: 'round', d: '10 mm', w: '20 mm', h: '10 mm', rot: '0 deg' }; break;
       }
     }
     const tool = toolFor(draft);
@@ -507,7 +518,7 @@ export const useStore = create<State>((set, get) => ({
 
 function toolFor(f: Feature): Tool {
   if ((f.type === 'fillet' || f.type === 'chamfer') && f.edges.mode === 'picked') return 'pickEdges';
-  if (f.type === 'shell' || f.type === 'draft' || f.type === 'thicken' || f.type === 'thread') return 'pickFaces';
+  if (f.type === 'shell' || f.type === 'draft' || f.type === 'thicken' || f.type === 'thread' || f.type === 'combine' || f.type === 'movebody') return 'pickFaces';
   if (f.type === 'sm_flange') return 'pickFlangeEdge';
   return null;
 }

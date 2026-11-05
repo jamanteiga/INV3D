@@ -18,17 +18,22 @@ export interface Occurrence {
 
 /** Referencia geométrica de un componente, en coordenadas locales de la pieza:
  *  cara plana (punto + normal) o eje de una cara cilíndrica (punto del eje + dirección + radio). */
-export interface FaceRef { occ: string; point: V3; normal: V3; kind?: 'plane' | 'axis'; radius?: number; convex?: boolean }
+export interface FaceRef { occ: string; point: V3; normal: V3; kind?: 'plane' | 'axis'; radius?: number; convex?: boolean; /** dirección de referencia X y centro de la cara (uniones) */ xdir?: V3; center?: V3 }
 
 /** Coincidir, al ras, rígida, ángulo, tangente e insertar (como las restricciones de ensamblaje de Inventor). */
-export type JointType = 'mate' | 'flush' | 'rigid' | 'angle' | 'tangent' | 'insert';
-export const JOINT_NAMES: Record<JointType, string> = { mate: 'Coincidir', flush: 'Al ras', rigid: 'Rígida', angle: 'Ángulo', tangent: 'Tangente', insert: 'Insertar' };
+export type JointType = 'mate' | 'flush' | 'rigid' | 'angle' | 'tangent' | 'insert' | 'rot' | 'slider' | 'cyl' | 'planar' | 'ball';
+export const JOINT_NAMES: Record<JointType, string> = { mate: 'Coincidir', flush: 'Al ras', rigid: 'Rígida', angle: 'Ángulo', tangent: 'Tangente', insert: 'Insertar',
+  rot: 'Unión de rotación', slider: 'Unión corredera', cyl: 'Unión cilíndrica', planar: 'Unión planar', ball: 'Unión de bola' };
+/** Uniones de Inventor (orígenes con eje): grados de libertad que dejan libres */
+export const JOINT_DOF: Partial<Record<JointType, string>> = { rot: '1 giro', slider: '1 traslación', cyl: '1 giro + 1 traslación', planar: '2 traslaciones + 1 giro', ball: '3 giros', rigid: 'ninguno' };
 export interface Joint {
   id: string; name: string; type: JointType;
   a: FaceRef; b: FaceRef;
   offset: string; angle: string;
   /** Insertar: ejes en el mismo sentido (alineada) en lugar de opuestos */
   aligned?: boolean;
+  /** Rotación/corredera: fija el ángulo (rotación) o la posición (corredera) en el valor indicado (para conducir) */
+  lock?: boolean;
   suppressed?: boolean;
 }
 
@@ -87,8 +92,12 @@ export interface BoltCalc {
 /** Patrón de componentes (copias de uno o varios componentes). */
 export interface CompPattern { id: string; name: string; source: string[]; kind: 'rect' | 'circ'; dir1: V3; n1: string; d1: string; dir2?: V3; n2?: string; d2?: string; axisO?: V3; axis?: V3; count?: string; angle?: string; copies: string[] }
 
+/** Representación de vista: componentes ocultos */
+export interface ViewRep { id: string; name: string; hidden: string[] }
+
 export interface AsmDoc {
   format: 'inv3d.assembly';
+  viewReps?: ViewRep[];
   version: 1;
   iProperties: IProps;
   kind: 'assembly' | 'weldment';
@@ -147,6 +156,15 @@ export const q = {
     return [c[0] / n, c[1] / n, c[2] / n, w / n];
   },
   norm: (a: Quat): Quat => { const n = Math.hypot(...a) || 1; return [a[0] / n, a[1] / n, a[2] / n, a[3] / n]; },
+  /** Matriz de rotación (filas) → cuaternión */
+  fromMatrix: (m: number[][]): Quat => {
+    const tr = m[0][0] + m[1][1] + m[2][2];
+    if (tr > 0) { const S = Math.sqrt(tr + 1) * 2; return q.norm([(m[2][1] - m[1][2]) / S, (m[0][2] - m[2][0]) / S, (m[1][0] - m[0][1]) / S, 0.25 * S]); }
+    if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) { const S = Math.sqrt(1 + m[0][0] - m[1][1] - m[2][2]) * 2; return q.norm([0.25 * S, (m[0][1] + m[1][0]) / S, (m[0][2] + m[2][0]) / S, (m[2][1] - m[1][2]) / S]); }
+    if (m[1][1] > m[2][2]) { const S = Math.sqrt(1 + m[1][1] - m[0][0] - m[2][2]) * 2; return q.norm([(m[0][1] + m[1][0]) / S, 0.25 * S, (m[1][2] + m[2][1]) / S, (m[0][2] - m[2][0]) / S]); }
+    const S = Math.sqrt(1 + m[2][2] - m[0][0] - m[1][1]) * 2; return q.norm([(m[0][2] + m[2][0]) / S, (m[1][2] + m[2][1]) / S, 0.25 * S, (m[1][0] - m[0][1]) / S]);
+  },
+  toMatrix: (qq: Quat): number[][] => { const c = (v: V3) => q.rotate(qq, v); const X = c([1, 0, 0]), Y = c([0, 1, 0]), Z = c([0, 0, 1]); return [[X[0], Y[0], Z[0]], [X[1], Y[1], Z[1]], [X[2], Y[2], Z[2]]]; },
 };
 export const xfPoint = (x: Xform, p: V3): V3 => v3.add(q.rotate(x.quat, p), x.pos);
 export const xfDir = (x: Xform, d: V3): V3 => q.rotate(x.quat, d);
@@ -171,6 +189,16 @@ export function solveJoints(asm: AsmDoc, ev: (s: string) => number): { xf: Recor
       const pa = xfPoint(A, j.a.point), na = v3.norm(xfDir(A, j.a.normal));
       const nbW = v3.norm(xfDir(B, j.b.normal));
       if (j.type === 'angle' || j.type === 'tangent') continue; // los resuelve el método numérico
+      const pac = xfPoint(A, j.a.center ?? j.a.point);
+      if (j.type === 'ball') { xf[j.b.occ] = { pos: v3.add(B.pos, v3.sub(pac, xfPoint(B, j.b.center ?? j.b.point))), quat: B.quat }; continue; }
+      if (j.type === 'rot' || j.type === 'slider' || j.type === 'cyl' || j.type === 'planar') {
+        const rot0 = q.between(nbW, v3.mul(na, -1));
+        const nq = q.norm(q.mul(rot0, B.quat)), nb0: Xform = { pos: B.pos, quat: nq };
+        const pb0 = xfPoint(nb0, j.b.center ?? j.b.point), w = v3.sub(pb0, pac);
+        const sh = j.type === 'rot' ? v3.mul(w, -1) : j.type === 'planar' ? v3.mul(na, -v3.dot(w, na)) : v3.mul(v3.sub(w, v3.mul(na, v3.dot(w, na))), -1);
+        xf[j.b.occ] = { pos: v3.add(B.pos, sh), quat: nq };
+        continue;
+      }
       const axes = j.a.kind === 'axis' && j.b.kind === 'axis';
       if ((j.a.kind === 'axis') !== (j.b.kind === 'axis')) continue;
       // Coincidente: normales opuestas. Al ras: normales iguales. Ejes: se alinean en el sentido más próximo.
@@ -249,9 +277,11 @@ export function weldFromFaces(nA: V3, vertsA: V3[], nB: V3, vertsB: V3[]): { p0:
 const sub3 = v3.sub, dot3 = v3.dot, cross3 = v3.cross;
 
 /** Residuos de una restricción con las poses dadas de A y B. */
+const UNION = new Set<JointType>(['rot', 'slider', 'cyl', 'planar', 'ball']);
 export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => number): number[] {
-  const pa = xfPoint(A, j.a.point), na = v3.norm(xfDir(A, j.a.normal));
-  const pb = xfPoint(B, j.b.point), nb = v3.norm(xfDir(B, j.b.normal));
+  const u = UNION.has(j.type);
+  const pa = xfPoint(A, u ? j.a.center ?? j.a.point : j.a.point), na = v3.norm(xfDir(A, j.a.normal));
+  const pb = xfPoint(B, u ? j.b.center ?? j.b.point : j.b.point), nb = v3.norm(xfDir(B, j.b.normal));
   const off = ev(j.offset || '0') || 0;
   const ka = j.a.kind ?? 'plane', kb = j.b.kind ?? 'plane';
   const perp = (w: V3, d: V3) => sub3(w, v3.mul(d, dot3(w, d)));
@@ -267,6 +297,19 @@ export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => 
     case 'insert': return [...(j.aligned ? sub3(na, nb) : v3.add(na, nb)), ...perp(sub3(pb, pa), na), dot3(sub3(pb, pa), na) - off];
     case 'rigid': return [...v3.add(na, nb), ...sub3(pb, v3.add(pa, v3.mul(na, off)))];
     case 'angle': return [dot3(na, nb) - Math.cos(((ev(j.angle || '0') || 0) * Math.PI) / 180)];
+    case 'ball': return [...sub3(pb, pa)];
+    case 'planar': return [...v3.add(na, nb), dot3(sub3(pb, pa), na) - off];
+    case 'cyl': return [...cross3(na, nb), ...perp(sub3(pb, pa), na)];
+    case 'rot': case 'slider': {
+      const out = [...v3.add(na, nb), ...(j.type === 'rot' ? sub3(pb, pa) : perp(sub3(pb, pa), na))];
+      const xa = j.a.xdir ? v3.norm(xfDir(A, j.a.xdir)) : null, xb = j.b.xdir ? v3.norm(xfDir(B, j.b.xdir)) : null;
+      if (j.type === 'slider' && xa && xb) out.push(dot3(cross3(xa, xb), na));
+      if (j.lock) {
+        if (j.type === 'rot' && xa && xb) { const th = ((ev(j.angle || '0') || 0) * Math.PI) / 180; out.push(dot3(xa, xb) - Math.cos(th), dot3(cross3(xa, xb), na) - Math.sin(th)); }
+        if (j.type === 'slider') out.push(dot3(sub3(pb, pa), na) - off);
+      }
+      return out;
+    }
     case 'tangent': {
       if (ka === 'axis' && kb === 'axis') { const r = (j.a.radius ?? 0) + (j.b.radius ?? 0) + off; return [...cross3(na, nb), v3.len(perp(sub3(pb, pa), na)) - r]; }
       const [P, N, Q, D, r] = ka === 'plane' ? [pa, na, pb, nb, j.b.radius ?? 0] : [pb, nb, pa, na, j.a.radius ?? 0];

@@ -1,12 +1,13 @@
 // Geometría de la hoja de plano: vistas (incluidas secciones y detalles), cotas, anotaciones, cajetín
 // y lista de piezas, como primitivas comunes para la pantalla (SVG) y las exportaciones (PDF, DXF, SVG).
-import { SHEETS, scaleLabel, type DrawingDoc, type DView, type DDim, type DAnn } from './drawing';
+import { SHEETS, scaleLabel, type DrawingDoc, type DView, type DDim, type DAnn, type DBreak, type GdtSym } from './drawing';
 import type { P2 } from './svgpath';
 import type { V3 } from './doc';
 import { fmt } from './expr';
 
 export interface Circ { c: P2; r: number; full: boolean }
-export interface ProjData { vis: P2[][]; hid: P2[][]; cut: P2[][]; bbox: [number, number, number, number]; circles: Circ[]; center: V3 }
+export interface Bend { a: P2; b: P2; label: string }
+export interface ProjData { vis: P2[][]; hid: P2[][]; cut: P2[][]; bbox: [number, number, number, number]; circles: Circ[]; center: V3; bends?: Bend[]; flat?: { t: number; r: number; k: number } }
 
 export type Prim =
   | { t: 'pl'; cls: string; pts: P2[]; id?: string }
@@ -92,6 +93,53 @@ function clipPolyCircle(poly: P2[], c: P2, r: number): P2[][] {
   return out;
 }
 
+/** Recorte genérico: parte cada segmento por los parámetros ts y conserva los tramos cuyo punto medio cumple keep. */
+function clipBy(poly: P2[], ts: (A: P2, B: P2) => number[], keep: (p: P2) => boolean): P2[][] {
+  const out: P2[][] = []; let cur: P2[] = [];
+  for (let i = 0; i + 1 < poly.length; i++) {
+    const A = poly[i], B = poly[i + 1], d = sub(B, A);
+    const tt = [0, ...ts(A, B).filter((t) => t > 1e-9 && t < 1 - 1e-9).sort((a, b) => a - b), 1];
+    for (let k = 0; k + 1 < tt.length; k++) {
+      const P = add(A, mul(d, tt[k])), Q = add(A, mul(d, tt[k + 1]));
+      if (keep(add(A, mul(d, (tt[k] + tt[k + 1]) / 2)))) { if (!cur.length) cur.push(P); cur.push(Q); }
+      else if (cur.length) { out.push(cur); cur = []; }
+    }
+  }
+  if (cur.length > 1) out.push(cur);
+  return out;
+}
+const lineTs = (axis: 0 | 1, vals: number[]) => (A: P2, B: P2) => { const dd = B[axis] - A[axis]; return Math.abs(dd) < 1e-12 ? [] : vals.map((v) => (v - A[axis]) / dd); };
+
+/** Correspondencia de las vistas partidas entre coordenadas del modelo (relativas al centro) y de la hoja (relativas al centro). */
+export const BREAK_GAP = 6;
+export function breakMap(v: DView) {
+  const s = v.scale, G = BREAK_GAP;
+  const list = (axis: 'x' | 'y'): DBreak[] => (v.breaks ?? []).filter((b) => b.axis === axis).map((b) => ({ axis, a: Math.min(b.a, b.b), b: Math.max(b.a, b.b) })).sort((x, y) => x.a - y.a);
+  const L = { x: list('x'), y: list('y') };
+  const tot = (axis: 'x' | 'y') => L[axis].reduce((t, b) => t + (b.b - b.a) * s - G, 0);
+  const fwd = (axis: 'x' | 'y', m: number) => {
+    let off = 0;
+    for (const b of L[axis]) { if (m >= b.b) off -= (b.b - b.a) * s - G; else if (m > b.a) off -= (m - b.a) * s; }
+    return m * s + off + tot(axis) / 2;
+  };
+  const inv = (axis: 'x' | 'y', u: number) => {
+    const x = u - tot(axis) / 2; let off = 0;
+    for (const b of L[axis]) {
+      const as = b.a * s + off;
+      if (x <= as) break;
+      if (x < as + G) return b.a + ((x - as) / G) * (b.b - b.a);
+      off -= (b.b - b.a) * s - G;
+    }
+    return (x - off) / s;
+  };
+  return { L, fwd, inv, any: L.x.length + L.y.length > 0 };
+}
+/** Distancia real (sin partir) entre dos puntos de hoja relativos al centro de la vista. */
+export function unbreak(v: DView, p: P2): P2 {
+  const bm = breakMap(v); if (!bm.any) return p;
+  return [bm.inv('x', p[0]) * v.scale, bm.inv('y', p[1]) * v.scale];
+}
+
 // ---------- Geometría de una vista ----------
 export interface ViewGeom {
   vis: P2[][]; hid: P2[][]; cut: P2[][];
@@ -100,6 +148,9 @@ export interface ViewGeom {
   /** modelo 2D → hoja, y su inversa */
   T: (q: P2) => P2; inv: (p: P2) => P2;
   clip?: { c: P2; r: number };
+  /** Líneas de rotura (vistas partidas) */
+  brk?: P2[][];
+  bends?: Bend[];
 }
 export function viewGeometry(v: DView, p: ProjData, parent?: { v: DView; p: ProjData }): ViewGeom {
   if (v.kind === 'detail' && v.detail && parent) {
@@ -117,15 +168,44 @@ export function viewGeometry(v: DView, p: ProjData, parent?: { v: DView; p: Proj
     };
   }
   const [x0, y0, x1, y1] = p.bbox, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-  const T = (q: P2): P2 => [v.x + (q[0] - cx) * v.scale, v.y + (q[1] - cy) * v.scale];
-  const inv = (s: P2): P2 => [cx + (s[0] - v.x) / v.scale, cy + (s[1] - v.y) / v.scale];
+  const bm = breakMap(v);
+  const T = (q: P2): P2 => [v.x + bm.fwd('x', q[0] - cx), v.y + bm.fwd('y', q[1] - cy)];
+  const inv = (s: P2): P2 => [cx + bm.inv('x', s[0] - v.x), cy + bm.inv('y', s[1] - v.y)];
+  let rect: [number, number, number, number] = [...T([x0, y0]), ...T([x1, y1])] as [number, number, number, number];
+  // Vistas partidas: se suprimen los tramos interiores a cada rotura (en coordenadas del modelo)
+  const inBreak = (q: P2) => bm.L.x.some((b) => q[0] - cx > b.a && q[0] - cx < b.b) || bm.L.y.some((b) => q[1] - cy > b.a && q[1] - cy < b.b);
+  const brkTs = (A: P2, B: P2) => [...lineTs(0, bm.L.x.flatMap((b) => [b.a + cx, b.b + cx]))(A, B), ...lineTs(1, bm.L.y.flatMap((b) => [b.a + cy, b.b + cy]))(A, B)];
+  const cutB = (polys: P2[][]) => (bm.any ? polys.flatMap((pl) => clipBy(pl, brkTs, (q) => !inBreak(q))) : polys);
+  // Vista recortada
+  let cropR: [number, number, number, number] | null = null;
+  if (v.crop) {
+    const c = v.crop;
+    cropR = [v.x + Math.min(c[0], c[2]), v.y + Math.min(c[1], c[3]), v.x + Math.max(c[0], c[2]), v.y + Math.max(c[1], c[3])];
+    rect = [Math.max(rect[0], cropR[0]), Math.max(rect[1], cropR[1]), Math.min(rect[2], cropR[2]), Math.min(rect[3], cropR[3])];
+  }
+  const R = cropR;
+  const inCrop = (q: P2) => !R || (q[0] >= R[0] - 1e-9 && q[0] <= R[2] + 1e-9 && q[1] >= R[1] - 1e-9 && q[1] <= R[3] + 1e-9);
+  const cropTs = (A: P2, B: P2) => (R ? [...lineTs(0, [R[0], R[2]])(A, B), ...lineTs(1, [R[1], R[3]])(A, B)] : []);
+  const cutC = (polys: P2[][]) => (R ? polys.flatMap((pl) => clipBy(pl, cropTs, inCrop)) : polys);
+  const map = (polys: P2[][]) => cutC(cutB(polys).map((l) => l.map(T)));
+  const brk: P2[][] = [];
+  const [ry0, ry1, rx0, rx1] = [rect[1] - 2, rect[3] + 2, rect[0] - 2, rect[2] + 2];
+  for (const b of bm.L.x) for (const m of [b.a, b.b]) {
+    const X = v.x + bm.fwd('x', m) + (m === b.a ? 0 : 0), ym = (ry0 + ry1) / 2;
+    brk.push([[X, ry0], [X, ym - 2], [X - 1.5, ym - 0.7], [X + 1.5, ym + 0.7], [X, ym + 2], [X, ry1]]);
+  }
+  for (const b of bm.L.y) for (const m of [b.a, b.b]) {
+    const Y = v.y + bm.fwd('y', m), xm = (rx0 + rx1) / 2;
+    brk.push([[rx0, Y], [xm - 2, Y], [xm - 0.7, Y - 1.5], [xm + 0.7, Y + 1.5], [xm + 2, Y], [rx1, Y]]);
+  }
   return {
-    vis: p.vis.map((l) => l.map(T)),
-    hid: v.hidden ? p.hid.map((l) => l.map(T)) : [],
-    cut: p.cut.map((l) => l.map(T)),
-    rect: [v.x - ((x1 - x0) * v.scale) / 2, v.y - ((y1 - y0) * v.scale) / 2, v.x + ((x1 - x0) * v.scale) / 2, v.y + ((y1 - y0) * v.scale) / 2],
-    circles: p.circles.map((c) => ({ c: T(c.c), r: c.r * v.scale, full: c.full })),
-    T, inv,
+    vis: map(p.vis),
+    hid: v.hidden ? map(p.hid) : [],
+    cut: map(p.cut),
+    rect,
+    circles: p.circles.filter((c) => !inBreak(c.c)).map((c) => ({ c: T(c.c), r: c.r * v.scale, full: c.full })).filter((c) => inCrop(c.c)),
+    T, inv, brk,
+    bends: p.bends?.map((b) => ({ a: T(b.a), b: T(b.b), label: b.label })),
   };
 }
 
@@ -137,7 +217,9 @@ export function dimValue(d: DDim, v: DView): number {
     const u = sub(d.b, d.a), w = sub(d.c ?? d.b, d.a);
     return Math.abs((Math.atan2(u[0] * w[1] - u[1] * w[0], u[0] * w[0] + u[1] * w[1]) * 180) / Math.PI);
   }
-  const dx = d.b[0] - d.a[0], dy = d.b[1] - d.a[1];
+  const A = unbreak(v, d.a), B = unbreak(v, d.b);
+  if (d.kind === 'ord') return Math.abs(d.axis === 'y' ? B[1] - A[1] : B[0] - A[0]) / v.scale;
+  const dx = B[0] - A[0], dy = B[1] - A[1];
   const L = d.kind === 'h' ? Math.abs(dx) : d.kind === 'v' ? Math.abs(dy) : Math.hypot(dx, dy);
   return L / v.scale;
 }
@@ -172,6 +254,17 @@ export function dimGeometry(d: DDim, v: DView) {
     const t1: P2 = [-Math.sin(a1) * Math.sign(sw), Math.cos(a1) * Math.sign(sw)], t2: P2 = [-Math.sin(a2) * Math.sign(sw), Math.cos(a2) * Math.sign(sw)];
     const am = a1 + sw / 2;
     return { lines, arrows: [arrowTri(arc[0], mul(t1, -1)), arrowTri(arc[arc.length - 1], t2)], text, mid: [V[0] + (R + 3) * Math.cos(am), V[1] + (R + 3) * Math.sin(am)] as P2, ang: 0, anchor: 'middle' as const };
+  }
+  if (d.kind === 'ord') {
+    const B = add(O, d.b), C = add(O, d.c ?? d.b), tl = text.length * 2.1;
+    if (d.axis === 'y') {
+      const sg = Math.sign(C[0] - B[0]) || 1, xm = B[0] + (C[0] - B[0]) * 0.6;
+      const lines: P2[][] = [[[B[0] + sg * 1.5, B[1]], [xm, B[1]], [xm + sg * 2, C[1]], C]];
+      return { lines, arrows: [] as P2[][], text, mid: [C[0] + sg * (tl / 2 + 1), C[1] - 1.2] as P2, ang: 0, anchor: 'middle' as const };
+    }
+    const sg = Math.sign(C[1] - B[1]) || 1, ym = B[1] + (C[1] - B[1]) * 0.6;
+    const lines: P2[][] = [[[B[0], B[1] + sg * 1.5], [B[0], ym], [C[0], ym + sg * 2], C]];
+    return { lines, arrows: [] as P2[][], text, mid: [C[0] + 1.2, C[1] + sg * (tl / 2 + 1)] as P2, ang: 90, anchor: 'middle' as const };
   }
   const A: P2 = add(O, d.a), B: P2 = add(O, d.b);
   let p1: P2, p2: P2, n: P2;
@@ -241,13 +334,64 @@ export function annGeometry(a: DAnn): { lines: P2[][]; thin: P2[][]; fills: P2[]
       out.center.push([[p0[0] - r, p0[1]], [p0[0] + r, p0[1]]], [[p0[0], p0[1] - r], [p0[0], p0[1] + r]]);
       break;
     }
+    case 'fcf': {
+      // Marco de tolerancia geométrica ISO 1101: [símbolo | (Ø)valor | A | B…]
+      const pos = a.pts.length > 1 ? p1 : p0, h = 6;
+      if (a.pts.length > 1) { out.thin.push([p0, pos]); out.fills.push(arrowTri(p0, sub(p0, pos))); }
+      const tol = `${a.dia ? 'Ø' : ''}${a.text ?? '0,05'}`;
+      const dats = (a.datums ?? '').split(/[|,; ]+/).filter(Boolean);
+      const cells = [h, Math.max(10, tol.length * 2.3 + 3), ...dats.map((d) => Math.max(h, d.length * 2.4 + 2.5))];
+      let x = pos[0];
+      const yb = pos[1] - h / 2, yt = pos[1] + h / 2;
+      out.thin.push([[x, yb], [x + cells.reduce((t, c) => t + c, 0), yb], [x + cells.reduce((t, c) => t + c, 0), yt], [x, yt], [x, yb]]);
+      cells.forEach((w, i) => {
+        if (i > 0) out.thin.push([[x, yb], [x, yt]]);
+        const c: P2 = [x + w / 2, pos[1]];
+        if (i === 0) gdtGlyph(a.sym ?? 'flat', c, out);
+        else out.texts.push({ x: c[0], y: pos[1] - 1.25, h: 3.5, text: i === 1 ? tol : dats[i - 2], anchor: 'middle' });
+        x += w;
+      });
+      break;
+    }
+    case 'datum': {
+      // Símbolo de referencia: triángulo lleno sobre la superficie, línea y recuadro con la letra
+      const u = unit(sub(p1, p0)), n: P2 = [-u[1], u[0]];
+      out.fills.push([add(p0, mul(n, 1.8)), sub(p0, mul(n, 1.8)), add(p0, mul(u, 3.1))]);
+      const box = 7;
+      const e: P2 = Math.abs(u[0]) > Math.abs(u[1]) ? [p1[0] - Math.sign(u[0]) * box / 2, p1[1]] : [p1[0], p1[1] - Math.sign(u[1]) * box / 2];
+      out.thin.push([add(p0, mul(u, 3)), e]);
+      out.thin.push([[p1[0] - box / 2, p1[1] - box / 2], [p1[0] + box / 2, p1[1] - box / 2], [p1[0] + box / 2, p1[1] + box / 2], [p1[0] - box / 2, p1[1] + box / 2], [p1[0] - box / 2, p1[1] - box / 2]]);
+      out.texts.push({ x: p1[0], y: p1[1] - 1.6, h: 4.5, text: a.text ?? 'A', anchor: 'middle' });
+      break;
+    }
   }
   return out;
+}
+/** Dibuja el símbolo de característica geométrica centrado en c (celda de 6 mm). */
+function gdtGlyph(sym: GdtSym, c: P2, out: { thin: P2[][]; circles: { c: P2; r: number }[]; fills: P2[][] }) {
+  const [x, y] = c, k = 2;
+  const L = (...pts: P2[]) => out.thin.push(pts);
+  switch (sym) {
+    case 'straight': L([x - k, y], [x + k, y]); break;
+    case 'flat': L([x - k, y - 1], [x + k - 0.8, y - 1], [x + k, y + 1], [x - k + 0.8, y + 1], [x - k, y - 1]); break;
+    case 'circ': out.circles.push({ c, r: 1.8 }); break;
+    case 'cyl': out.circles.push({ c, r: 1.4 }); L([x - 2.2, y - 1.6], [x - 0.6, y + 1.6]); L([x + 0.6, y - 1.6], [x + 2.2, y + 1.6]); break;
+    case 'profl': case 'profs': { const a: P2[] = []; for (let i = 0; i <= 16; i++) { const t = (Math.PI * i) / 16; a.push([x + 2 * Math.cos(t), y - 1 + 2 * Math.sin(t)]); } if (sym === 'profs') a.push(a[0]); L(...a); break; }
+    case 'perp': L([x - k, y - 1.6], [x + k, y - 1.6]); L([x, y - 1.6], [x, y + 2]); break;
+    case 'angle': L([x + k, y - 1.6], [x - k, y - 1.6], [x + k, y + 1.4]); break;
+    case 'par': L([x - 1.8, y - 1.6], [x - 0.4, y + 1.8]); L([x + 0.4, y - 1.6], [x + 1.8, y + 1.8]); break;
+    case 'pos': out.circles.push({ c, r: 1.3 }); L([x - 2.2, y], [x + 2.2, y]); L([x, y - 2.2], [x, y + 2.2]); break;
+    case 'conc': out.circles.push({ c, r: 0.9 }, { c, r: 1.9 }); break;
+    case 'sym': L([x - 1.2, y + 1.2], [x + 1.2, y + 1.2]); L([x - 2.2, y], [x + 2.2, y]); L([x - 1.2, y - 1.2], [x + 1.2, y - 1.2]); break;
+    case 'runout': L([x - 1.5, y - 1.8], [x + 1, y + 1.3]); out.fills.push(arrowTri([x + 1.6, y + 2], [1, 1.2], 1.6, 0.6)); break;
+    case 'truns': L([x - 2, y - 1.8], [x + 0.4, y - 1.8]); L([x - 2, y - 1.8], [x - 0.6, y + 1.3]); L([x + 0.4, y - 1.8], [x + 1.8, y + 1.3]); out.fills.push(arrowTri([x - 0.3, y + 2], [0.6, 1.2], 1.5, 0.55), arrowTri([x + 2.1, y + 2], [0.6, 1.2], 1.5, 0.55)); break;
+  }
 }
 const dot = (c: P2, r: number): P2[] => { const o: P2[] = []; for (let i = 0; i < 10; i++) { const t = (i / 10) * Math.PI * 2; o.push([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t)]); } return o; };
 
 // ---------- Cajetín ----------
 const TB_W = 180;
+export const TB_H = 40;
 export function titleBlockGeometry(drw: DrawingDoc) {
   const [W] = SHEETS[drw.sheet];
   const x0 = W - 10 - TB_W, y0 = 10;
@@ -261,10 +405,16 @@ export function titleBlockGeometry(drw: DrawingDoc) {
     { x: 60, y: 8, w: 50, h: 8, label: 'Material', value: t.material },
     { x: 110, y: 8, w: 30, h: 8, label: 'Escala', value: t.scale },
     { x: 140, y: 8, w: 20, h: 8, label: 'Rev.', value: t.revision },
-    { x: 160, y: 8, w: 20, h: 8, label: 'Hoja', value: '1/1' },
+    { x: 160, y: 8, w: 20, h: 8, label: 'Hoja', value: `${(drw.page ?? 0) + 1}/${Math.max(1, drw.pages?.length ?? 1)}` },
     { x: 0, y: 0, w: 30, h: 8, label: 'Fecha', value: t.date },
-    { x: 30, y: 0, w: 80, h: 8, label: 'Formato', value: `${drw.sheet} · medidas en mm` },
+    { x: 30, y: 0, w: 45, h: 8, label: 'Formato', value: `${drw.sheet} · mm` },
+    { x: 75, y: 0, w: 35, h: 8, label: 'Masa', value: t.mass ?? '' },
     { x: 110, y: 0, w: 70, h: 8, label: 'Proyección', value: 'europea (ISO E)' },
+    { x: 0, y: 32, w: 40, h: 8, label: 'Proyecto', value: t.project ?? '' },
+    { x: 40, y: 32, w: 40, h: 8, label: 'Tolerancias generales', value: t.generalTol ?? '' },
+    { x: 80, y: 32, w: 40, h: 8, label: 'Acabado', value: t.finish ?? '' },
+    { x: 120, y: 32, w: 30, h: 8, label: 'Aprobado', value: t.approved ?? '' },
+    { x: 150, y: 32, w: 30, h: 8, label: 'Fecha aprob.', value: t.approvedDate ?? '' },
   ];
   return { x0, y0, cells: cells.map((c) => ({ ...c, x: x0 + c.x, y: y0 + c.y })) };
 }
@@ -303,8 +453,13 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
       P.push({ t: 'pl', cls: 'center', pts: [[c.c[0] - r, c.c[1]], [c.c[0] + r, c.c[1]]], id: v.id }, { t: 'pl', cls: 'center', pts: [[c.c[0], c.c[1] - r], [c.c[0], c.c[1] + r]], id: v.id });
     }
     if (g.clip) P.push({ t: 'circ', cls: 'thin', c: g.clip.c, r: g.clip.r, id: v.id });
-    const label = v.kind === 'section' ? `SECCIÓN ${v.label}-${v.label} (${scaleLabel(v.scale)})` : v.kind === 'detail' ? `DETALLE ${v.label} (${scaleLabel(v.scale)})` : `${v.name} · ${scaleLabel(v.scale)}`;
-    P.push({ t: 'txt', cls: v.kind === 'section' || v.kind === 'detail' ? 'vlabel big' : 'vlabel', x: (g.rect[0] + g.rect[2]) / 2, y: g.rect[1] - 7, h: v.kind === 'section' || v.kind === 'detail' ? 3.5 : 3, text: label, anchor: 'middle', id: v.id });
+    for (const l of g.brk ?? []) P.push({ t: 'pl', cls: 'thin', pts: l, id: v.id });
+    for (const [i, b] of (g.bends ?? []).entries()) {
+      P.push({ t: 'pl', cls: 'center', pts: [b.a, b.b], id: v.id });
+      P.push({ t: 'txt', cls: 'annt', x: b.b[0], y: b.b[1] + 2, h: 2.5, text: `P${i + 1}`, anchor: 'middle', id: v.id });
+    }
+    const label = v.kind === 'aux' ? `VISTA ${v.label} (${scaleLabel(v.scale)})` : v.kind === 'flat' ? `DESARROLLO (${scaleLabel(v.scale)})` : v.kind === 'section' ? `SECCIÓN ${v.label}-${v.label} (${scaleLabel(v.scale)})` : v.kind === 'detail' ? `DETALLE ${v.label} (${scaleLabel(v.scale)})` : `${v.name} · ${scaleLabel(v.scale)}`;
+    P.push({ t: 'txt', cls: v.kind === 'section' || v.kind === 'detail' || v.kind === 'aux' ? 'vlabel big' : 'vlabel', x: (g.rect[0] + g.rect[2]) / 2, y: g.rect[1] - 7, h: v.kind === 'section' || v.kind === 'detail' ? 3.5 : 3, text: label, anchor: 'middle', id: v.id });
   }
   // Indicaciones de sección y detalle sobre la vista padre
   for (const v of drw.views) {
@@ -321,6 +476,13 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
         P.push({ t: 'pl', cls: 'thick', pts: [tail, tip], id: v.id }, { t: 'fill', cls: 'arrow', loops: [arrowTri(tip, nv, 3.5, 1.2)], id: v.id });
         P.push({ t: 'txt', cls: 'vlabel big', x: E[0] + nv[0] * 10 - u[0] * 2, y: E[1] + nv[1] * 10 - 1.7 - u[1] * 2, h: 5, text: v.label ?? 'A', anchor: 'middle', id: v.id, bold: true });
       }
+    }
+    if (v.kind === 'aux' && v.aux) {
+      // flecha de dirección de la vista auxiliar junto a la arista elegida
+      const A = add([pv.x, pv.y], v.aux.a), nv: P2 = unit(v.aux.n2);
+      const tail = add(A, mul(nv, 14)), tip = add(A, mul(nv, 4));
+      P.push({ t: 'pl', cls: 'thick', pts: [tail, tip], id: v.id }, { t: 'fill', cls: 'arrow', loops: [arrowTri(tip, mul(nv, -1), 3.5, 1.2)], id: v.id });
+      P.push({ t: 'txt', cls: 'vlabel big', x: tail[0] + nv[0] * 3, y: tail[1] + nv[1] * 3 - 1.7, h: 5, text: v.label ?? 'A', anchor: 'middle', id: v.id, bold: true });
     }
     if (v.kind === 'detail' && v.detail) {
       const c = add([pv.x, pv.y], v.detail.c);
@@ -346,6 +508,27 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     for (const c of g.circles) P.push({ t: 'circ', cls: 'thin', c: c.c, r: c.r, id: a.id });
     for (const t of g.texts) P.push({ t: 'txt', cls: 'annt', ...t, id: a.id });
   }
+  // Tablas
+  for (const tb of drw.tables ?? []) {
+    const tab = tableData(drw, proj, tb);
+    if (!tab) continue;
+    for (const p of tab.extra) P.push({ ...p, id: tb.id } as Prim);
+    let y = tb.y;
+    const tw = tab.cols.reduce((t, c) => t + c, 0);
+    P.push({ t: 'pl', cls: 'tb', pts: [[tb.x, y], [tb.x + tw, y], [tb.x + tw, y - 7], [tb.x, y - 7], [tb.x, y]], id: tb.id });
+    P.push({ t: 'txt', cls: 'tbb', x: tb.x + tw / 2, y: y - 5, h: 3, text: tab.title, anchor: 'middle', bold: true, id: tb.id });
+    y -= 7;
+    for (const [ri, row] of tab.rows.entries()) {
+      let x = tb.x;
+      row.forEach((txt, ci) => {
+        const w = tab.cols[ci];
+        P.push({ t: 'pl', cls: 'tb', pts: [[x, y], [x + w, y], [x + w, y - 6], [x, y - 6], [x, y]], id: tb.id });
+        P.push({ t: 'txt', cls: ri === 0 ? 'tbl' : 'tbv', x: x + 1.2, y: y - 4.3, h: ri === 0 ? 2.2 : 2.5, text: txt, bold: ri === 0, id: tb.id });
+        x += w;
+      });
+      y -= 6;
+    }
+  }
   for (const n of drw.notes) P.push({ t: 'txt', cls: 'note', x: n.x, y: n.y, h: n.size, text: n.text, id: n.id });
   // Cajetín
   const tb = titleBlockGeometry(drw);
@@ -363,6 +546,48 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     P.push({ t: 'txt', cls: i === bom.length - 1 ? 'tbb' : 'tbv', x: c.x + 1.2, y: c.y + 1.8, h: 2.5, text: c.text, bold: i === bom.length - 1 });
   }
   return P;
+}
+
+// ---------- Tablas (taladros, revisiones, pliegues) ----------
+export function tableData(drw: DrawingDoc, proj: (v: DView) => ProjData | null, tb: { kind: string; view?: string }): { title: string; cols: number[]; rows: string[][]; extra: Prim[] } | null {
+  if (tb.kind === 'rev') {
+    const revs = drw.revisions ?? [];
+    return { title: 'REVISIONES', cols: [12, 78, 24, 26], rows: [['Rev.', 'Descripción', 'Fecha', 'Aprobado'], ...revs.map((r) => [r.rev, r.desc, r.date, r.by])], extra: [] };
+  }
+  const v = drw.views.find((x) => x.id === tb.view); if (!v) return null;
+  if (tb.kind === 'bend') {
+    const pd = proj(v); if (!pd?.bends) return null;
+    const rows = pd.bends.map((b, i) => {
+      const m = /(ARRIBA|ABAJO)\s+(\d+(?:[.,]\d+)?)°\s*R?([\d.,]+)?/.exec(b.label);
+      return [`P${i + 1}`, m ? (m[1] === 'ARRIBA' ? 'Arriba' : 'Abajo') : '', m ? `${m[2]}°` : b.label, m?.[3] ? `R${m[3]}` : pd.flat ? `R${fmt(pd.flat.r, 2)}` : ''];
+    });
+    return { title: 'TABLA DE PLIEGUES', cols: [14, 22, 20, 22], rows: [['Pliegue', 'Dirección', 'Ángulo', 'Radio'], ...rows], extra: [] };
+  }
+  // Tabla de taladros: círculos completos de la vista, agrupados por centro, con origen en la esquina inferior izquierda
+  const g = geomOf(drw, proj, v); if (!g) return null;
+  const groups: { c: P2; ds: number[] }[] = [];
+  for (const c of g.circles) {
+    if (!c.full || c.r < 0.4) continue;
+    const gr = groups.find((x) => Math.hypot(x.c[0] - c.c[0], x.c[1] - c.c[1]) < 0.05);
+    const d = (2 * c.r) / v.scale;
+    if (gr) { if (!gr.ds.some((x) => Math.abs(x - d) < 0.01)) gr.ds.push(d); } else groups.push({ c: c.c, ds: [d] });
+  }
+  // descartar el contorno exterior de piezas de revolución (círculo que llena la vista)
+  const W0 = g.rect[2] - g.rect[0], H0 = g.rect[3] - g.rect[1];
+  const holes = groups.filter((x) => !(Math.min(...x.ds) * v.scale > Math.min(W0, H0) * 0.95));
+  const o: P2 = [g.rect[0], g.rect[1]];
+  holes.sort((a, b) => (Math.abs(a.c[1] - b.c[1]) > 0.5 ? a.c[1] - b.c[1] : a.c[0] - b.c[0]));
+  const extra: Prim[] = [];
+  extra.push({ t: 'pl', cls: 'thin', pts: [[o[0] - 3, o[1]], [o[0] + 8, o[1]]] }, { t: 'pl', cls: 'thin', pts: [[o[0], o[1] - 3], [o[0], o[1] + 8]] });
+  extra.push({ t: 'txt', cls: 'annt', x: o[0] - 1, y: o[1] - 4, h: 2.5, text: '0,0', anchor: 'end' });
+  const rows = holes.map((h, i) => {
+    const tag = `A${i + 1}`;
+    const r = (Math.max(...h.ds) * v.scale) / 2;
+    extra.push({ t: 'txt', cls: 'annt', x: h.c[0] + r * 0.75 + 0.8, y: h.c[1] + r * 0.75 + 0.8, h: 2.5, text: tag });
+    const rel = unbreak(v, [h.c[0] - v.x, h.c[1] - v.y]), relO = unbreak(v, [o[0] - v.x, o[1] - v.y]);
+    return [tag, fmt((rel[0] - relO[0]) / v.scale, 2), fmt((rel[1] - relO[1]) / v.scale, 2), h.ds.sort((a, b) => a - b).map((d) => `Ø${fmt(d, 2)}`).join(' / ')];
+  });
+  return { title: 'TABLA DE TALADROS', cols: [12, 22, 22, 34], rows: [['Ref.', 'X', 'Y', 'Descripción'], ...rows], extra };
 }
 
 /** Rayado a 45° de lazos (regla par-impar) para PDF y DXF. */

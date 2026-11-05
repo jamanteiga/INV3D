@@ -1,3 +1,5 @@
+import { drwActions } from './actions';
+import { allPages } from '../core/drawing';
 import { useState, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
@@ -12,6 +14,7 @@ const ICON: Record<Feature['type'], string> = {
   hole: 'hole', pattern: 'prect', mirror: 'mirror', shell: 'shell', workplane: 'workplane', loft: 'loft', sweep: 'sweep',
   sm_face: 'smface', sm_flange: 'smflange', rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken',
   thread: 'thread', workaxis: 'axis', workpoint: 'point',
+  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch',
 };
 
 type Menu = { x: number; y: number; items: { label: string; danger?: boolean; run: () => void }[] } | null;
@@ -146,6 +149,7 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
         <div key={j.id} className={rowCls(j.id, j.suppressed ? 'supp' : '')} style={{ paddingLeft: 30 }} onClick={() => sel(j.id)} title={errs[j.id]}
           onContextMenu={(e) => { e.preventDefault(); sel(j.id); setMenu({ x: e.clientX, y: e.clientY, items: [
             { label: j.suppressed ? 'Activar' : 'Suprimir', run: () => s.commitAsm((a) => { const t = a.joints.find((x) => x.id === j.id); if (t) t.suppressed = !t.suppressed; }) },
+            ...(j.type === 'rot' || j.type === 'slider' ? [{ label: 'Conducir…', run: () => s.open({ kind: 'drive' }) }] : []),
             { label: 'Eliminar', danger: true, run: () => del('joints', j.id) },
           ] }); }}>
           <Icon name="joint" size={15} /><span className="tree-name">{j.name} ({JOINT_NAMES[j.type]})</span><Err id={j.id} />
@@ -173,6 +177,10 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
             { label: o.grounded ? 'Liberar' : 'Fijar', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.grounded = !t.grounded; }) },
             { label: o.hidden ? 'Mostrar' : 'Ocultar', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.hidden = !t.hidden; }) },
             { label: o.suppressed ? 'Activar' : 'Suprimir', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.suppressed = !t.suppressed; }) },
+            { label: 'Sustituir…', run: () => s.open({ kind: 'replace' }) },
+            { label: 'Simetría respecto a YZ', run: () => asmActions.mirrorComponent(o.id, 'YZ') },
+            { label: 'Simetría respecto a XZ', run: () => asmActions.mirrorComponent(o.id, 'XZ') },
+            { label: 'Simetría respecto a XY', run: () => asmActions.mirrorComponent(o.id, 'XY') },
             { label: '-', run: () => {} },
             { label: 'Eliminar', danger: true, run: () => del('occurrences', o.id) },
           ] }); }}
@@ -226,22 +234,45 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
 function DrwTree({ setMenu }: { setMenu: (m: Menu) => void }) {
   const s = useStore();
   const name = (id: string) => s.docs.find((d) => d.id === id)?.fileName ?? 'origen no abierto';
+  const pages = allPages(s.drw), cur = s.drw.page ?? 0;
+  const VI: Record<string, string> = { section: 'section', detail: 'detail', aux: 'auxview', flat: 'flat', iso: 'iso' };
   return (<>
     <div className="tree-row root"><Icon name="drawing" size={17} /><span className="tree-name">{s.fileName}</span></div>
-    <Folder icon="sheetsize" label={`Hoja:1 (${s.drw.sheet})`}>
-      {s.drw.views.map((v) => (
-        <div key={v.id} className={`tree-row ${s.selItem === v.id ? 'sel' : ''}`} style={{ paddingLeft: 30 }} onClick={() => s.set({ selItem: v.id })}
-          onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, items: [{ label: 'Eliminar vista', danger: true, run: () => s.commitDrw((d) => {
-            const gone = new Set([v.id, ...d.views.filter((x) => x.parent === v.id).map((x) => x.id)]);
-            d.views = d.views.filter((x) => !gone.has(x.id)); d.dims = d.dims.filter((x) => !gone.has(x.view));
-          }) }] }); }}>
-          <Icon name={v.parent ? 'projview' : 'baseview'} size={15} /><span className="tree-name">{v.name} · {scaleLabel(v.scale)}</span>
-          <span className="tree-count" title={name(v.source)}>{name(v.source).replace(/\.[^.]+$/, '')}</span>
+    {pages.map((pg, i) => (
+      <div key={i}>
+        <div className={`tree-row ${i === cur ? 'cur-sheet' : ''}`} onClick={() => drwActions.gotoSheet(i)} onDoubleClick={() => { const n = prompt('Nombre de la hoja', pg.name); if (n) drwActions.renameSheet(i, n); }}
+          onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, items: [
+            { label: 'Activar', run: () => drwActions.gotoSheet(i) },
+            { label: 'Cambiar nombre…', run: () => { const n = prompt('Nombre de la hoja', pg.name); if (n) drwActions.renameSheet(i, n); } },
+            { label: 'Nueva hoja', run: drwActions.addSheet },
+            ...(pages.length > 1 ? [{ label: 'Eliminar hoja', danger: true, run: () => drwActions.deleteSheet(i) }] : []),
+          ] }); }}>
+          <Icon name="sheets" size={16} /><span className="tree-name">{pg.name} ({pg.sheet})</span>{i === cur && <span className="tree-count">activa</span>}
         </div>
-      ))}
-      {s.drw.dims.length > 0 && <div className="tree-row" style={{ paddingLeft: 30 }}><Icon name="dim" size={15} /><span className="tree-name">Cotas</span><span className="tree-count">{s.drw.dims.length}</span></div>}
-      {s.drw.notes.length > 0 && <div className="tree-row" style={{ paddingLeft: 30 }}><Icon name="note" size={15} /><span className="tree-name">Notas</span><span className="tree-count">{s.drw.notes.length}</span></div>}
-    </Folder>
+        {i === cur && (<>
+          {s.drw.views.map((v) => (
+            <div key={v.id} className={`tree-row ${s.selItem === v.id ? 'sel' : ''}`} style={{ paddingLeft: v.parent ? 44 : 30 }} onClick={() => s.set({ selItem: v.id })}
+              onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, items: [
+                ...(v.breaks?.length || v.crop ? [{ label: 'Quitar roturas y recorte', run: () => { s.set({ selItem: v.id }); drwActions.clearBreaks(); } }] : []),
+                { label: 'Eliminar vista', danger: true, run: () => s.commitDrw((d) => {
+                  const gone = new Set([v.id, ...d.views.filter((x) => x.parent === v.id).map((x) => x.id)]);
+                  d.views = d.views.filter((x) => !gone.has(x.id)); d.dims = d.dims.filter((x) => !gone.has(x.view)); d.tables = (d.tables ?? []).filter((x) => !x.view || !gone.has(x.view));
+                }) }] }); }}>
+              <Icon name={VI[v.kind ?? ''] ?? (v.parent ? 'projview' : 'baseview')} size={15} /><span className="tree-name">{v.name}{v.breaks?.length ? ' · partida' : ''}{v.crop ? ' · recortada' : ''} · {scaleLabel(v.scale)}</span>
+              <span className="tree-count" title={name(v.source)}>{name(v.source).replace(/\.[^.]+$/, '')}</span>
+            </div>
+          ))}
+          {(s.drw.tables ?? []).map((t) => (
+            <div key={t.id} className={`tree-row ${s.selItem === t.id ? 'sel' : ''}`} style={{ paddingLeft: 30 }} onClick={() => s.set({ selItem: t.id })}>
+              <Icon name={t.kind === 'rev' ? 'revtable' : 'holetable'} size={15} /><span className="tree-name">{t.kind === 'hole' ? 'Tabla de taladros' : t.kind === 'bend' ? 'Tabla de pliegues' : 'Tabla de revisiones'}</span>
+            </div>
+          ))}
+          {s.drw.dims.length > 0 && <div className="tree-row" style={{ paddingLeft: 30 }}><Icon name="dim" size={15} /><span className="tree-name">Cotas</span><span className="tree-count">{s.drw.dims.length}</span></div>}
+          {(s.drw.anns ?? []).length > 0 && <div className="tree-row" style={{ paddingLeft: 30 }}><Icon name="leader" size={15} /><span className="tree-name">Anotaciones</span><span className="tree-count">{s.drw.anns!.length}</span></div>}
+          {s.drw.notes.length > 0 && <div className="tree-row" style={{ paddingLeft: 30 }}><Icon name="note" size={15} /><span className="tree-name">Notas</span><span className="tree-count">{s.drw.notes.length}</span></div>}
+        </>)}
+      </div>
+    ))}
   </>);
 }
 
