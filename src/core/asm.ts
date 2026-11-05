@@ -14,7 +14,13 @@ export interface Occurrence {
   grounded?: boolean;
   suppressed?: boolean;
   hidden?: boolean;
+  /** Simetría asociativa: sigue la posición del componente original respecto al plano */
+  mirrorOf?: { occ: string; plane: 'YZ' | 'XZ' | 'XY' };
+  /** Elemento de un patrón de componentes asociativo */
+  patternOf?: string;
 }
+/** Patrón de componentes asociativo: los elementos se recolocan al mover el padre o cambiar los parámetros. */
+export interface CompPattern { id: string; name: string; parent: string; p: Record<string, string>; members: string[]; suppressed?: boolean }
 
 /** Referencia geométrica de un componente, en coordenadas locales de la pieza:
  *  cara plana (punto + normal) o eje de una cara cilíndrica (punto del eje + dirección + radio). */
@@ -34,8 +40,13 @@ export interface Joint {
   aligned?: boolean;
   /** Rotación/corredera: fija el ángulo (rotación) o la posición (corredera) en el valor indicado (para conducir) */
   lock?: boolean;
+  /** Límites de recorrido (rotación en grados, corredera en mm) */
+  min?: string; max?: string;
   suppressed?: boolean;
 }
+/** Restricciones de movimiento entre dos uniones: engranaje (rotación-rotación) y piñón-cremallera (rotación-traslación). */
+export interface Motion { id: string; name: string; type: 'gear' | 'rack'; j1: string; j2: string; ratio: string; reverse?: boolean; base: number; suppressed?: boolean }
+export const MOTION_NAMES = { gear: 'Rotación-rotación', rack: 'Rotación-traslación' } as const;
 
 export type EndType = 'none' | 'miter' | 'trim';
 export interface EndTreat { type: EndType; other?: string; gap?: string }
@@ -90,7 +101,6 @@ export interface BoltCalc {
 }
 
 /** Patrón de componentes (copias de uno o varios componentes). */
-export interface CompPattern { id: string; name: string; source: string[]; kind: 'rect' | 'circ'; dir1: V3; n1: string; d1: string; dir2?: V3; n2?: string; d2?: string; axisO?: V3; axis?: V3; count?: string; angle?: string; copies: string[] }
 
 /** Representación de vista: componentes ocultos */
 export interface ViewRep { id: string; name: string; hidden: string[] }
@@ -98,6 +108,8 @@ export interface ViewRep { id: string; name: string; hidden: string[] }
 export interface AsmDoc {
   format: 'inv3d.assembly';
   viewReps?: ViewRep[];
+  patterns?: CompPattern[];
+  motions?: Motion[];
   version: 1;
   iProperties: IProps;
   kind: 'assembly' | 'weldment';
@@ -318,6 +330,38 @@ export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => 
   }
 }
 
+/** Valor actual de una unión: ángulo (°) para rotación/cilíndrica, posición (mm) para corredera. */
+export function jointValue(j: Joint, A: Xform, B: Xform): number {
+  const na = v3.norm(xfDir(A, j.a.normal));
+  if (j.type === 'slider') {
+    const u = UNION.has(j.type);
+    return dot3(sub3(xfPoint(B, u ? j.b.center ?? j.b.point : j.b.point), xfPoint(A, u ? j.a.center ?? j.a.point : j.a.point)), na);
+  }
+  if (!j.a.xdir || !j.b.xdir) return 0;
+  const xa = v3.norm(xfDir(A, j.a.xdir)), xb = v3.norm(xfDir(B, j.b.xdir));
+  return (Math.atan2(dot3(cross3(xa, xb), na), dot3(xa, xb)) * 180) / Math.PI;
+}
+const wrap180 = (a: number) => { let x = ((a + 180) % 360 + 360) % 360 - 180; if (x === -180) x = 180; return x; };
+/** Residuos de una restricción de movimiento (el valor de la unión 1 bloqueada se toma sin envolver). */
+export function motionResidual(m: Motion, j1: Joint, j2: Joint, P: (id: string) => Xform, ev: (s: string) => number): number {
+  const v1 = j1.lock && (j1.type === 'rot' || j1.type === 'slider') ? (j1.type === 'rot' ? ev(j1.angle || '0') : ev(j1.offset || '0')) : jointValue(j1, P(j1.a.occ), P(j1.b.occ));
+  const v2 = jointValue(j2, P(j2.a.occ), P(j2.b.occ));
+  const k = (ev(m.ratio || '1') || 1) * (m.reverse ? -1 : 1);
+  if (m.type === 'gear') return (wrap180(v2 - (k * v1 + m.base)) * Math.PI) / 180;
+  return v2 - ((k * v1) / 360 + m.base); // k = avance en mm por vuelta
+}
+/** Valor base al crear la restricción de movimiento, para que el mecanismo no salte. */
+export function motionBase(type: Motion['type'], ratio: number, j1: Joint, j2: Joint, P: (id: string) => Xform): number {
+  const v1 = jointValue(j1, P(j1.a.occ), P(j1.b.occ)), v2 = jointValue(j2, P(j2.a.occ), P(j2.b.occ));
+  return type === 'gear' ? v2 - ratio * v1 : v2 - (ratio * v1) / 360;
+}
+function limitResidual(j: Joint, A: Xform, B: Xform, ev: (s: string) => number): number[] {
+  if ((j.type !== 'rot' && j.type !== 'slider') || j.lock || (!j.min && !j.max)) return [];
+  const v = jointValue(j, A, B), lo = j.min ? ev(j.min) : -Infinity, hi = j.max ? ev(j.max) : Infinity;
+  const r = v > hi ? v - hi : v < lo ? v - lo : 0;
+  return [j.type === 'rot' ? (r * Math.PI) / 180 : r];
+}
+
 const poseWith = (x0: Xform, v: number[], o: number): Xform => {
   const r: V3 = [v[o + 3], v[o + 4], v[o + 5]], ang = v3.len(r);
   const dq = ang > 1e-12 ? q.axisAngle(r, ang) : [0, 0, 0, 1] as Quat;
@@ -338,7 +382,11 @@ export function solveAssembly(asm: AsmDoc, ev: (s: string) => number, opts: { do
   const idx = new Map(movers.map((id, i) => [id, i * 6]));
   const n = movers.length * 6;
   const pose = (v: number[], id: string) => (idx.has(id) ? poseWith(xf0[id], v, idx.get(id)!) : xf0[id]);
-  const R = (v: number[]) => active.flatMap((j) => { try { return jointResiduals(j, pose(v, j.a.occ), pose(v, j.b.occ), ev).map((x) => (isFinite(x) ? x : 0)); } catch { return []; } });
+  const motions = (asm.motions ?? []).filter((m) => !m.suppressed).map((m) => ({ m, j1: active.find((j) => j.id === m.j1), j2: active.find((j) => j.id === m.j2) })).filter((x) => x.j1 && x.j2) as { m: Motion; j1: Joint; j2: Joint }[];
+  const R = (v: number[]) => [
+    ...active.flatMap((j) => { try { return [...jointResiduals(j, pose(v, j.a.occ), pose(v, j.b.occ), ev), ...limitResidual(j, pose(v, j.a.occ), pose(v, j.b.occ), ev)].map((x) => (isFinite(x) ? x : 0)); } catch { return []; } }),
+    ...motions.map(({ m, j1, j2 }) => { try { const r = motionResidual(m, j1, j2, (id) => pose(v, id), ev); return isFinite(r) ? r : 0; } catch { return 0; } }),
+  ];
   let x = new Array(n).fill(0);
   const w = new Array(n).fill(0).map((_, i) => (i % 6 < 3 ? 1 : 1e-4));
   const norm2 = (r: number[]) => r.reduce((a, b) => a + b * b, 0);
@@ -430,4 +478,58 @@ function rankOf(vecs: number[][]): number {
     rank++;
   }
   return rank;
+}
+
+// ---------- Patrones y simetrías asociativos ----------
+const AXV: Record<string, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
+/** Posiciones de las copias de un patrón (sin el original). */
+export function patternPoses(xf: Xform, p: Record<string, string>, ev: (s: string) => number): Xform[] {
+  const out: Xform[] = [];
+  if (p.kind === 'rect') {
+    const n1 = Math.max(1, Math.round(ev(p.n))), d1 = ev(p.d), n2 = p.dir2 ? Math.max(1, Math.round(ev(p.n2))) : 1, d2 = p.dir2 ? ev(p.d2) : 0;
+    for (let i = 0; i < n1; i++) for (let j = 0; j < n2; j++) {
+      if (!i && !j) continue;
+      const t = v3.add(v3.mul(AXV[p.dir] ?? AXV.X, i * d1), p.dir2 ? v3.mul(AXV[p.dir2], j * d2) : [0, 0, 0]);
+      out.push({ pos: v3.add(xf.pos, t), quat: [...xf.quat] as Quat });
+    }
+  } else {
+    const n = Math.max(2, Math.round(ev(p.count))), tot = ev(p.angle), step = Math.abs(tot - 360) < 1e-9 ? 360 / n : tot / (n - 1);
+    for (let k = 1; k < n; k++) {
+      const rq = q.axisAngle(AXV[p.dir] ?? AXV.Z, (step * k * Math.PI) / 180);
+      out.push({ pos: q.rotate(rq, xf.pos), quat: q.norm(q.mul(rq, xf.quat)) });
+    }
+  }
+  return out.slice(0, 400);
+}
+export function mirrorPose(xf: Xform, plane: 'YZ' | 'XZ' | 'XY'): Xform {
+  const M = plane === 'YZ' ? [-1, 1, 1] : plane === 'XZ' ? [1, -1, 1] : [1, 1, -1];
+  const R = q.toMatrix(xf.quat);
+  const R2 = R.map((row, i) => row.map((v, j) => M[i] * v * M[j]));
+  return { pos: xf.pos.map((v, i) => v * M[i]) as V3, quat: q.fromMatrix(R2) };
+}
+/** Recoloca simetrías y patrones a partir de sus originales; añade o quita elementos si cambia el número. */
+export function applyAssociative(a: AsmDoc, ev: (s: string) => number, uidFn: (p: string) => string) {
+  const byId = () => new Map(a.occurrences.map((o) => [o.id, o]));
+  for (const pt of a.patterns ?? []) {
+    let m = byId();
+    const par = m.get(pt.parent);
+    if (!par) { a.occurrences = a.occurrences.filter((o) => o.patternOf !== pt.id); pt.members = []; continue; }
+    const poses = pt.suppressed ? [] : patternPoses(par.xf, pt.p, ev);
+    pt.members = pt.members.filter((id) => m.has(id));
+    while (pt.members.length > poses.length) {
+      const id = pt.members.pop()!;
+      a.occurrences = a.occurrences.filter((o) => o.id !== id);
+      a.joints = a.joints.filter((j) => j.a.occ !== id && j.b.occ !== id);
+    }
+    const base = par.name.replace(/:\d+$/, '');
+    while (pt.members.length < poses.length) {
+      const id = uidFn('o');
+      a.occurrences.push({ id, name: `${base}:${a.occurrences.filter((x) => x.part === par.part).length + 1}`, part: par.part, xf: poses[pt.members.length], grounded: true, patternOf: pt.id });
+      pt.members.push(id);
+    }
+    m = byId();
+    pt.members.forEach((id, i) => { const o = m.get(id); if (o) { o.xf = poses[i]; o.part = par.part; o.suppressed = par.suppressed; } });
+  }
+  const m = byId();
+  for (const o of a.occurrences) if (o.mirrorOf) { const src = m.get(o.mirrorOf.occ); if (src) o.xf = mirrorPose(src.xf, o.mirrorOf.plane); }
 }

@@ -467,3 +467,14 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .rev-desc { flex: 2; }
 .rev-date, .rev-by { flex: 1; }
 .tree-row.cur-sheet .tree-name { font-weight: 600; }
+
+.folder-list { max-height: 52vh; overflow: auto; border: 1px solid var(--line); border-radius: 4px; margin: 8px 0; }
+.folder-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: default; }
+.folder-row:hover, .folder-row:focus { background: var(--hover, rgba(0,100,200,.08)); outline: none; }
+.fr-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fm-sub { font-size: 11px; color: var(--muted, #667); padding: 6px 14px 2px; text-transform: uppercase; letter-spacing: .04em; }
+.fm-recent { font-size: 12.5px !important; }
+.folder-banner { display: flex; align-items: center; gap: 10px; padding: 4px 12px; background: #fff6d6; border-bottom: 1px solid #e8d48a; font-size: 12.5px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+.file-menu { max-height: calc(100vh - 70px); overflow-y: auto; }

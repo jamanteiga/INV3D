@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore, activeSketch } from '../core/store';
 import { evaluate, resolveParams, makeEval, fmt, isValidName } from '../core/expr';
 import {
-  docParams, ENTITY_NAMES, OP_NAMES, MATERIALS, planeLabel, FEATURE_NAMES, BODY_FEATURES, v3,
+  docParams, ENTITY_NAMES, OP_NAMES, MATERIALS, planeLabel, FEATURE_NAMES, BODY_FEATURES, v3, uid,
   type Feature, type SkEntity, type SketchF, type BoolOp, type EdgeMode, type E2, type PartDoc, type V3, type StdPlane, type PlaneRef,
   type IProps,
 } from '../core/doc';
@@ -12,7 +12,7 @@ import { CONSTRAINT_NAMES, CONSTRAINT_GLYPH, transformEntities, offsetEntity, re
 import { weldFromFaces, q, type AsmDoc, type Joint } from '../core/asm';
 import { SCALES, scaleLabel, VIEW_NAMES, type ViewDir } from '../core/drawing';
 import { Icon } from './icons';
-import { openFile, newIpj, saveText } from '../core/files';
+import { openFile, newIpj, saveText, pickFile } from '../core/files';
 import { cad, type FlatResult } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
 import { writeDxf } from '../core/dxf';
@@ -20,8 +20,12 @@ import { asmActions, drwActions } from './actions';
 import { bomRows, bomCsv } from './bom';
 import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
-import { JOINT_NAMES, JOINT_DOF } from '../core/asm';
-import { GDT_NAMES, GDT_DATUM } from '../core/drawing';
+import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
+import { viewModelDims, viewGeom } from './DrawingView';
+import type { ModelDim } from '../core/retrieve';
+import { folderApi, openFromFolder, exportConfig, importConfig } from './session';
+import { listFolder, type FolderEntry } from '../core/persist';
+import { GDT_NAMES, GDT_DATUM, SHEETS, drawStyle, type DrawStyle, type DrawingDoc } from '../core/drawing';
 import { connectSpaceMouse, getSmSettings, setSmSettings, webHidAvailable, type SmSettings } from './spacemouse';
 
 function useEval() {
@@ -604,6 +608,10 @@ function JointDialog() {
         <label className="check"><input type="checkbox" checked={!!j.lock} onChange={(e) => s.updateDraft({ lock: e.target.checked })} />Bloquear {j.type === 'rot' ? 'ángulo' : 'posición'}</label>
         {j.lock && j.type === 'rot' && <Row label="Ángulo"><Expr value={j.angle || '0 deg'} unit="deg" onCommit={(v) => s.updateDraft({ angle: v })} /></Row>}
         {j.lock && j.type === 'slider' && <Row label="Posición"><Expr value={j.offset || '0 mm'} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>}
+        {!j.lock && (<>
+          <Row label="Límite mín."><input value={j.min ?? ''} placeholder={j.type === 'rot' ? 'p. ej. -90 deg' : 'p. ej. 0 mm'} onChange={(e) => s.updateDraft({ min: e.target.value || undefined })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+          <Row label="Límite máx."><input value={j.max ?? ''} placeholder={j.type === 'rot' ? 'p. ej. 90 deg' : 'p. ej. 100 mm'} onChange={(e) => s.updateDraft({ max: e.target.value || undefined })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        </>)}
       </>)}
       {j.type === 'angle' && <Row label="Ángulo"><Expr value={j.angle} unit="deg" onCommit={(v) => s.updateDraft({ angle: v })} /></Row>}
       {j.type === 'insert' && <Row label="Solución"><Seg value={j.aligned ? 'al' : 'op'} onChange={(v) => s.updateDraft({ aligned: v === 'al' })} options={[['al', 'Alineada'], ['op', 'Opuesta']]} /></Row>}
@@ -613,7 +621,7 @@ function JointDialog() {
         if (j.type === 'insert' && (j.a.kind !== 'axis' || j.b.kind !== 'axis')) { s.notify('Insertar necesita dos caras cilíndricas', 'error'); return; }
         if (j.type === 'tangent' && j.a.kind !== 'axis' && j.b.kind !== 'axis') { s.notify('Tangente necesita al menos una cara cilíndrica', 'error'); return; }
         if (j.type === 'flush' && (j.a.kind === 'axis' || j.b.kind === 'axis')) { s.notify('Al ras se aplica a caras planas', 'error'); return; }
-        const joint: Joint = { id: j.id, name: j.name, type: j.type, a: j.a, b: j.b, offset: j.offset, angle: j.angle, aligned: j.type === 'insert' ? !!j.aligned : undefined, lock: j.lock || undefined };
+        const joint: Joint = { id: j.id, name: j.name, type: j.type, a: j.a, b: j.b, offset: j.offset, angle: j.angle, aligned: j.type === 'insert' ? !!j.aligned : undefined, lock: j.lock || undefined, min: j.min || undefined, max: j.max || undefined };
         s.commitAsm((a) => { a.joints.push(joint); });
         s.closeDialog();
       }} onCancel={s.closeDialog} />
@@ -929,6 +937,7 @@ function DrwPanel() {
     )}
     {dim && (
       <div className="psec">
+        {dim.ref && <div className={`pick-info ${dim.orphan ? 'err' : ''}`}>{dim.orphan ? 'La cota del modelo ya no existe' : 'Cota asociada al modelo'}{' '}<button className="btn" onClick={() => s.commitDrw((dd) => { const t = dd.dims.find((x) => x.id === dim.id); if (t) { delete t.ref; delete t.orphan; } })}>Desvincular</button></div>}
         <div className="psec-title">Cota {dim.kind === 'd' ? 'de diámetro' : dim.kind === 'r' ? 'de radio' : dim.kind === 'ang' ? 'angular' : dim.kind === 'ord' ? `por coordenadas (${dim.axis === 'y' ? 'Y' : 'X'})` : 'lineal'}</div>
         <Row label="Texto"><input value={dim.text ?? ''} placeholder="automático" onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.text = e.target.value || undefined; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
         <Row label="Tolerancia"><select value={TOLS.includes(dim.tol ?? '') ? dim.tol ?? '' : '*'} onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.tol = e.target.value === '*' ? '±0.1' : e.target.value || undefined; })}>
@@ -1283,6 +1292,203 @@ function SpaceMouseDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function OptionsDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [tab, setTab] = useState<'gen' | 'folder' | 'libs' | 'drw'>('gen');
+  const st = s.settings;
+  const setS = (p: Partial<typeof st>) => useStore.setState({ settings: { ...st, ...p } });
+  const mats = s.libs.materials;
+  const setM = (m: typeof mats) => useStore.setState({ libs: { ...s.libs, materials: m } });
+  const txt = (k: 'userName' | 'company', label: string) => <Row label={label}><input value={st[k]} onChange={(e) => setS({ [k]: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></Row>;
+  return (
+    <Modal title="Opciones de la aplicación" onClose={onClose} wide>
+      <div style={{ marginBottom: 10 }}><Seg value={tab} onChange={setTab} options={[['gen', 'General'], ['folder', 'Carpeta y sesión'], ['libs', 'Bibliotecas'], ['drw', 'Dibujo']]} /></div>
+      {tab === 'gen' && (<>
+        {txt('userName', 'Usuario (diseñador)')}{txt('company', 'Empresa')}
+        <Row label="Material por defecto"><select value={st.defaultMaterial} onChange={(e) => setS({ defaultMaterial: e.target.value })}>{MATERIALS.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>
+        <label className="check"><input type="checkbox" checked={st.showEdges} onChange={(e) => { setS({ showEdges: e.target.checked }); s.set({ showEdges: e.target.checked }); }} />Mostrar aristas en el modelo</label>
+        <p className="phelp">El usuario y la empresa rellenan el diseñador de las piezas nuevas y el cajetín de los planos.</p>
+      </>)}
+      {tab === 'folder' && (<>
+        <label className="check"><input type="checkbox" checked={st.restoreSession} onChange={(e) => setS({ restoreSession: e.target.checked })} />Reabrir los documentos de la última sesión al entrar</label>
+        <label className="check"><input type="checkbox" checked={st.autosave} onChange={(e) => setS({ autosave: e.target.checked })} />Autoguardar la sesión en el navegador (cada cambio)</label>
+        <label className="check"><input type="checkbox" checked={st.autosaveFolder} disabled={s.folder.state !== 'granted'} onChange={(e) => setS({ autosaveFolder: e.target.checked })} />Autoguardar cada minuto en la carpeta los documentos ya guardados allí</label>
+        <div className="psec-title" style={{ marginTop: 12 }}>Carpeta de trabajo</div>
+        {!folderApi.supported() ? <p className="phelp">Este navegador o esta página no permiten acceder a carpetas locales. Abre INV3D directamente en Chrome o Edge (https://jamanteiga.github.io/INV3D/). La configuración se guarda igualmente en el navegador.</p> : (<>
+          <Row label="Carpeta"><span className="ro strong">{s.folder.name || '— sin carpeta —'}</span>{s.folder.state === 'prompt' && <span className="ro" style={{ marginLeft: 6 }}>(pendiente de permiso)</span>}</Row>
+          <div className="modal-btns">
+            <button className="btn" onClick={folderApi.choose}>{s.folder.name ? 'Cambiar carpeta…' : 'Elegir carpeta…'}</button>
+            {s.folder.state === 'prompt' && <button className="btn primary" onClick={folderApi.reconnect}>Reconectar</button>}
+            {s.folder.name && <button className="btn" onClick={folderApi.forget}>Olvidar</button>}
+          </div>
+          <p className="phelp">Elige p. ej. C:\Users\jaman\Documents\PROYECTOS. INV3D la recuerda: al entrar basta un clic en «Reconectar». Ctrl+S guarda directamente en ella y la configuración se copia en <b>inv3d-config.json</b> dentro de la carpeta, así que si la carpeta está en OneDrive tendrás la misma configuración en otro PC.</p>
+        </>)}
+      </>)}
+      {tab === 'libs' && (<>
+        <div className="psec-title">Materiales propios</div>
+        {mats.map((m, i) => (
+          <div key={i} className="vr-row">
+            <input placeholder="Nombre" value={m.name} onChange={(e) => setM(mats.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} onKeyDown={(e) => e.stopPropagation()} />
+            <input type="number" title="Densidad kg/m³" style={{ width: 80, flex: 'none' }} value={m.density} onChange={(e) => setM(mats.map((x, j) => (j === i ? { ...x, density: Number(e.target.value) } : x)))} />
+            <input type="color" style={{ width: 34, flex: 'none' }} value={m.color} onChange={(e) => setM(mats.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)))} />
+            <button className="btn icon" onClick={() => setM(mats.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button>
+          </div>
+        ))}
+        <button className="btn" onClick={() => setM([...mats, { name: 'Material nuevo', density: 7850, color: '#b9bec6' }])}>Añadir material</button>
+        <div className="psec-title" style={{ marginTop: 12 }}>Copiar la configuración</div>
+        <div className="modal-btns">
+          <button className="btn" onClick={() => saveText(exportConfig(), 'inv3d-config.json', 'Configuración INV3D', '.json', 'application/json')}>Exportar…</button>
+          <button className="btn" onClick={async () => { const f = await pickFile('.json'); if (!f) return; try { importConfig(await f.text()); s.notify('Configuración importada'); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Importar…</button>
+        </div>
+        <p className="phelp">Las plantillas propias se añadirán aquí.</p>
+      </>)}
+      {tab === 'drw' && (<>
+        <Row label="Norma de dibujo"><select value={st.drawingStd} onChange={(e) => setS({ drawingStd: e.target.value as typeof st.drawingStd })}><option>ISO</option><option>DIN</option><option>ANSI</option></select></Row>
+        <Row label="Hoja por defecto"><select value={st.sheetDefault} onChange={(e) => setS({ sheetDefault: e.target.value as typeof st.sheetDefault })}>{Object.keys(SHEETS).map((k) => <option key={k}>{k}</option>)}</select></Row>
+        <p className="phelp">Se aplica a los planos nuevos. Cada plano se puede ajustar en Anotar › Estilos.</p>
+      </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
+function DrwStyleDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const d = s.drw, st = drawStyle(d);
+  const up = (p: Partial<DrawStyle>) => s.commitDrw((dd) => { dd.style = { ...(dd.style ?? {}), ...p }; });
+  const num = (k: keyof DrawStyle, label: string, step = 0.1) => <Row label={label}><input type="number" step={step} value={st[k] as number} onChange={(e) => up({ [k]: Number(e.target.value) })} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>;
+  return (
+    <Modal title="Gestor de estilos de dibujo" onClose={onClose} wide>
+      <Row label="Norma"><select value={d.std ?? 'ISO'} onChange={(e) => s.commitDrw((dd) => { dd.std = e.target.value as DrawingDoc['std']; dd.style = {}; })}><option>ISO</option><option>DIN</option><option>ANSI</option></select>
+        <button className="btn" style={{ marginLeft: 8 }} onClick={() => s.commitDrw((dd) => { dd.style = {}; })}>Restablecer</button></Row>
+      <div className="two-col">
+        <div>
+          <div className="psec-title">Cotas</div>
+          {num('dimTextH', 'Altura de texto')}
+          <Row label="Terminación"><select value={st.arrow} onChange={(e) => up({ arrow: e.target.value as DrawStyle['arrow'] })}><option value="closed">Flecha llena</option><option value="open">Flecha abierta</option><option value="tick">Trazo oblicuo</option><option value="dot">Punto</option></select></Row>
+          {num('arrowL', 'Largo de flecha')}{num('arrowW', 'Semiancho de flecha', 0.05)}
+          {num('extGap', 'Separación de la línea auxiliar')}{num('extOver', 'Prolongación de la línea auxiliar')}
+          <Row label="Unidades"><select value={st.units} onChange={(e) => up({ units: e.target.value as 'mm' | 'in' })}><option value="mm">mm</option><option value="in">pulgadas</option></select></Row>
+          <Row label="Decimales"><input type="number" min={0} max={6} value={st.precision} onChange={(e) => up({ precision: Number(e.target.value) })} /></Row>
+          <Row label="Separador"><select value={st.decSep} onChange={(e) => up({ decSep: e.target.value as ',' | '.' })}><option value=",">coma (12,5)</option><option value=".">punto (12.5)</option></select></Row>
+          <label className="check"><input type="checkbox" checked={st.trailingZeros} onChange={(e) => up({ trailingZeros: e.target.checked })} />Ceros finales (12,50)</label>
+        </div>
+        <div>
+          <div className="psec-title">Líneas y vistas</div>
+          {num('thick', 'Línea gruesa (PDF)', 0.05)}{num('thin', 'Línea fina (PDF)', 0.05)}
+          {num('hatchStep', 'Paso del rayado')}
+          <Row label="Proyección"><select value={st.projection} onChange={(e) => up({ projection: e.target.value as 'first' | 'third' })}><option value="first">Primer diedro (europea)</option><option value="third">Tercer diedro (americana)</option></select></Row>
+          <p className="phelp">La proyección decide qué vista se crea al proyectar a cada lado y el símbolo del cajetín. Las vistas ya colocadas no cambian.</p>
+        </div>
+      </div>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
+function RetrieveDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const v = s.drw.views.find((x) => x.id === s.selItem) ?? s.drw.views.find((x) => !x.parent);
+  const list = useMemo(() => (v ? viewModelDims(s, s.drw, v) : []), [v?.id]);
+  const have = (m: ModelDim) => s.drw.dims.some((d) => d.view === v?.id && d.ref && d.ref.sk === m.ref.sk && d.ref.con === m.ref.con && d.ref.feat === m.ref.feat && d.ref.ent === m.ref.ent);
+  const [sel, setSel] = useState<Set<number>>(() => new Set(list.map((m, i) => (have(m) ? -1 : i)).filter((i) => i >= 0)));
+  const create = () => {
+    if (!v) return;
+    const g = viewGeom(s, v); if (!g) return;
+    let kh = 0, kv = 0, ka = 0;
+    s.commitDrw((d) => {
+      list.forEach((m, i) => {
+        if (!sel.has(i)) return;
+        let offset = 0;
+        const A: [number, number] = [m.a[0] + v.x, m.a[1] + v.y], B: [number, number] = [m.b[0] + v.x, m.b[1] + v.y];
+        if (m.kind === 'h') offset = g.rect[3] + 8 + 7 * kh++ - Math.max(A[1], B[1]);
+        else if (m.kind === 'v') offset = g.rect[2] + 8 + 7 * kv++ - Math.max(A[0], B[0]);
+        else if (m.kind === 'a') offset = 8 + 7 * ka++;
+        d.dims.push({ id: uid('dm'), view: v.id, kind: m.kind, a: m.a, b: m.b, r: m.r, offset, ref: m.ref });
+      });
+    });
+    s.notify(`${sel.size} cotas recuperadas`); onClose();
+  };
+  return (
+    <Modal title={`Recuperar cotas del modelo${v ? ` — ${v.name}` : ''}`} onClose={onClose} wide>
+      {!v ? <p className="phelp">Selecciona una vista.</p> : !list.length ? <p className="phelp">No hay cotas del modelo visibles en verdadera magnitud en esta vista. Las cotas de boceto aparecen en vistas paralelas al boceto; las de extrusión, en vistas laterales.</p> : (<>
+        <div className="modal-btns"><button className="btn" onClick={() => setSel(new Set(list.map((_, i) => i)))}>Todas</button><button className="btn" onClick={() => setSel(new Set())}>Ninguna</button></div>
+        <div className="folder-list">
+          {list.map((m, i) => (
+            <label key={i} className="folder-row"><input type="checkbox" checked={sel.has(i)} onChange={(e) => { const n = new Set(sel); if (e.target.checked) n.add(i); else n.delete(i); setSel(n); }} />
+              <span className="fr-path">{m.label}</span><span className="ro">{{ h: 'horizontal', v: 'vertical', a: 'alineada', d: 'diámetro', r: 'radio' }[m.kind as 'h'] ?? m.kind}{have(m) ? ' · ya está' : ''}</span></label>
+          ))}
+        </div>
+        <p className="phelp">Las cotas recuperadas siguen al modelo: si cambias la pieza, se mueven y cambian de valor.</p>
+      </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!sel.size} onClick={create}>Crear</button></div>
+    </Modal>
+  );
+}
+
+function FolderDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [files, setFiles] = useState<FolderEntry[] | null>(null);
+  const [q, setQ] = useState('');
+  useEffect(() => { if (s.folder.state === 'granted') listFolder().then(setFiles).catch(() => setFiles([])); }, [s.folder.state, s.folder.name]);
+  const shown = (files ?? []).filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <Modal title={`Carpeta de trabajo${s.folder.name ? ` — ${s.folder.name}` : ''}`} onClose={onClose} wide>
+      {!folderApi.supported() ? <p className="phelp">Abre INV3D directamente en Chrome o Edge para usar una carpeta local.</p>
+        : s.folder.state === 'none' ? (<><p className="phelp">Elige la carpeta donde guardas tus proyectos. INV3D la recordará cada vez que entres.</p><div className="modal-btns"><button className="btn primary" onClick={folderApi.choose}>Elegir carpeta…</button></div></>)
+        : s.folder.state === 'prompt' ? (<><p className="phelp">El navegador pide confirmar el acceso a <b>{s.folder.name}</b> en cada sesión.</p><div className="modal-btns"><button className="btn primary" onClick={folderApi.reconnect}>Reconectar {s.folder.name}</button><button className="btn" onClick={folderApi.choose}>Otra carpeta…</button></div></>)
+        : (<>
+          <div className="vr-row"><input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /><button className="btn" onClick={() => listFolder().then(setFiles)}>Actualizar</button><button className="btn" onClick={folderApi.choose}>Cambiar…</button></div>
+          <div className="folder-list">
+            {files === null ? <p className="phelp">Leyendo…</p> : !shown.length ? <p className="phelp">No hay ficheros CAD.</p> : shown.map((f) => (
+              <button key={f.path} className="folder-row" onDoubleClick={() => { openFromFolder(f.path); onClose(); }} onClick={(e) => { if (e.detail === 1) (e.currentTarget as HTMLElement).focus(); }} onKeyDown={(e) => { if (e.key === 'Enter') { openFromFolder(f.path); onClose(); } }}>
+                <Icon name={/\.i3a$|\.iam$/i.test(f.name) ? 'assembly' : /\.i3d$|\.idw$|\.dxf$|\.dwg$/i.test(f.name) ? 'drawing' : /\.ipj$/i.test(f.name) ? 'project' : 'part'} size={16} />
+                <span className="fr-path">{f.path}</span><span className="ro">{(f.size / 1024).toFixed(0)} kB · {new Date(f.modified).toLocaleDateString('es-ES')}</span>
+              </button>
+            ))}
+          </div>
+          <p className="phelp">Doble clic para abrir. Ctrl+S guarda en esta carpeta.</p>
+        </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
+function MotionDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [type, setType] = useState<'gear' | 'rack'>('gear');
+  const rots = s.asm.joints.filter((j) => j.type === 'rot' || j.type === 'cyl');
+  const seconds = s.asm.joints.filter((j) => (type === 'gear' ? j.type === 'rot' || j.type === 'cyl' : j.type === 'slider' || j.type === 'cyl'));
+  const [j1, setJ1] = useState(rots[0]?.id ?? '');
+  const [j2, setJ2] = useState('');
+  const [ratio, setRatio] = useState('1');
+  const [rev, setRev] = useState(false);
+  const second = seconds.find((x) => x.id === j2 && x.id !== j1) ?? seconds.find((x) => x.id !== j1);
+  const ok = () => {
+    const J1 = s.asm.joints.find((x) => x.id === j1), J2 = second;
+    if (!J1 || !J2) return;
+    const ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+    const k = (ev(ratio) || 1) * (rev ? -1 : 1);
+    const xf = (id: string) => s.asm.occurrences.find((o) => o.id === id)!.xf;
+    const base = motionBase(type, k, J1, J2, xf);
+    s.commitAsm((a) => { (a.motions ??= []).push({ id: uid('mo'), name: `${MOTION_NAMES[type]}${(a.motions?.length ?? 0) + 1}`, type, j1: J1.id, j2: J2.id, ratio, reverse: rev || undefined, base }); });
+    onClose();
+  };
+  return (
+    <Modal title="Restricción de movimiento" onClose={onClose}>
+      <Seg value={type} onChange={setType} options={[['gear', 'Rotación-rotación'], ['rack', 'Rotación-traslación']]} />
+      {!rots.length ? <p className="phelp">Crea antes uniones de rotación (Ensamblar › Unión).</p> : (<>
+        <Row label={type === 'gear' ? 'Unión 1 (motriz)' : 'Unión de giro'}><select value={j1} onChange={(e) => setJ1(e.target.value)}>{rots.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Row>
+        <Row label={type === 'gear' ? 'Unión 2' : 'Unión corredera'}><select value={second?.id ?? ''} onChange={(e) => setJ2(e.target.value)}>{seconds.filter((x) => x.id !== j1).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Row>
+        <Row label={type === 'gear' ? 'Relación (z1/z2)' : 'Avance por vuelta'}><input value={ratio} onChange={(e) => setRatio(e.target.value)} onKeyDown={(e) => e.stopPropagation()} placeholder={type === 'gear' ? '20/40' : 'π·m·z, p. ej. 3.1416*2*20 mm'} /></Row>
+        <label className="check"><input type="checkbox" checked={rev} onChange={(e) => setRev(e.target.checked)} />{type === 'gear' ? 'Sentido inverso (engranaje exterior)' : 'Sentido inverso'}</label>
+        <p className="phelp">{type === 'gear' ? 'Giro 2 = relación × giro 1. Para dos ruedas dentadas exteriores usa z1/z2 y sentido inverso.' : 'Desplazamiento = avance × vueltas del piñón (π·m·z para una cremallera).'} Se mantiene la posición actual como origen. Prueba el mecanismo con Conducir.</p>
+      </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!rots.length || !second} onClick={ok}>Aceptar</button></div>
+    </Modal>
+  );
+}
+
 function DriveDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const joints = s.asm.joints.filter((j) => j.type === 'rot' || j.type === 'slider');
@@ -1504,6 +1710,11 @@ export function Modals() {
     case 'content': return <ContentDialog onClose={close} />;
     case 'cpattern': return <CompPatternDialog onClose={close} />;
     case 'drive': return <DriveDialog onClose={close} />;
+    case 'motion': return <MotionDialog onClose={close} />;
+    case 'options': return <OptionsDialog onClose={close} />;
+    case 'drwstyle': return <DrwStyleDialog onClose={close} />;
+    case 'retrieve': return <RetrieveDialog onClose={close} />;
+    case 'folder': return <FolderDialog onClose={close} />;
     case 'replace': return <ReplaceDialog onClose={close} />;
     case 'viewreps': return <ViewRepDialog onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
@@ -1517,7 +1728,7 @@ export function Modals() {
     case 'shortcuts': return <Modal title="Atajos de teclado y ratón" onClose={close}><table className="ptable kv"><tbody>{SHORTCUTS.map(([k, v]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{v}</td></tr>)}</tbody></table></Modal>;
     default: return (
       <Modal title="Acerca de INV3D" onClose={close}>
-        <p><b>INV3D 0.4</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
+        <p><b>INV3D 0.5</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
         <p className="phelp">Boceto con restricciones geométricas y cotas, pieza y chapa, ensamblaje con restricciones (solver simultáneo), Centro de contenido, estructura (perfiles EN), soldadura (ISO 2553), tornillería (ISO, cálculo EN 1993-1-8), planos con secciones y detalles (ISO, proyección europea) y presentación.</p>
         <p className="phelp">Núcleo OpenCascade (LGPL) vía replicad · visor Three.js · visor DWG LibreDWG (GPL-3.0).</p>
         <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={close}>Cerrar</button></div>

@@ -1,6 +1,18 @@
 // Geometría de la hoja de plano: vistas (incluidas secciones y detalles), cotas, anotaciones, cajetín
 // y lista de piezas, como primitivas comunes para la pantalla (SVG) y las exportaciones (PDF, DXF, SVG).
-import { SHEETS, scaleLabel, type DrawingDoc, type DView, type DDim, type DAnn, type DBreak, type GdtSym } from './drawing';
+import { SHEETS, scaleLabel, drawStyle, DRAW_STD, type DrawingDoc, type DView, type DDim, type DAnn, type DBreak, type GdtSym, type DrawStyle } from './drawing';
+
+/** Estilo activo (lo fija buildSheet con la norma del plano). */
+let ST: DrawStyle = DRAW_STD.ISO;
+export function setDrawStyle(s: DrawStyle) { ST = s; }
+export const curStyle = () => ST;
+/** Número con la precisión, separador decimal y unidades de la norma. */
+export function fmtD(mm: number, prec = ST.precision): string {
+  const v = ST.units === 'in' ? mm / 25.4 : mm;
+  let t = v.toFixed(prec);
+  if (!ST.trailingZeros && t.includes('.')) t = t.replace(/0+$/, '').replace(/\.$/, '');
+  return ST.decSep === ',' ? t.replace('.', ',') : t;
+}
 import type { P2 } from './svgpath';
 import type { V3 } from './doc';
 import { fmt } from './expr';
@@ -226,10 +238,22 @@ export function dimValue(d: DDim, v: DView): number {
 export function dimText(d: DDim, v: DView): string {
   if (d.text) return d.text;
   const val = dimValue(d, v);
-  const base = d.kind === 'd' ? `Ø${fmt(val, 2)}` : d.kind === 'r' ? `R${fmt(val, 2)}` : d.kind === 'ang' ? `${fmt(val, 1)}°` : fmt(val, 2);
+  const base = d.kind === 'd' ? `Ø${fmtD(val)}` : d.kind === 'r' ? `R${fmtD(val)}` : d.kind === 'ang' ? `${fmt(val, 1).replace('.', ST.decSep)}°` : fmtD(val);
   return d.tol ? `${base} ${d.tol}` : base;
 }
 const arrowTri = (P: P2, dir: P2, L = 3, W = 0.9): P2[] => { const u = unit(dir), n: P2 = [-u[1], u[0]]; const b = sub(P, mul(u, L)); return [P, add(b, mul(n, W)), sub(b, mul(n, W))]; };
+/** Terminaciones de cota según la norma: llena, abierta, trazo oblicuo o punto. */
+function dimEnds(ends: [P2, P2][]): { fills: P2[][]; lines: P2[][] } {
+  const fills: P2[][] = [], lines: P2[][] = [];
+  for (const [P, dir] of ends) {
+    const u = unit(dir), n: P2 = [-u[1], u[0]], L = ST.arrowL, W = ST.arrowW;
+    if (ST.arrow === 'closed') fills.push(arrowTri(P, dir, L, W));
+    else if (ST.arrow === 'open') { const b = sub(P, mul(u, L)); lines.push([add(b, mul(n, W)), P, sub(b, mul(n, W))]); }
+    else if (ST.arrow === 'tick') { const k = L * 0.5; lines.push([sub(P, mul(add(u, n), k * 0.707)), add(P, mul(add(u, n), k * 0.707))]); }
+    else { const r = W * 0.6, c: P2[] = []; for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; c.push([P[0] + r * Math.cos(a), P[1] + r * Math.sin(a)]); } fills.push(c.slice(0, 3), [c[0], c[3], c[6]], [c[0], c[6], c[9]], c.slice(3, 7), c.slice(6, 10), [c[9], c[10], c[11], c[0]]); }
+  }
+  return { fills, lines };
+}
 
 /** Elementos de una cota en coordenadas de hoja: líneas, flechas y texto. */
 export function dimGeometry(d: DDim, v: DView) {
@@ -240,7 +264,8 @@ export function dimGeometry(d: DDim, v: DView) {
     const P2_ = add(A, mul(u, r)), P1 = sub(A, mul(u, r));
     const lines: P2[][] = d.kind === 'd' ? [[P1, P2_]] : [[A, P2_]];
     if (len(sub(B, A)) > r) lines.push([P2_, B], [B, add(B, [u[0] >= 0 ? 6 : -6, 0])]);
-    const arrows = d.kind === 'd' ? [arrowTri(P2_, u), arrowTri(P1, mul(u, -1))] : [arrowTri(P2_, u)];
+    const e = dimEnds(d.kind === 'd' ? [[P2_, u], [P1, mul(u, -1)]] : [[P2_, u]]);
+    const arrows = e.fills; lines.push(...e.lines);
     const tx: P2 = len(sub(B, A)) > r ? add(B, [u[0] >= 0 ? 3 : -3, 1]) : add(A, mul(u, r * 0.5));
     return { lines, arrows, text, mid: tx, ang: 0, anchor: (u[0] >= 0 ? 'middle' : 'middle') as 'middle' };
   }
@@ -253,7 +278,8 @@ export function dimGeometry(d: DDim, v: DView) {
     const lines = [arc, ext(P, a1), ext(Q, a2)].filter((l) => l.length);
     const t1: P2 = [-Math.sin(a1) * Math.sign(sw), Math.cos(a1) * Math.sign(sw)], t2: P2 = [-Math.sin(a2) * Math.sign(sw), Math.cos(a2) * Math.sign(sw)];
     const am = a1 + sw / 2;
-    return { lines, arrows: [arrowTri(arc[0], mul(t1, -1)), arrowTri(arc[arc.length - 1], t2)], text, mid: [V[0] + (R + 3) * Math.cos(am), V[1] + (R + 3) * Math.sin(am)] as P2, ang: 0, anchor: 'middle' as const };
+    const e = dimEnds([[arc[0], mul(t1, -1)], [arc[arc.length - 1], t2]]); lines.push(...e.lines);
+    return { lines, arrows: e.fills, text, mid: [V[0] + (R + 3) * Math.cos(am), V[1] + (R + 3) * Math.sin(am)] as P2, ang: 0, anchor: 'middle' as const };
   }
   if (d.kind === 'ord') {
     const B = add(O, d.b), C = add(O, d.c ?? d.b), tl = text.length * 2.1;
@@ -274,11 +300,12 @@ export function dimGeometry(d: DDim, v: DView) {
     const L = len(sub(B, A)) || 1; n = [-(B[1] - A[1]) / L, (B[0] - A[0]) / L];
     p1 = add(A, mul(n, d.offset)); p2 = add(B, mul(n, d.offset));
   }
-  const ext = (P: P2, Q: P2): P2[] => { const u = unit(sub(Q, P)); return [add(P, mul(u, 1)), add(Q, mul(u, 2))]; };
+  const ext = (P: P2, Q: P2): P2[] => { const u = unit(sub(Q, P)); return [add(P, mul(u, ST.extGap)), add(Q, mul(u, ST.extOver))]; };
   const u = unit(sub(p2, p1));
   const ang = (Math.atan2(u[1], u[0]) * 180) / Math.PI;
   const mid: P2 = add(mul(add(p1, p2), 0.5), mul(n, 1.2));
-  return { lines: [ext(A, p1), ext(B, p2), [p1, p2]], arrows: [arrowTri(p1, mul(u, -1)), arrowTri(p2, u)], text, mid, ang: ang > 90 || ang < -90 ? ang + 180 : ang, anchor: 'middle' as const };
+  const e = dimEnds([[p1, mul(u, -1)], [p2, u]]);
+  return { lines: [ext(A, p1), ext(B, p2), [p1, p2], ...e.lines], arrows: e.fills, text, mid, ang: ang > 90 || ang < -90 ? ang + 180 : ang, anchor: 'middle' as const };
 }
 
 // ---------- Anotaciones ----------
@@ -409,7 +436,7 @@ export function titleBlockGeometry(drw: DrawingDoc) {
     { x: 0, y: 0, w: 30, h: 8, label: 'Fecha', value: t.date },
     { x: 30, y: 0, w: 45, h: 8, label: 'Formato', value: `${drw.sheet} · mm` },
     { x: 75, y: 0, w: 35, h: 8, label: 'Masa', value: t.mass ?? '' },
-    { x: 110, y: 0, w: 70, h: 8, label: 'Proyección', value: 'europea (ISO E)' },
+    { x: 110, y: 0, w: 70, h: 8, label: 'Proyección', value: drawStyle(drw).projection === 'third' ? `americana (${drw.std ?? 'ANSI'})` : `europea (${drw.std ?? 'ISO'} E)` },
     { x: 0, y: 32, w: 40, h: 8, label: 'Proyecto', value: t.project ?? '' },
     { x: 40, y: 32, w: 40, h: 8, label: 'Tolerancias generales', value: t.generalTol ?? '' },
     { x: 80, y: 32, w: 40, h: 8, label: 'Acabado', value: t.finish ?? '' },
@@ -438,6 +465,7 @@ export function geomOf(drw: DrawingDoc, proj: (v: DView) => ProjData | null, v: 
 }
 
 export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
+  ST = drawStyle(drw);
   const [W, H] = SHEETS[drw.sheet];
   const P: Prim[] = [];
   P.push({ t: 'pl', cls: 'frame', pts: [[10, 10], [W - 10, 10], [W - 10, H - 10], [10, H - 10], [10, 10]] });
@@ -496,7 +524,7 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     const g = dimGeometry(d, v);
     for (const l of g.lines) P.push({ t: 'pl', cls: 'dim', pts: l, id: d.id });
     P.push({ t: 'fill', cls: 'arrow', loops: g.arrows, id: d.id });
-    P.push({ t: 'txt', cls: 'dimt', x: g.mid[0], y: g.mid[1], h: 3.5, text: g.text, rot: g.ang, anchor: 'middle', id: d.id });
+    P.push({ t: 'txt', cls: 'dimt', x: g.mid[0], y: g.mid[1], h: ST.dimTextH, text: g.text, rot: g.ang, anchor: 'middle', id: d.id });
   }
   // Anotaciones
   for (const a of drw.anns ?? []) {
@@ -537,10 +565,11 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     P.push({ t: 'txt', cls: 'tbl', x: c.x + 1.2, y: c.y + c.h - 2.6, h: 1.8, text: c.label });
     if (c.value) P.push({ t: 'txt', cls: c.big ? 'tbb' : 'tbv', x: c.x + 1.2, y: c.y + (c.big ? 3 : 1.4), h: c.big ? 5 : 2.5, text: c.value, bold: c.big });
   }
-  // Símbolo de proyección europea
-  const sx = tb.x0 + 168, sy = tb.y0 + 4;
-  P.push({ t: 'circ', cls: 'tb', c: [sx - 6, sy], r: 2.6 }, { t: 'circ', cls: 'tb', c: [sx - 6, sy], r: 1.2 });
-  P.push({ t: 'pl', cls: 'tb', pts: [[sx - 1, sy + 2.6], [sx + 4, sy + 1.6], [sx + 4, sy - 1.6], [sx - 1, sy - 2.6], [sx - 1, sy + 2.6]] });
+  // Símbolo de proyección (europea: círculos a la izquierda del cono; americana: a la derecha)
+  const sx = tb.x0 + 168, sy = tb.y0 + 4, third = ST.projection === 'third';
+  const cx = third ? sx + 3 : sx - 6, kx = third ? sx - 7 : sx - 1;
+  P.push({ t: 'circ', cls: 'tb', c: [cx, sy], r: 2.6 }, { t: 'circ', cls: 'tb', c: [cx, sy], r: 1.2 });
+  P.push({ t: 'pl', cls: 'tb', pts: [[kx, sy + 2.6], [kx + 5, sy + 1.6], [kx + 5, sy - 1.6], [kx, sy - 2.6], [kx, sy + 2.6]] });
   if (bom) for (const [i, row] of bom.entries()) for (const c of row.cells) {
     P.push({ t: 'pl', cls: 'tb', pts: [[c.x, c.y], [c.x + c.w, c.y], [c.x + c.w, c.y + 6], [c.x, c.y + 6], [c.x, c.y]] });
     P.push({ t: 'txt', cls: i === bom.length - 1 ? 'tbb' : 'tbv', x: c.x + 1.2, y: c.y + 1.8, h: 2.5, text: c.text, bold: i === bom.length - 1 });
@@ -591,7 +620,7 @@ export function tableData(drw: DrawingDoc, proj: (v: DView) => ProjData | null, 
 }
 
 /** Rayado a 45° de lazos (regla par-impar) para PDF y DXF. */
-export function hatchLines(loops: P2[][], step = 2.5): P2[][] {
+export function hatchLines(loops: P2[][], step = ST.hatchStep): P2[][] {
   const out: P2[][] = [];
   if (!loops.length) return out;
   // Girar 45°: u = (x+y)/√2 constante en cada línea de rayado

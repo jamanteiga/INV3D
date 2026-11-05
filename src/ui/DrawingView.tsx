@@ -7,6 +7,7 @@ import { v3, uid, type PartDoc, type V3 } from '../core/doc';
 import type { AsmDoc } from '../core/asm';
 import { fmt } from '../core/expr';
 import { bomRows } from './bom';
+import { modelDims, refreshModelDims, type ModelDim } from '../core/retrieve';
 import { buildSheet, geomOf, detectCircles, chainSegments, breakMap, TB_H, BREAK_GAP, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
 
 export type { ProjData };
@@ -101,10 +102,26 @@ export async function sheetPrims(s: State): Promise<{ W: number; H: number; prim
   const drw = s.drw;
   await Promise.all(drw.views.map((v) => getProjection(s, v)).filter(Boolean));
   const [W, H] = SHEETS[drw.sheet];
-  return { W, H, prims: buildSheet({ drw, proj: projNow(s), bom: bomForDrawing(s, drw) }) };
+  return { W, H, prims: buildSheet({ drw: withModelDims(s, drw), proj: projNow(s), bom: bomForDrawing(s, drw) }) };
 }
 
 export function viewGeom(s: State, v: DView): ViewGeom | null { return geomOf(s.drw, projNow(s), v); }
+
+/** Cotas del modelo visibles en una vista (para recuperarlas o actualizarlas). */
+export function viewModelDims(s: State, drw: DrawingDoc, v: DView): ModelDim[] {
+  const src = s.docData(v.source) as PartDoc | null;
+  if (!src || src.format !== 'inv3d.part' || v.kind === 'flat' || v.kind === 'detail') return [];
+  const pd = projNow(s)(v), g = pd && geomOf(drw, projNow(s), v);
+  if (!pd || !g) return [];
+  try { return modelDims(src, v, viewCamera(v), pd, g); } catch { return []; }
+}
+/** Plano con las cotas asociativas recalculadas a partir del modelo actual. */
+export function withModelDims(s: State, drw: DrawingDoc): DrawingDoc {
+  if (!drw.dims.some((d) => d.ref)) return drw;
+  let dims = drw.dims;
+  for (const v of drw.views) if (dims.some((d) => d.ref && d.view === v.id)) dims = refreshModelDims(dims, v, viewModelDims(s, drw, v));
+  return { ...drw, dims };
+}
 
 const TOOL_HINT: Record<string, string[]> = {
   drwDim: ['Cota: primer punto (extremo o centro)', 'Segundo punto de la misma vista', 'Posición de la línea de cota'],
@@ -168,7 +185,7 @@ export default function DrawingView() {
   const pxPerMm = () => { const r = svgRef.current?.getBoundingClientRect(); return r ? Math.min(r.width / vb[2], r.height / vb[3]) : 1; };
 
   const s0 = useStore.getState();
-  const prims = useMemo(() => buildSheet({ drw, proj: projNow(useStore.getState()), bom: bomForDrawing(useStore.getState(), drw) }), [drw, docsVersion, loading, s0.asm]);
+  const prims = useMemo(() => { const st = useStore.getState(); return buildSheet({ drw: withModelDims(st, drw), proj: projNow(st), bom: bomForDrawing(st, drw) }); }, [drw, docsVersion, loading, s0.asm]);
   const geoms = useMemo(() => { const out: Record<string, ViewGeom> = {}; for (const v of drw.views) { const g = viewGeom(useStore.getState(), v); if (g) out[v.id] = g; } return out; }, [drw, docsVersion, loading]);
 
   // ---------- Forzado ----------

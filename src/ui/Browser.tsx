@@ -144,6 +144,27 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
   const Err = ({ id }: { id: string }) => (errs[id] ? <span className="tree-err" title={errs[id]}><Icon name="error" size={14} /></span> : null);
   return (<>
     <div className="tree-row root"><Icon name={s.asm.kind === 'weldment' ? 'weldment' : 'assembly'} size={17} /><span className="tree-name">{s.asm.iProperties.partNumber || s.fileName}</span></div>
+    {(s.asm.patterns ?? []).map((pt) => (
+      <div key={pt.id} className={rowCls(pt.id, pt.suppressed ? 'supp' : '')} style={{ paddingLeft: 14 }} onClick={() => sel(pt.id)}
+        onContextMenu={(e) => { e.preventDefault(); sel(pt.id); setMenu({ x: e.clientX, y: e.clientY, items: [
+          { label: pt.suppressed ? 'Activar' : 'Suprimir', run: () => s.commitAsm((a) => { const t = a.patterns!.find((x) => x.id === pt.id); if (t) t.suppressed = !t.suppressed; }) },
+          { label: 'Desvincular (copias independientes)', run: () => s.commitAsm((a) => { a.patterns = a.patterns!.filter((x) => x.id !== pt.id); for (const o of a.occurrences) if (o.patternOf === pt.id) delete o.patternOf; }) },
+          { label: 'Eliminar patrón', danger: true, run: () => s.commitAsm((a) => { a.patterns = a.patterns!.filter((x) => x.id !== pt.id); a.occurrences = a.occurrences.filter((o) => o.patternOf !== pt.id); }) },
+        ] }); }}>
+        <Icon name="pattern_comp" size={16} /><span className="tree-name">{pt.name}</span><span className="tree-count">{pt.members.length + 1}</span>
+      </div>
+    ))}
+    {(s.asm.motions ?? []).length > 0 && <Folder icon="drive" label="Movimiento" count={s.asm.motions!.length} defaultOpen={false}>
+      {s.asm.motions!.map((m) => (
+        <div key={m.id} className={rowCls(m.id, m.suppressed ? 'supp' : '')} style={{ paddingLeft: 30 }} onClick={() => sel(m.id)}
+          onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, items: [
+            { label: m.suppressed ? 'Activar' : 'Suprimir', run: () => s.commitAsm((a) => { const t = a.motions!.find((x) => x.id === m.id); if (t) t.suppressed = !t.suppressed; }) },
+            { label: 'Eliminar', danger: true, run: () => s.commitAsm((a) => { a.motions = a.motions!.filter((x) => x.id !== m.id); }) },
+          ] }); }}>
+          <Icon name="drive" size={15} /><span className="tree-name">{m.name}</span><span className="tree-count">{m.ratio}</span>
+        </div>
+      ))}
+    </Folder>}
     <Folder icon="joint" label="Relaciones" count={s.asm.joints.length} defaultOpen={false}>
       {s.asm.joints.map((j) => (
         <div key={j.id} className={rowCls(j.id, j.suppressed ? 'supp' : '')} style={{ paddingLeft: 30 }} onClick={() => sel(j.id)} title={errs[j.id]}

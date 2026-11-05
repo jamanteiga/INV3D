@@ -1,11 +1,11 @@
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
 import { useStore, type SkOp } from '../core/store';
 import { uid, v3, newDoc, MATERIALS, type V3, type SketchF, type PartDoc } from '../core/doc';
-import { IDENTITY, solveAssembly, q as qq, type FrameMember, type BoltGroup, type EndType } from '../core/asm';
+import { IDENTITY, solveAssembly, patternPoses, mirrorPose, q as qq, type FrameMember, type BoltGroup, type EndType } from '../core/asm';
 import { CONTENT } from '../core/content';
 import { makeEval } from '../core/expr';
 import { cad } from '../core/cadClient';
-import { projectedDir, SHEETS, SCALES, VIEW_NAMES, scaleLabel, allPages, loadPage, extractPage, type DView, type TableKind } from '../core/drawing';
+import { projectedDir, drawStyle, SHEETS, SCALES, VIEW_NAMES, scaleLabel, allPages, loadPage, extractPage, type DView, type TableKind } from '../core/drawing';
 import { writeDxf, type DxfDoc } from '../core/dxf';
 import { saveText } from '../core/files';
 import { getProjection, viewGeom, sheetPrims } from './DrawingView';
@@ -84,29 +84,10 @@ export const asmActions = {
     const s = S();
     const o = s.asm.occurrences.find((x) => x.id === occId); if (!o) return;
     const ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
-    const AX: Record<string, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
-    const copies: { pos: V3; quat: [number, number, number, number] }[] = [];
-    if (p.kind === 'rect') {
-      const n1 = Math.max(1, Math.round(ev(p.n))), d1 = ev(p.d), n2 = p.dir2 ? Math.max(1, Math.round(ev(p.n2))) : 1, d2 = p.dir2 ? ev(p.d2) : 0;
-      for (let i = 0; i < n1; i++) for (let j = 0; j < n2; j++) {
-        if (!i && !j) continue;
-        const t = v3.add(v3.mul(AX[p.dir], i * d1), p.dir2 ? v3.mul(AX[p.dir2], j * d2) : [0, 0, 0]);
-        copies.push({ pos: v3.add(o.xf.pos, t), quat: [...o.xf.quat] as [number, number, number, number] });
-      }
-    } else {
-      const n = Math.max(2, Math.round(ev(p.count))), tot = ev(p.angle), step = Math.abs(tot - 360) < 1e-9 ? 360 / n : tot / (n - 1);
-      for (let k = 1; k < n; k++) {
-        const rq = qq.axisAngle(AX[p.dir], (step * k * Math.PI) / 180);
-        copies.push({ pos: qq.rotate(rq, o.xf.pos), quat: qq.norm(qq.mul(rq, o.xf.quat)) });
-      }
-    }
-    if (copies.length > 400) return s.notify('Demasiados elementos (máx. 400)', 'error');
-    const base = o.name.replace(/:\d+$/, '');
-    s.commitAsm((a) => {
-      let k = a.occurrences.filter((x) => x.part === o.part).length;
-      for (const c of copies) a.occurrences.push({ id: uid('o'), name: `${base}:${++k}`, part: o.part, xf: c, grounded: true });
-    });
-    s.notify(`Patrón: ${copies.length} copias (fijas)`);
+    const n = patternPoses(o.xf, p, ev).length;
+    if (!n) return s.notify('El patrón no crea copias', 'error');
+    s.commitAsm((a) => { (a.patterns ??= []).push({ id: uid('cp'), name: `Patrón de componentes${(a.patterns?.length ?? 0) + 1}`, parent: occId, p, members: [] }); });
+    s.notify(`Patrón asociativo: ${n} copias (siguen al componente original)`);
   },
   /** Componente simétrico respecto a un plano de origen del ensamblaje (pieza derivada en espejo). */
   mirrorComponent: (occId: string, plane: 'YZ' | 'XZ' | 'XY') => {
@@ -119,12 +100,9 @@ export const asmActions = {
     nd.iProperties = { ...src.iProperties, partNumber: src.iProperties.partNumber + '-SIM', description: `${src.iProperties.description} (simétrica)` };
     nd.features = [{ id: uid('f'), name: 'Derivada', type: 'derive', source: o.part, sourceName: srcName, doc: structuredClone(src), scale: '1', mirror: plane, op: 'join' }];
     const pid = s.addDocument('part', nd, name, false);
-    const M = plane === 'YZ' ? [-1, 1, 1] : plane === 'XZ' ? [1, -1, 1] : [1, 1, -1];
-    const R = qq.toMatrix(o.xf.quat);
-    const R2 = R.map((row, i) => row.map((v, j) => M[i] * v * M[j]));
-    const xf = { pos: o.xf.pos.map((v, i) => v * M[i]) as V3, quat: qq.fromMatrix(R2) };
-    s.commitAsm((a) => { a.occurrences.push({ id: uid('o'), name: name.replace(/\.i3p$/i, '') + ':1', part: pid, xf, grounded: true }); });
-    s.notify('Componente simétrico creado (pieza derivada en espejo)');
+    const xf = mirrorPose(o.xf, plane);
+    s.commitAsm((a) => { a.occurrences.push({ id: uid('o'), name: name.replace(/\.i3p$/i, '') + ':1', part: pid, xf, grounded: true, mirrorOf: { occ: o.id, plane } }); });
+    s.notify('Componente simétrico asociativo creado (sigue la forma y la posición del original)');
   },
   replaceComponent: (occId: string, partId: string, all: boolean) => {
     const s = S();
@@ -352,7 +330,7 @@ export const drwActions = {
     await p;
     const g = viewGeom(S(), v); if (!g) return;
     const w = g.rect[2] - g.rect[0], h = g.rect[3] - g.rect[1];
-    const dir = side === 'iso' ? 'iso' : projectedDir(v.dir, side);
+    const dir = side === 'iso' ? 'iso' : projectedDir(v.dir, side, drawStyle(s.drw).projection === 'third');
     const id = uid('v');
     const nv: DView = { id, name: VIEW_NAMES[dir], source: v.source, dir, scale: v.scale, x: v.x, y: v.y, hidden: side === 'iso' ? false : v.hidden, parent: side === 'iso' ? undefined : v.id, kind: side === 'iso' ? 'iso' : 'proj' };
     const pc = getProjection(s, nv); if (!pc) return;
@@ -465,7 +443,8 @@ export const drwActions = {
     if (!pdf) pdf = new jsPDF({ orientation: e.W > e.H ? 'landscape' : 'portrait', unit: 'mm', format: [e.W, e.H] });
     else pdf.addPage([e.W, e.H], e.W > e.H ? 'landscape' : 'portrait');
     const Y = (y: number) => e.H - y;
-    const W: Record<string, number> = { frame: 0.5, tb: 0.35, vis: 0.5, hid: 0.25, dim: 0.18, center: 0.18, cutline: 0.18, hatch: 0.13, thin: 0.18, thick: 0.6, ann: 0.35, cutend: 0.7 };
+    const ds = drawStyle(drw), tk = ds.thick, tn = ds.thin;
+    const W: Record<string, number> = { frame: tk, tb: tk * 0.7, vis: tk, hid: tn, dim: tn * 0.72, center: tn * 0.72, cutline: tn * 0.72, hatch: tn * 0.5, thin: tn * 0.72, thick: tk * 1.2, ann: tk * 0.7, cutend: tk * 1.4 };
     const DASH: Record<string, number[]> = { hid: [2, 1], center: [6, 1, 1, 1], cutline: [6, 1, 1, 1] };
     for (const l of e.lines) {
       pdf.setLineWidth(W[l.cls] ?? 0.25); pdf.setLineDashPattern(DASH[l.cls] ?? [], 0);

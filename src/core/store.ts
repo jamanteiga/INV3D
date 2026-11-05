@@ -5,13 +5,14 @@ import {
 } from './doc';
 import { makeEval } from './expr';
 import { solve, applySolution, checkNew } from './sketch';
-import { newAsm, solveAssembly, type AsmDoc } from './asm';
+import { newAsm, solveAssembly, applyAssociative, type AsmDoc } from './asm';
 import { newDrawing, type DrawingDoc } from './drawing';
 import { cad, type RegenResult, type AsmResult, type MeshData } from './cadClient';
+import { DEFAULT_SETTINGS, type AppSettings, type UserLibs, type RecentItem } from './persist';
 
 export type DocKind = 'part' | 'assembly' | 'drawing';
 export type AnyDoc = PartDoc | AsmDoc | DrawingDoc;
-export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean }
+export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean; /** ruta relativa en la carpeta de trabajo */ path?: string }
 
 export type Mode = 'model' | 'sketch' | 'present';
 export type Tool = null
@@ -29,7 +30,7 @@ export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'drwsection' | 'drwdetail' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' }
   | { kind: 'fileinfo'; title: string; info: FileInfo }
   | { kind: 'skop'; op: SkOp; params: Record<string, string>; step: number; base?: string };
 export type SkOp = 'offset' | 'mirror' | 'rpattern' | 'cpattern' | 'move' | 'copy' | 'rotate' | 'scale' | 'fillet' | 'chamfer' | 'text';
@@ -93,6 +94,11 @@ export interface State {
   spaceMouse: string;
   clip: '' | 'X' | 'Y' | 'Z';
   project: ProjectInfo | null;
+  /** Configuración persistente */
+  settings: AppSettings;
+  libs: UserLibs;
+  recent: RecentItem[];
+  folder: { name: string; state: 'none' | 'prompt' | 'granted' };
   toast: { text: string; kind: 'info' | 'error'; n: number } | null;
   cursor: [number, number] | null;
   menuOpen: boolean;
@@ -206,6 +212,10 @@ export const useStore = create<State>((set, get) => ({
   view: { name: 'home', n: 0 },
   showEdges: true, wire: false, spaceMouse: '', clip: '',
   project: null,
+  settings: { ...DEFAULT_SETTINGS },
+  libs: { materials: [] },
+  recent: [],
+  folder: { name: '', state: 'none' },
   toast: null,
   cursor: null,
   menuOpen: false,
@@ -221,7 +231,7 @@ export const useStore = create<State>((set, get) => ({
   partsMap: (ids) => {
     const s = get();
     const out: Record<string, PartDoc> = {};
-    for (const d of s.docs) if (d.kind === 'part' && (!ids || ids.includes(d.id))) out[d.id] = s.docData(d.id) as PartDoc;
+    for (const d of s.docs) if (d.kind === 'part' && (!ids || ids.includes(d.id))) out[d.id] = liveDerive(s.docData(d.id) as PartDoc);
     return out;
   },
   addDocument: (kind, data, fileName, activate = true, id) => {
@@ -237,6 +247,10 @@ export const useStore = create<State>((set, get) => ({
       const d = k === 'sheet' ? newSheetDoc() : newDoc();
       const fn = uniqueName(docs, k === 'sheet' ? 'Chapa' : 'Pieza', '.i3p');
       d.iProperties.partNumber = baseName(fn);
+      const st = get().settings;
+      if (st.defaultMaterial && k === 'part') d.iProperties.material = st.defaultMaterial;
+      if (st.userName) d.iProperties.designer = st.userName;
+      if (st.company) d.iProperties.company = st.company;
       return get().addDocument('part', d, fn);
     }
     if (k === 'assembly' || k === 'weldment') {
@@ -246,7 +260,9 @@ export const useStore = create<State>((set, get) => ({
       return get().addDocument('assembly', a, fn);
     }
     const fn = uniqueName(docs, 'Dibujo', '.i3d');
-    return get().addDocument('drawing', newDrawing(), fn);
+    const st = get().settings, dw = newDrawing();
+    dw.sheet = st.sheetDefault; dw.title.designer = st.userName; dw.title.company = st.company; dw.std = st.drawingStd;
+    return get().addDocument('drawing', dw, fn);
   },
   activate: (id) => {
     const s = get();
@@ -327,6 +343,7 @@ export const useStore = create<State>((set, get) => ({
       const r = solveAssembly(next, (x) => { try { return makeEval([])(x); } catch { return NaN; } });
       for (const o of next.occurrences) if (r.xf[o.id] && !o.grounded) o.xf = { pos: r.xf[o.id].pos.map((v) => Number(v.toFixed(6))) as V3, quat: r.xf[o.id].quat.map((v) => Number(v.toFixed(9))) as [number, number, number, number] };
     }
+    if (next.patterns?.length || next.occurrences.some((o) => o.mirrorOf)) applyAssociative(next, (x) => { try { return makeEval([])(x); } catch { return NaN; } }, uid);
     set({ asm: next, past: [...past.slice(-99), asm], future: [], dirty: true });
   },
   commitDrw: (fn) => {
@@ -541,13 +558,27 @@ let asmTimer: ReturnType<typeof setTimeout> | undefined;
 /** Mallas de piezas ya recibidas, por clave de contenido (se reutilizan entre ensamblajes). */
 export const meshCache = new Map<string, MeshData>();
 
+/** Piezas derivadas asociativas: si la pieza de origen está abierta se usa su versión actual. */
+export function liveDerive(doc: PartDoc, depth = 0): PartDoc {
+  if (depth > 4 || !doc.features.some((f) => f.type === 'derive')) return doc;
+  const s = useStore.getState();
+  let changed = false;
+  const features = doc.features.map((f) => {
+    if (f.type !== 'derive') return f;
+    const src = s.docData(f.source) as PartDoc | null;
+    if (!src || src.format !== 'inv3d.part' || src === f.doc) return f;
+    changed = true;
+    return { ...f, doc: liveDerive(src, depth + 1) };
+  });
+  return changed ? { ...doc, features } : doc;
+}
 async function runRegen() {
   const s = useStore.getState();
   if (s.oc !== 'ready' || s.kind !== 'part') return;
   const my = ++regenSeq;
   useStore.setState({ busy: true });
   try {
-    const r = await cad.regen(s.doc);
+    const r = await cad.regen(liveDerive(s.doc));
     if (my === regenSeq && useStore.getState().kind === 'part') useStore.setState({ result: r, busy: false });
     else useStore.setState({ busy: false });
   } catch (e) {

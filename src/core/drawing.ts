@@ -54,6 +54,10 @@ export interface DDim {
   tol?: string;
   /** Cota por coordenadas: eje medido (a = origen, b = punto, c = posición del texto) */
   axis?: 'x' | 'y';
+  /** Cota recuperada del modelo (asociativa): boceto + restricción, u operación */
+  ref?: { sk?: string; con?: string; feat?: string; ent?: string };
+  /** La referencia del modelo ya no existe */
+  orphan?: boolean;
 }
 export interface DNote { id: string; x: number; y: number; text: string; size: number }
 export type AnnKind = 'balloon' | 'leader' | 'surface' | 'weld' | 'centerline' | 'centermark' | 'hole' | 'fcf' | 'datum';
@@ -92,10 +96,32 @@ export interface DrawingDoc {
   bom?: { view: string; x: number; y: number } | null;
   tables?: DTable[];
   revisions?: DRev[];
+  /** Norma de dibujo (estilos de cota, texto y proyección) */
+  std?: 'ISO' | 'DIN' | 'ANSI';
+  /** Estilo personalizado sobre la norma */
+  style?: Partial<DrawStyle>;
   /** Varias hojas: la activa vive en los campos de arriba; pages guarda todas (la activa puede estar desfasada). */
   pages?: SheetPage[];
   page?: number;
 }
+
+/** Estilo de dibujo (Gestor de estilos): texto, cotas, flechas, grosores y proyección. */
+export interface DrawStyle {
+  textH: number; dimTextH: number; font: string;
+  arrow: 'closed' | 'open' | 'tick' | 'dot'; arrowL: number; arrowW: number;
+  extGap: number; extOver: number;
+  decSep: ',' | '.'; precision: number; trailingZeros: boolean; units: 'mm' | 'in';
+  thick: number; thin: number;
+  projection: 'first' | 'third';
+  hatchAngle: number; hatchStep: number;
+  centerExt: number;
+}
+export const DRAW_STD: Record<'ISO' | 'DIN' | 'ANSI', DrawStyle> = {
+  ISO: { textH: 3.5, dimTextH: 3.5, font: 'Arial', arrow: 'closed', arrowL: 3, arrowW: 1, extGap: 1, extOver: 2, decSep: ',', precision: 2, trailingZeros: false, units: 'mm', thick: 0.5, thin: 0.25, projection: 'first', hatchAngle: 45, hatchStep: 2.5, centerExt: 2.5 },
+  DIN: { textH: 3.5, dimTextH: 3.5, font: 'Arial', arrow: 'closed', arrowL: 2.5, arrowW: 0.9, extGap: 0, extOver: 2, decSep: ',', precision: 2, trailingZeros: false, units: 'mm', thick: 0.5, thin: 0.25, projection: 'first', hatchAngle: 45, hatchStep: 2.5, centerExt: 2 },
+  ANSI: { textH: 3.2, dimTextH: 3.2, font: 'Arial', arrow: 'closed', arrowL: 3.2, arrowW: 1.07, extGap: 1.6, extOver: 3.2, decSep: '.', precision: 3, trailingZeros: true, units: 'in', thick: 0.6, thin: 0.3, projection: 'third', hatchAngle: 45, hatchStep: 3.2, centerExt: 3.2 },
+};
+export function drawStyle(d: Pick<DrawingDoc, 'std' | 'style'>): DrawStyle { return { ...DRAW_STD[d.std ?? 'ISO'], ...(d.style ?? {}) }; }
 
 export function extractPage(d: DrawingDoc, name?: string): SheetPage {
   return { name: name ?? d.pages?.[d.page ?? 0]?.name ?? `Hoja${(d.page ?? 0) + 1}`, sheet: d.sheet, views: d.views, dims: d.dims, notes: d.notes, anns: d.anns ?? [], tables: d.tables ?? [], bom: d.bom ?? null };
@@ -130,7 +156,13 @@ export const SCALES = [10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.04, 0.02, 0.01];
 export const scaleLabel = (s: number) => (s >= 1 ? `${s}:1` : `1:${Math.round(1 / s)}`);
 
 /** Proyección europea (ISO E): a partir de la vista base, la proyectada a la derecha es el perfil izquierdo, etc. */
-export function projectedDir(base: ViewDir, side: 'right' | 'left' | 'up' | 'down'): ViewDir {
+export function projectedDir(base: ViewDir, side: 'right' | 'left' | 'up' | 'down', third = false): ViewDir {
+  if (third) {
+    // Tercer diedro (ANSI): cada vista se coloca del lado desde el que se mira
+    if (base === 'front') return side === 'right' ? 'right' : side === 'left' ? 'left' : side === 'down' ? 'bottom' : 'top';
+    if (base === 'top') return side === 'up' ? 'back' : side === 'down' ? 'front' : side === 'right' ? 'right' : 'left';
+    return 'iso';
+  }
   if (base === 'front') return side === 'right' ? 'left' : side === 'left' ? 'right' : side === 'down' ? 'top' : 'bottom';
   if (base === 'top') return side === 'up' ? 'front' : side === 'down' ? 'back' : side === 'right' ? 'left' : 'right';
   return 'iso';

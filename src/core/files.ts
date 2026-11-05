@@ -76,19 +76,49 @@ function embedFor(ids: string[]) {
   return out;
 }
 
-export async function saveDoc() {
+/** Contenido de un documento abierto (.i3p/.i3a/.i3d) con las piezas referenciadas embebidas. */
+export function serializeDoc(id?: string): string {
   const s = useStore.getState();
-  let content: string, desc: string, ext: string;
-  if (s.kind === 'part') { content = JSON.stringify(s.doc, null, 1); desc = 'Pieza INV3D'; ext = '.i3p'; }
-  else if (s.kind === 'assembly') {
-    content = JSON.stringify({ ...s.asm, embedded: embedFor([...new Set(s.asm.occurrences.map((o) => o.part))]) }); desc = 'Ensamblaje INV3D'; ext = '.i3a';
-  } else {
-    content = JSON.stringify({ ...s.drw, embedded: embedFor([...new Set(s.drw.views.map((v) => v.source))]) }); desc = 'Plano INV3D'; ext = '.i3d';
-  }
+  id ??= s.active;
+  const e = s.docs.find((d) => d.id === id); const data = s.docData(id);
+  if (!e || !data) throw new Error('Documento no encontrado');
+  if (e.kind === 'part') return JSON.stringify(data, null, 1);
+  if (e.kind === 'assembly') { const a = data as AsmDoc; return JSON.stringify({ ...a, embedded: embedFor([...new Set(a.occurrences.map((o) => o.part))]) }); }
+  const d = data as DrawingDoc;
+  return JSON.stringify({ ...d, embedded: embedFor([...new Set(d.views.map((v) => v.source))]) });
+}
+const DOC_EXT = { part: ['.i3p', 'Pieza INV3D'], assembly: ['.i3a', 'Ensamblaje INV3D'], drawing: ['.i3d', 'Plano INV3D'] } as const;
+
+/** Guardar: en la carpeta de trabajo si está conectada (sin diálogo); si no, diálogo del navegador o descarga. */
+export async function saveDoc(as = false) {
+  const s = useStore.getState();
+  const [ext, desc] = DOC_EXT[s.kind];
+  const content = serializeDoc();
+  const cur = s.docs.find((d) => d.id === s.active);
   const fn = s.fileName.endsWith(ext) ? s.fileName : `${baseName(s.fileName)}${ext}`;
+  const { markSaved, addRecent } = await import('../ui/session');
+  if (s.folder.state === 'granted') {
+    let path = cur?.path ?? fn;
+    if (as || !cur?.path) {
+      const p = prompt(`Guardar en la carpeta «${s.folder.name}» como (puedes poner subcarpetas, p. ej. Piezas/${fn}):`, path);
+      if (!p) return;
+      path = p.endsWith(ext) ? p : `${p}${ext}`;
+      const { existsInFolder } = await import('./persist');
+      if (path !== cur?.path && await existsInFolder(path) && !(await s.ask(`${path} ya existe. ¿Sustituirlo?`, 'Sustituir'))) return;
+    }
+    try {
+      const { writeInFolder } = await import('./persist');
+      await writeInFolder(path, content, 'application/json');
+      markSaved(s.active, path);
+      addRecent(path.split('/').pop()!, s.kind, path, content);
+      s.notify(`Guardado ${path} en ${s.folder.name}`);
+      return;
+    } catch (e) { s.notify(`No se pudo escribir en la carpeta (${(e as Error).message}); se usa el diálogo`, 'error'); }
+  }
   const name = await saveAs(content, fn, desc, ext, 'application/json');
   if (name) {
     useStore.setState({ fileName: name, dirty: false, docs: useStore.getState().docs.map((d) => (d.id === s.active ? { ...d, fileName: name, dirty: false } : d)) });
+    addRecent(name, s.kind, undefined, content);
     s.notify(`Guardado ${name}`);
   }
 }
@@ -115,6 +145,20 @@ export async function exportSTL() {
   } catch (e) { s.notify((e as Error).message, 'error'); }
 }
 
+/** 3MF (impresión 3D), OBJ o glTF binario a partir de la malla del sólido. */
+export async function exportMesh(fmt: '3mf' | 'obj' | 'glb') {
+  const s = useStore.getState();
+  try {
+    if (s.kind === 'drawing') throw new Error('Un plano no se exporta como malla');
+    const { parseSTL, to3MF, toOBJ, toGLB } = await import('./meshexport');
+    const m = parseSTL(await cad.exportSTL(s.kind === 'assembly' ? 'asm' : 'part'));
+    const name = baseName(s.fileName);
+    if (fmt === '3mf') await saveAs(to3MF(m, name), `${name}.3mf`, '3MF (impresión 3D)', '.3mf', 'model/3mf');
+    else if (fmt === 'obj') await saveAs(toOBJ(m, name), `${name}.obj`, 'OBJ', '.obj', 'model/obj');
+    else await saveAs(toGLB(m, name), `${name}.glb`, 'glTF binario', '.glb', 'model/gltf-binary');
+  } catch (e) { s.notify((e as Error).message, 'error'); }
+}
+
 export function pickFile(accept: string): Promise<File | null> {
   return new Promise((res) => {
     const inp = document.createElement('input');
@@ -137,6 +181,7 @@ export async function openFile(file?: File | null) {
       const doc = validateDoc(JSON.parse(await file.text()));
       s.load(doc, file.name);
       s.notify(`Abierto ${file.name}`);
+      remember(file);
     } else if (ext === 'i3a' || ext === 'i3d') {
       const raw = JSON.parse(await file.text());
       const embedded = (raw.embedded ?? {}) as Record<string, { fileName: string; kind: string; data: unknown }>;
@@ -149,6 +194,7 @@ export async function openFile(file?: File | null) {
       if (ext === 'i3a') s.addDocument('assembly', validateAsm(raw), file.name);
       else s.addDocument('drawing', validateDrawing(raw) as DrawingDoc, file.name);
       s.notify(`Abierto ${file.name}`);
+      remember(file);
     } else if (ext === 'step' || ext === 'stp') {
       await importStep(file, true);
     } else if (ext === 'dxf') {
@@ -165,6 +211,14 @@ export async function openFile(file?: File | null) {
   } catch (e) {
     s.notify((e as Error).message, 'error');
   }
+}
+
+export const recentCtl = { skip: false };
+function remember(file: File) {
+  if (recentCtl.skip) return;
+  import('../ui/session').then(({ addRecent }) => {
+    addRecent(file.name, file.name.split('.').pop() ?? '', undefined, file);
+  });
 }
 
 /** Abre el primer fichero de un .zip guardado por INV3D (método store o deflate). */

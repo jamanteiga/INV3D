@@ -1,7 +1,8 @@
+import { openRecent } from './session';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
-import { openFile, saveDoc, exportSTEP, exportSTL, importStep, newIpj } from '../core/files';
+import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS } from '../core/doc';
 import { asmActions, drwActions, partActions } from './actions';
 import { demoStair } from './demo';
@@ -88,7 +89,7 @@ export default function Ribbon() {
         </div>
         <button className="qat-b" title="Nuevo (Ctrl+N)" onClick={() => s.open({ kind: 'newdoc' })}><Icon name="newfile" size={16} /></button>
         <button className="qat-b" title="Abrir (Ctrl+O)" onClick={() => openFile()}><Icon name="open" size={16} /></button>
-        <button className="qat-b" title="Guardar (Ctrl+S)" onClick={saveDoc}><Icon name="save" size={16} /></button>
+        <button className="qat-b" title="Guardar (Ctrl+S)" onClick={() => saveDoc()}><Icon name="save" size={16} /></button>
         <span className="qat-sep" />
         <button className="qat-b" title="Deshacer (Ctrl+Z)" disabled={!s.past.length} onClick={s.undo}><Icon name="undo" size={16} /></button>
         <button className="qat-b" title="Rehacer (Ctrl+Y)" disabled={!s.future.length} onClick={s.redo}><Icon name="redo" size={16} /></button>
@@ -287,10 +288,13 @@ export default function Ribbon() {
             <Big icon="constraint3d" label="Restringir" kbd="J" onClick={() => A.openJoint()} title="Coincidir, al ras, ángulo, tangente, insertar o rígida (J)" />
             <Big icon="joint" label="Unión" onClick={() => { A.openJoint(); s.updateDraft({ type: 'rot', name: 'Unión' }); }} title="Unión de rotación, corredera, cilíndrica, planar o bola" />
             <Col>
-              <Small icon="drive" label="Conducir" disabled={!s.asm.joints.some((j) => j.type === 'rot' || j.type === 'slider')} onClick={() => s.open({ kind: 'drive' })} title="Animar una unión de rotación o corredera" />
               <Small icon="insert3d" label="Insertar" onClick={() => { A.openJoint(); s.updateDraft({ type: 'insert' }); }} />
               <Small icon="angle3d" label="Ángulo" onClick={() => { A.openJoint(); s.updateDraft({ type: 'angle', angle: '90 deg' }); }} />
               <Small icon="c_tangent" label="Tangente" onClick={() => { A.openJoint(); s.updateDraft({ type: 'tangent' }); }} />
+            </Col>
+            <Col>
+              <Small icon="joint2" label="Movimiento" disabled={!s.asm.joints.some((j) => j.type === 'rot' || j.type === 'cyl')} onClick={() => s.open({ kind: 'motion' })} title="Restricción de movimiento: engranajes (rotación-rotación) y piñón-cremallera (rotación-traslación)" />
+              <Small icon="drive" label="Conducir" disabled={!s.asm.joints.some((j) => j.type === 'rot' || j.type === 'slider')} onClick={() => s.open({ kind: 'drive' })} title="Animar una unión de rotación o corredera" />
             </Col>
           </Group>
           <Group label="Esqueleto">
@@ -360,6 +364,7 @@ export default function Ribbon() {
           </Group>
           <Group label="Hoja">
             <Big icon="sheets" label="Nueva hoja" onClick={D.addSheet} title="Añade una hoja al plano (cambia de hoja en el navegador)" />
+            <Big icon="style" label={`Estilos ${s.drw.std ?? 'ISO'}`} onClick={() => s.open({ kind: 'drwstyle' })} title="Gestor de estilos: norma ISO/DIN/ANSI, cotas, flechas, líneas y proyección" />
             <div className="rb-grid sheets">
               {(['A4', 'A3', 'A2', 'A1', 'A0'] as const).map((z) => <button key={z} className={`rb-txt ${s.drw.sheet === z ? 'on' : ''}`} onClick={() => s.commitDrw((d) => { d.sheet = z; })}>{z}</button>)}
             </div>
@@ -368,6 +373,7 @@ export default function Ribbon() {
         {k === 'drawing' && cur === 'annotate' && (<>
           <Group label="Cota">
             <Big icon="dim" label="Cota" kbd="D" active={tool === 'drwDim'} onClick={T('drwDim')} title="Cota lineal entre dos puntos (D)" />
+            <Big icon="retrieve" label="Recuperar" onClick={() => s.open({ kind: 'retrieve' })} title="Recuperar las cotas del modelo en la vista seleccionada (asociativas)" />
             <Col>
               <Small icon="dimdia" label="Diámetro" active={tool === 'drwDimD'} onClick={T('drwDimD')} />
               <Small icon="dimrad" label="Radio" active={tool === 'drwDimR'} onClick={T('drwDimR')} />
@@ -478,11 +484,22 @@ function FileMenu() {
       <div className="file-menu" role="menu">
         <button onClick={act(() => s.open({ kind: 'newdoc' }))}><Icon name="newfile" size={20} />Nuevo…<kbd>Ctrl+N</kbd></button>
         <button onClick={act(() => openFile())}><Icon name="open" size={20} />Abrir…<kbd>Ctrl+O</kbd></button>
-        <button onClick={act(saveDoc)}><Icon name="save" size={20} />Guardar<kbd>Ctrl+S</kbd></button>
+        <button onClick={act(() => saveDoc())}><Icon name="save" size={20} />Guardar{s.folder.state === 'granted' ? ` en ${s.folder.name}` : ''}<kbd>Ctrl+S</kbd></button>
+        <button onClick={act(() => saveDoc(true))}><Icon name="save" size={20} />Guardar como…<kbd>Ctrl+Mayús+S</kbd></button>
+        <button onClick={act(() => s.open({ kind: 'folder' }))}><Icon name="folder" size={20} />Carpeta de trabajo{s.folder.name ? `: ${s.folder.name}` : '…'}</button>
+        {s.recent.length > 0 && (<>
+          <div className="fm-sub">Recientes</div>
+          {s.recent.slice(0, 8).map((r) => (
+            <button key={r.path ?? r.name} className="fm-recent" title={r.path ?? r.name} onClick={act(() => openRecent(r))}><Icon name={r.kind === 'i3a' || r.kind === 'assembly' ? 'assembly' : r.kind === 'i3d' || r.kind === 'drawing' ? 'drawing' : 'part'} size={16} />{r.path ?? r.name}</button>
+          ))}
+        </>)}
         <hr />
         {s.kind === 'part' && <button onClick={act(() => importStep())}><Icon name="import" size={20} />Importar STEP en la pieza</button>}
         {s.kind !== 'drawing' && <button onClick={act(exportSTEP)}><Icon name="step" size={20} />Exportar STEP</button>}
         {s.kind !== 'drawing' && <button onClick={act(exportSTL)}><Icon name="stl" size={20} />Exportar STL</button>}
+        {s.kind !== 'drawing' && <button onClick={act(() => exportMesh('3mf'))}><Icon name="stl" size={20} />Exportar 3MF (impresión 3D)</button>}
+        {s.kind !== 'drawing' && <button onClick={act(() => exportMesh('obj'))}><Icon name="stl" size={20} />Exportar OBJ</button>}
+        {s.kind !== 'drawing' && <button onClick={act(() => exportMesh('glb'))}><Icon name="stl" size={20} />Exportar glTF (.glb)</button>}
         {s.kind === 'drawing' && <button onClick={act(drwActions.exportDxf)}><Icon name="dxf" size={20} />Exportar DXF</button>}
         {s.kind === 'drawing' && <button onClick={act(drwActions.exportPdf)}><Icon name="pdf" size={20} />Exportar PDF</button>}
         <hr />
@@ -490,6 +507,7 @@ function FileMenu() {
         <button onClick={act(() => newIpj(s.docData(s.active) && 'iProperties' in (s.docData(s.active) as object) ? (s.docData(s.active) as any).iProperties.partNumber : 'Proyecto'))}><Icon name="project" size={20} />Crear proyecto .ipj</button>
         <button onClick={act(() => s.open({ kind: 'iprops' }))}><Icon name="iprops" size={20} />iProperties</button>
         <hr />
+        <button onClick={act(() => s.open({ kind: 'options' }))}><Icon name="settings" size={20} />Opciones de la aplicación…</button>
         <button onClick={act(() => s.open({ kind: 'about' }))}><Icon name="help" size={20} />Acerca de INV3D</button>
         <div className="fm-foot">Abre .i3p, .i3a, .i3d, .step/.stp, .ipj, .dwg, .dxf · lee metadatos y miniatura de .ipt, .iam, .idw, .ipn</div>
       </div>

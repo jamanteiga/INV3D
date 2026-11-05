@@ -10,6 +10,7 @@ import { saveDoc, openFile } from './core/files';
 import { fmt } from './core/expr';
 import { Icon } from './ui/icons';
 import { asmActions } from './ui/actions';
+import { folderApi } from './ui/session';
 
 const TOOL_MSG: Record<string, string> = {
   pickPlane: 'Selecciona un plano de origen, un plano de trabajo o una cara plana para el boceto',
@@ -92,6 +93,20 @@ function Loader() {
   );
 }
 
+/** Aviso para reconectar la carpeta de trabajo recordada (el navegador pide un clic por sesión). */
+function FolderBanner() {
+  const f = useStore((s) => s.folder);
+  const [hide, setHide] = useState(false);
+  if (f.state !== 'prompt' || hide) return null;
+  return (
+    <div className="folder-banner" role="status">
+      <Icon name="folder" size={16} /><span>Carpeta de trabajo <b>{f.name}</b>: el navegador pide confirmar el acceso.</span>
+      <button className="btn primary" onClick={() => folderApi.reconnect()}>Reconectar</button>
+      <span className="grow" /><button className="btn icon" title="Ocultar" onClick={() => setHide(true)}>×</button>
+    </div>
+  );
+}
+
 /** Pestañas de documentos abiertos (como la barra inferior de Inventor). */
 function DocTabs() {
   const s = useStore();
@@ -133,7 +148,7 @@ export default function App() {
       if (e.ctrlKey || e.metaKey) {
         if (k === 'z') { e.preventDefault(); s.undo(); }
         else if (k === 'y') { e.preventDefault(); s.redo(); }
-        else if (k === 's') { e.preventDefault(); saveDoc(); }
+        else if (k === 's') { e.preventDefault(); saveDoc(e.shiftKey); }
         else if (k === 'o') { e.preventDefault(); openFile(); }
         else if (k === 'n') { e.preventDefault(); s.open({ kind: 'newdoc' }); }
         return;
@@ -205,6 +220,7 @@ export default function App() {
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }}
       onDrop={(e) => { e.preventDefault(); setDrag(false); for (const f of e.dataTransfer.files) openFile(f); }}>
       <Ribbon />
+      <FolderBanner />
       <main className="work">
         <Browser />
         <section className="center">
