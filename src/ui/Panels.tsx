@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore, activeSketch } from '../core/store';
 import { evaluate, resolveParams, makeEval, fmt, isValidName } from '../core/expr';
 import {
-  docParams, ENTITY_NAMES, OP_NAMES, MATERIALS, planeLabel, FEATURE_NAMES, BODY_FEATURES, v3, uid,
+  docParams, ENTITY_NAMES, OP_NAMES, MATERIALS, planeLabel, FEATURE_NAMES, BODY_FEATURES, SURFACE_FEATURES, v3, uid, type S3Entity, type E3, type Sketch3dF,
   type Feature, type SkEntity, type SketchF, type BoolOp, type EdgeMode, type E2, type PartDoc, type V3, type StdPlane, type PlaneRef,
   type IProps,
 } from '../core/doc';
@@ -22,6 +22,7 @@ import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
 import { viewModelDims, viewGeom } from './DrawingView';
+import { ipartCandidates, currentValue, applyIPartRow, extractIFeature, ifParams, insertIFeature, type IPartTable, type IFeatureDef } from '../core/ifeature';
 import type { ModelDim } from '../core/retrieve';
 import { folderApi, openFromFolder, exportConfig, importConfig } from './session';
 import { listFolder, type FolderEntry } from '../core/persist';
@@ -82,6 +83,7 @@ const Steps = ({ items, current }: { items: [string, boolean][]; current: number
 // =================== PIEZA ===================
 const ICONS: Record<string, string> = { extrude: 'extrude', revolve: 'revolve', fillet: 'fillet', chamfer: 'chamfer', hole: 'hole', pattern: 'prect', mirror: 'mirror', shell: 'shell', workplane: 'workplane', loft: 'loft', sweep: 'sweep', sm_face: 'smface', sm_flange: 'smflange',
   rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken', thread: 'thread', workaxis: 'axis', workpoint: 'point',
+  surf_extrude: 'surfext', surf_revolve: 'surfrev', surf_loft: 'surfloft', surf_patch: 'patch', stitch: 'stitch', sm_loft: 'smloft', sketch3d: 'sketch3d',
   combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch' };
 
 /** Selector de plano (origen o de trabajo) con selección en pantalla. */
@@ -110,7 +112,9 @@ function FeatureDialog() {
   const closedSks = sketches.filter((x) => x.entities.some((e) => e.type !== 'point' && !e.construction));
   const pst = s.preview?.status[f.id];
   const opSeg = (op: BoolOp) => <Seg value={op} onChange={(v) => up({ op: v })} options={[['join', OP_NAMES.join], ['cut', OP_NAMES.cut], ['intersect', 'Intersec.'], ['new', 'Nuevo']]} />;
-  const skSel = (val: string, key: string, list = closedSks) => (
+  const sk3 = s.doc.features.filter((x) => x.type === 'sketch3d');
+  const surfs = s.doc.features.filter((x) => (SURFACE_FEATURES as readonly string[]).includes(x.type) || x.type === 'stitch');
+  const skSel = (val: string, key: string, list: { id: string; name: string }[] = closedSks) => (
     <select value={val} onChange={(e) => up({ [key]: e.target.value })}>
       {!list.length && <option value="">— sin bocetos válidos —</option>}
       {!list.some((k) => k.id === val) && list.length > 0 && <option value="">— elige —</option>}
@@ -180,7 +184,8 @@ function FeatureDialog() {
       </>)}
       {f.type === 'thicken' && (<>
         <Row label="Distancia"><Expr value={f.distance} live autoFocus onCommit={(v) => up({ distance: v })} /></Row>
-        <div className="pick-info"><b>{f.faces.length}</b> cara(s){f.faces.length > 0 && <button className="link" onClick={() => up({ faces: [] })}>Borrar</button>}. Distancia negativa: hacia dentro.</div>
+        <Row label="Origen"><select value={f.surface ?? ''} onChange={(e) => up({ surface: e.target.value || undefined })}><option value="">Caras del sólido</option>{surfs.map((x) => <option key={x.id} value={x.id}>Superficie: {x.name}</option>)}</select></Row>
+        {!f.surface && <div className="pick-info"><b>{f.faces.length}</b> cara(s){f.faces.length > 0 && <button className="link" onClick={() => up({ faces: [] })}>Borrar</button>}. Distancia negativa: hacia dentro.</div>}
         <Row label="Operación">{opSeg(f.op)}</Row>
       </>)}
       {f.type === 'thread' && (<>
@@ -219,7 +224,7 @@ function FeatureDialog() {
       })()}
       {f.type === 'pathpattern' && (<>
         <div className="plabel">Operaciones a repetir</div>{featPick(f.features)}
-        <Row label="Trayectoria">{skSel(f.path, 'path', sketches.filter((x) => x.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')))}</Row>
+        <Row label="Trayectoria">{skSel(f.path, 'path', [...sketches.filter((x) => x.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')), ...sk3])}</Row>
         <Row label="Cantidad"><Expr value={f.count} unit="ul" live onCommit={(v) => up({ count: v })} /></Row>
         <label className="check"><input type="checkbox" checked={f.align} onChange={(e) => up({ align: e.target.checked })} />Orientar según la trayectoria</label>
       </>)}
@@ -328,9 +333,50 @@ function FeatureDialog() {
       </>)}
       {f.type === 'sweep' && (<>
         <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
-        <Row label="Trayectoria">{skSel(f.path, 'path', sketches.filter((x) => x.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')))}</Row>
+        <Row label="Trayectoria">{skSel(f.path, 'path', [...sketches.filter((x) => x.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')), ...sk3])}</Row>
         <div className="pick-info">Trayectoria: líneas y arcos encadenados de otro boceto, empezando junto al perfil.</div>
         <Row label="Operación">{opSeg(f.op)}</Row>
+      </>)}
+      {f.type === 'surf_extrude' && (<>
+        <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
+        <Row label="Distancia"><Expr value={f.distance} live autoFocus onCommit={(v) => up({ distance: v })} /></Row>
+        <Row label="Dirección"><Seg value={f.dir} onChange={(v) => up({ dir: v })} options={[['normal', 'Normal'], ['reverse', 'Inversa'], ['symmetric', 'Simétrica']]} /></Row>
+        <div className="pick-info">Crea una superficie (sin espesor) a partir del perfil, abierto o cerrado.</div>
+      </>)}
+      {f.type === 'surf_revolve' && (<>
+        <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
+        <Row label="Eje"><select value={f.axis} onChange={(e) => up({ axis: e.target.value })}>
+          <option value="sx">Eje X del boceto</option><option value="sy">Eje Y del boceto</option>
+          {(sketches.find((k) => k.id === f.profile)?.entities ?? []).filter((e) => e.type === 'line').map((e, i) => <option key={e.id} value={e.id}>Línea {i + 1}{e.construction ? ' (construcción)' : ''}</option>)}
+        </select></Row>
+        <Row label="Ángulo"><Expr value={f.angle} unit="deg" live onCommit={(v) => up({ angle: v })} /></Row>
+      </>)}
+      {f.type === 'surf_loft' && (<>
+        <div className="plabel">Secciones (en orden)</div>
+        <div className="chips">
+          {[...closedSks, ...sk3].map((k) => { const on = f.sections.includes(k.id); return <button key={k.id} className={`chip ${on ? 'on' : ''}`} onClick={() => up({ sections: on ? f.sections.filter((i) => i !== k.id) : [...f.sections, k.id] })}>{on ? `${f.sections.indexOf(k.id) + 1}. ` : ''}{k.name}</button>; })}
+        </div>
+        <label className="check"><input type="checkbox" checked={f.ruled} onChange={(e) => up({ ruled: e.target.checked })} />Reglada (superficie reglada entre aristas)</label>
+      </>)}
+      {f.type === 'surf_patch' && (<>
+        <Row label="Contorno">{skSel(f.sketch, 'sketch', [...closedSks, ...sk3])}</Row>
+        <div className="pick-info">Boceto 2D cerrado: parche plano. Boceto 3D cerrado: superficie de contorno (Boundary Patch).</div>
+      </>)}
+      {f.type === 'stitch' && (<>
+        <div className="plabel">Superficies a coser</div>
+        <div className="chips">
+          {surfs.filter((x) => x.id !== f.id).map((k) => { const on = f.surfaces.includes(k.id); return <button key={k.id} className={`chip ${on ? 'on' : ''}`} onClick={() => up({ surfaces: on ? f.surfaces.filter((i) => i !== k.id) : [...f.surfaces, k.id] })}>{k.name}</button>; })}
+        </div>
+        <Row label="Operación">{opSeg(f.op)}</Row>
+        <label className="check"><input type="checkbox" checked={!!f.keep} onChange={(e) => up({ keep: e.target.checked })} />Conservar las superficies</label>
+        <div className="pick-info">Si cierran un volumen se convierte en sólido; si no, queda una superficie cosida.</div>
+      </>)}
+      {f.type === 'sm_loft' && (<>
+        <Row label="Contorno 1">{skSel(f.a, 'a', [...closedSks, ...sk3])}</Row>
+        <Row label="Contorno 2">{skSel(f.b, 'b', [...closedSks, ...sk3])}</Row>
+        <Row label="Espesor hacia"><Seg value={f.side} onChange={(v) => up({ side: v })} options={[['in', 'Dentro'], ['out', 'Fuera']]} /></Row>
+        <Row label="Segmentos (desarrollo)"><Expr value={f.segments} unit="ul" live onCommit={(v) => up({ segments: v })} /></Row>
+        <div className="pick-info">Transiciones de conductos (rectangular a circular, reducciones…). Espesor {s.doc.sheet?.t}. El desarrollo se calcula por triangulación.</div>
       </>)}
       {f.type === 'sm_face' && (<>
         <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
@@ -931,6 +977,10 @@ function DrwPanel() {
         <label className="check"><input type="checkbox" checked={!!v.centers} onChange={(e) => upV({ centers: e.target.checked })} />Marcas de centro automáticas</label>
         {v.kind === 'section' && <button className="btn wide" onClick={drwActions.flipSection}>Invertir dirección de la sección</button>}
         {(v.breaks?.length || v.crop) && <button className="btn wide" onClick={drwActions.clearBreaks}>Quitar roturas y recorte</button>}
+        {v.breakout && (<>
+          <Row label="Corte parcial"><input type="number" value={v.breakout.depth} onChange={(e) => s.commitDrw((dd) => { const t = dd.views.find((x) => x.id === v.id)!; t.breakout = { ...t.breakout!, depth: Number(e.target.value) }; })} /><span className="ro" style={{ marginLeft: 6 }}>mm de profundidad</span></Row>
+          <button className="btn wide" onClick={() => s.commitDrw((dd) => { delete dd.views.find((x) => x.id === v.id)!.breakout; })}>Quitar corte parcial</button>
+        </>)}
         {v.kind === 'flat' && <button className="btn wide" onClick={() => drwActions.addTable('bend')}>Tabla de pliegues</button>}
         <button className="btn danger wide" onClick={() => s.commitDrw((dd) => { const gone = new Set([v.id, ...dd.views.filter((x) => x.parent === v.id).map((x) => x.id)]); dd.views = dd.views.filter((x) => !gone.has(x.id)); dd.dims = dd.dims.filter((x) => !gone.has(x.view)); })}><Icon name="trash" size={16} />Eliminar vista</button>
       </div>
@@ -1489,6 +1539,142 @@ function MotionDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function Sketch3dDialog({ id, onClose }: { id?: string; onClose: () => void }) {
+  const s = useStore();
+  const orig = id ? (s.doc.features.find((f) => f.id === id) as Sketch3dF | undefined) : undefined;
+  const [ents, setEnts] = useState<S3Entity[]>(() => (orig ? JSON.parse(JSON.stringify(orig.entities)) : [{ id: uid('e'), type: 'line3', a: ['0', '0', '0'], b: ['0', '0', '100'] }]));
+  const [name, setName] = useState(orig?.name ?? `Boceto3D${s.doc.features.filter((f) => f.type === 'sketch3d').length + 1}`);
+  const last = (): E3 => { const e = ents[ents.length - 1]; if (!e) return ['0', '0', '0']; return e.type === 'line3' ? [...e.b] as E3 : e.type === 'spline3' ? [...e.pts[e.pts.length - 1]] as E3 : [...e.origin] as E3; };
+  const upE = (i: number, p: Partial<S3Entity>) => setEnts(ents.map((e, j) => (j === i ? ({ ...e, ...p } as S3Entity) : e)));
+  const pt = (val: E3, on: (v: E3) => void) => (
+    <span className="xyz">{(['X', 'Y', 'Z'] as const).map((k, i) => <input key={k} title={k} value={val[i]} onChange={(e) => { const n = [...val] as E3; n[i] = e.target.value; on(n); }} onKeyDown={(e) => e.stopPropagation()} />)}</span>
+  );
+  const save = () => {
+    s.commit((d) => {
+      const f = id ? (d.features.find((x) => x.id === id) as Sketch3dF) : null;
+      if (f) { f.entities = ents; f.name = name; }
+      else d.features.push({ id: uid('f'), name, type: 'sketch3d', entities: ents });
+    });
+    onClose();
+  };
+  return (
+    <Modal title={id ? `Editar ${name}` : 'Boceto 3D'} onClose={onClose} wide>
+      <Row label="Nombre"><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></Row>
+      <p className="phelp">Coordenadas en mm respecto al origen de la pieza; admiten expresiones y parámetros (p. ej. <code>L/2</code>). Las entidades se encadenan en orden.</p>
+      <div className="s3-list">
+        {ents.map((e, i) => (
+          <div key={e.id} className="s3-row">
+            <b>{i + 1}. {e.type === 'line3' ? 'Línea' : e.type === 'spline3' ? 'Spline' : 'Hélice'}</b>
+            {e.type === 'line3' && <>{pt(e.a, (v) => upE(i, { a: v }))}<span>→</span>{pt(e.b, (v) => upE(i, { b: v }))}</>}
+            {e.type === 'spline3' && (<div className="s3-pts">
+              {e.pts.map((q, k) => <div key={k}>{pt(q, (v) => upE(i, { pts: e.pts.map((x, j) => (j === k ? v : x)) }))}{e.pts.length > 2 && <button className="link" onClick={() => upE(i, { pts: e.pts.filter((_, j) => j !== k) })}>quitar</button>}</div>)}
+              <button className="link" onClick={() => upE(i, { pts: [...e.pts, [...e.pts[e.pts.length - 1]] as E3] })}>+ punto</button>
+            </div>)}
+            {e.type === 'helix3' && (<>
+              <span>Centro</span>{pt(e.origin, (v) => upE(i, { origin: v }))}
+              <select value={e.axis} onChange={(ev) => upE(i, { axis: ev.target.value as 'X' })}><option>X</option><option>Y</option><option>Z</option></select>
+              {(['radius', 'pitch', 'height'] as const).map((k) => <label key={k} className="s3-f">{{ radius: 'R', pitch: 'Paso', height: 'Altura' }[k]}<input value={e[k]} onChange={(ev) => upE(i, { [k]: ev.target.value })} onKeyDown={(ev) => ev.stopPropagation()} /></label>)}
+              <label className="check"><input type="checkbox" checked={!!e.left} onChange={(ev) => upE(i, { left: ev.target.checked })} />Izquierdas</label>
+            </>)}
+            <button className="btn icon" title="Eliminar" onClick={() => setEnts(ents.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button>
+          </div>
+        ))}
+      </div>
+      <div className="modal-btns">
+        <button className="btn" onClick={() => { const a = last(); setEnts([...ents, { id: uid('e'), type: 'line3', a, b: [a[0], a[1], `${a[2]} + 50`] }]); }}>+ Línea</button>
+        <button className="btn" onClick={() => { const a = last(); setEnts([...ents, { id: uid('e'), type: 'spline3', pts: [a, [`${a[0]} + 30`, a[1], `${a[2]} + 30`], [`${a[0]} + 60`, a[1], a[2]]] }]); }}>+ Spline</button>
+        <button className="btn" onClick={() => setEnts([...ents, { id: uid('e'), type: 'helix3', origin: ['0', '0', '0'], axis: 'Z', radius: '20', pitch: '10', height: '60' }])}>+ Hélice</button>
+        <span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!ents.length} onClick={save}>Aceptar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function IPartDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [t, setT] = useState<IPartTable>(() => (s.doc.ipart ? JSON.parse(JSON.stringify(s.doc.ipart)) : { cols: [], rows: [{ name: s.doc.iProperties.partNumber || s.fileName.replace(/\.[^.]+$/, ''), values: [] }], active: 0 }));
+  const cands = ipartCandidates(s.doc).filter((c) => !t.cols.includes(c));
+  const [addCol, setAddCol] = useState(cands[0] ?? '');
+  const commit = (apply?: number) => s.commit((d) => { const tt = JSON.parse(JSON.stringify(t)) as IPartTable; d.ipart = tt; if (apply !== undefined) applyIPartRow(d, tt, apply); });
+  const setCell = (r: number, c: number, v: string) => setT({ ...t, rows: t.rows.map((row, i) => (i === r ? { ...row, values: Object.assign([...row.values], { [c]: v }) } : row)) });
+  const member = (r: number) => {
+    const d = JSON.parse(JSON.stringify(s.doc)) as PartDoc; const tt = JSON.parse(JSON.stringify(t)) as IPartTable;
+    applyIPartRow(d, tt, r); delete d.ipart;
+    saveText(JSON.stringify(d, null, 1), `${t.rows[r].name}.i3p`, 'Pieza INV3D', '.i3p', 'application/json');
+  };
+  return (
+    <Modal title="Tabla iPart (familia de piezas)" onClose={onClose} wide>
+      <p className="phelp">Cada fila es un miembro de la familia. Las columnas son parámetros de usuario o cotas de boceto. «Activar» aplica la fila a la pieza; «Generar» guarda el miembro como pieza independiente.</p>
+      <div className="vr-row">
+        <select value={addCol} onChange={(e) => setAddCol(e.target.value)}>{cands.map((c) => <option key={c}>{c}</option>)}</select>
+        <button className="btn" disabled={!addCol} onClick={() => { setT({ ...t, cols: [...t.cols, addCol], rows: t.rows.map((r) => ({ ...r, values: [...r.values, currentValue(s.doc, addCol)] })) }); setAddCol(cands.filter((c) => c !== addCol)[0] ?? ''); }}>Añadir columna</button>
+        <button className="btn" onClick={() => setT({ ...t, rows: [...t.rows, { name: `${t.rows[t.rows.length - 1]?.name ?? 'Miembro'}-${t.rows.length + 1}`, values: [...(t.rows[t.rows.length - 1]?.values ?? t.cols.map((c) => currentValue(s.doc, c)))] }] })}>Añadir fila</button>
+      </div>
+      <div className="ipart-wrap">
+        <table className="ipart">
+          <thead><tr><th></th><th>Nº de pieza</th>{t.cols.map((c, i) => <th key={c}>{c}<button className="link" title="Quitar columna" onClick={() => setT({ cols: t.cols.filter((_, j) => j !== i), rows: t.rows.map((r) => ({ ...r, values: r.values.filter((_, j) => j !== i) })), active: t.active })}>×</button></th>)}<th></th></tr></thead>
+          <tbody>
+            {t.rows.map((r, ri) => (
+              <tr key={ri} className={ri === t.active ? 'on' : ''}>
+                <td>{ri === t.active ? '✓' : ''}</td>
+                <td><input value={r.name} onChange={(e) => setT({ ...t, rows: t.rows.map((x, i) => (i === ri ? { ...x, name: e.target.value } : x)) })} onKeyDown={(e) => e.stopPropagation()} /></td>
+                {t.cols.map((_, ci) => <td key={ci}><input value={r.values[ci] ?? ''} onChange={(e) => setCell(ri, ci, e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></td>)}
+                <td className="nowrap"><button className="btn" onClick={() => { setT({ ...t, active: ri }); commit(ri); }}>Activar</button><button className="btn" onClick={() => member(ri)}>Generar</button>{t.rows.length > 1 && <button className="btn icon" onClick={() => setT({ ...t, rows: t.rows.filter((_, i) => i !== ri), active: Math.min(t.active, t.rows.length - 2) })}><Icon name="trash" size={14} /></button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="modal-btns">
+        {s.doc.ipart && <button className="btn" onClick={() => { s.commit((d) => { delete d.ipart; }); onClose(); }}>Quitar tabla</button>}
+        <span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" onClick={() => { commit(t.active); onClose(); }}>Aceptar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function IFeatureDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const lib = s.libs.ifeatures ?? [];
+  const [tab, setTab] = useState<'insert' | 'extract'>(lib.length ? 'insert' : 'extract');
+  const sks = s.doc.features.filter((f) => f.type === 'sketch');
+  const [sk, setSk] = useState(sks[sks.length - 1]?.id ?? '');
+  const [name, setName] = useState('iFeature1');
+  const [sel, setSel] = useState(0);
+  const def = lib[sel];
+  const params = useMemo(() => (def ? ifParams(def) : []), [def]);
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [plane, setPlane] = useState<PlaneRef>({ kind: 'std', name: 'XY', offset: '0' });
+  const saveLib = (l: IFeatureDef[]) => useStore.setState({ libs: { ...s.libs, ifeatures: l } });
+  return (
+    <Modal title="iFeature" onClose={onClose} wide>
+      <div style={{ marginBottom: 10 }}><Seg value={tab} onChange={setTab} options={[['insert', 'Insertar'], ['extract', 'Extraer']]} /></div>
+      {tab === 'extract' && (<>
+        <Row label="Boceto"><select value={sk} onChange={(e) => setSk(e.target.value)}>{sks.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></Row>
+        <Row label="Nombre"><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        <p className="phelp">Se guardan el boceto y las operaciones que lo usan (extrusión, agujero, revolución…) con sus cotas como parámetros. Queda en tu biblioteca (Opciones › Bibliotecas) y se puede exportar como fichero .i3f.</p>
+        <div className="modal-btns"><span className="grow" />
+          <button className="btn" disabled={!sk} onClick={() => { try { const d = extractIFeature(s.doc, sk, name); saveText(JSON.stringify(d, null, 1), `${name}.i3f`, 'iFeature INV3D', '.i3f', 'application/json'); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Exportar .i3f…</button>
+          <button className="btn primary" disabled={!sk} onClick={() => { try { const d = extractIFeature(s.doc, sk, name); saveLib([...lib.filter((x) => x.name !== name), d]); s.notify(`iFeature «${name}» guardada en la biblioteca (${d.features.length} operaciones)`); setTab('insert'); setSel(lib.filter((x) => x.name !== name).length); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Guardar en la biblioteca</button>
+        </div>
+      </>)}
+      {tab === 'insert' && (<>
+        <div className="vr-row">
+          <select value={sel} onChange={(e) => { setSel(Number(e.target.value)); setVals({}); }}>{lib.map((d, i) => <option key={i} value={i}>{d.name} ({d.features.length})</option>)}</select>
+          <button className="btn" onClick={async () => { const f = await pickFile('.i3f,.json'); if (!f) return; try { const d = JSON.parse(await f.text()) as IFeatureDef; if (!Array.isArray(d.features)) throw new Error('No es una iFeature'); saveLib([...lib, d]); setSel(lib.length); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Abrir .i3f…</button>
+          {def && <button className="btn icon" title="Quitar de la biblioteca" onClick={() => { saveLib(lib.filter((_, i) => i !== sel)); setSel(0); }}><Icon name="trash" size={14} /></button>}
+        </div>
+        {!def ? <p className="phelp">La biblioteca está vacía: extrae antes una iFeature.</p> : (<>
+          <Row label="Plano de colocación"><PlanePick value={plane} onChange={setPlane} /></Row>
+          {params.map((p) => <Row key={p.key} label={p.label}><input value={vals[p.key] ?? p.expr} onChange={(e) => setVals({ ...vals, [p.key]: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></Row>)}
+        </>)}
+        <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn primary" disabled={!def} onClick={() => { s.commit((d) => insertIFeature(d, def, plane, vals)); onClose(); }}>Insertar</button></div>
+      </>)}
+    </Modal>
+  );
+}
+
 function DriveDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const joints = s.asm.joints.filter((j) => j.type === 'rot' || j.type === 'slider');
@@ -1577,6 +1763,13 @@ function BomDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+const SHEET_STYLES = [
+  { name: 'Galvanizado 0,6', t: '0.6 mm', r: '0.6 mm', k: '0.35' }, { name: 'Galvanizado 0,8', t: '0.8 mm', r: '0.8 mm', k: '0.35' },
+  { name: 'Galvanizado 1', t: '1 mm', r: '1 mm', k: '0.38' }, { name: 'Galvanizado 1,2', t: '1.2 mm', r: '1.2 mm', k: '0.4' },
+  { name: 'Acero 2', t: '2 mm', r: '2 mm', k: '0.44' }, { name: 'Acero 3', t: '3 mm', r: '4 mm', k: '0.44' }, { name: 'Acero 5', t: '5 mm', r: '6 mm', k: '0.45' },
+  { name: 'Inox 1,5', t: '1.5 mm', r: '1.5 mm', k: '0.42' }, { name: 'Aluminio 2', t: '2 mm', r: '3 mm', k: '0.43' },
+];
+
 function SheetStyleDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const [st, setSt] = useState(() => ({ ...(s.doc.sheet ?? { t: '2 mm', r: '2 mm', k: '0.44' }) }));
@@ -1586,7 +1779,13 @@ function SheetStyleDialog({ onClose }: { onClose: () => void }) {
       <Row label="Radio plegado"><Expr value={st.r} live onCommit={(v) => setSt({ ...st, r: v })} /></Row>
       <Row label="Factor K"><Expr value={st.k} unit="ul" live onCommit={(v) => setSt({ ...st, k: v })} /></Row>
       <p className="phelp">Desarrollo con tolerancia de pliegue BA = θ·(R + K·t). Valores típicos de K: 0,33 (R &lt; t) a 0,50 (R &gt; 3t).</p>
-      <div className="modal-btns"><span className="grow" />
+      <div className="psec-title">Biblioteca de estilos</div>
+      <div className="chips">
+        {[...SHEET_STYLES, ...(s.libs.sheetStyles ?? [])].map((x) => <button key={x.name} className="chip" title={`t ${x.t} · R ${x.r} · K ${x.k}`} onClick={() => setSt({ t: x.t, r: x.r, k: x.k })}>{x.name}</button>)}
+      </div>
+      <div className="modal-btns">
+        <button className="btn" onClick={() => { const n = prompt('Nombre del estilo (p. ej. Galvanizado 1 mm):', `Chapa ${st.t}`); if (n) useStore.setState({ libs: { ...s.libs, sheetStyles: [...(s.libs.sheetStyles ?? []).filter((x) => x.name !== n), { name: n, ...st }] } }); }}>Guardar en la biblioteca</button>
+        <span className="grow" />
         <button className="btn primary" onClick={() => { s.commit((d) => { d.sheet = st; }); onClose(); }}>Aceptar</button><button className="btn" onClick={onClose}>Cancelar</button>
       </div>
     </Modal>
@@ -1711,6 +1910,9 @@ export function Modals() {
     case 'cpattern': return <CompPatternDialog onClose={close} />;
     case 'drive': return <DriveDialog onClose={close} />;
     case 'motion': return <MotionDialog onClose={close} />;
+    case 'ipart': return <IPartDialog onClose={close} />;
+    case 'ifeature': return <IFeatureDialog onClose={close} />;
+    case 'sketch3d': return <Sketch3dDialog id={(d as { id?: string }).id} onClose={close} />;
     case 'options': return <OptionsDialog onClose={close} />;
     case 'drwstyle': return <DrwStyleDialog onClose={close} />;
     case 'retrieve': return <RetrieveDialog onClose={close} />;
@@ -1728,7 +1930,7 @@ export function Modals() {
     case 'shortcuts': return <Modal title="Atajos de teclado y ratón" onClose={close}><table className="ptable kv"><tbody>{SHORTCUTS.map(([k, v]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{v}</td></tr>)}</tbody></table></Modal>;
     default: return (
       <Modal title="Acerca de INV3D" onClose={close}>
-        <p><b>INV3D 0.5</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
+        <p><b>INV3D 0.6</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
         <p className="phelp">Boceto con restricciones geométricas y cotas, pieza y chapa, ensamblaje con restricciones (solver simultáneo), Centro de contenido, estructura (perfiles EN), soldadura (ISO 2553), tornillería (ISO, cálculo EN 1993-1-8), planos con secciones y detalles (ISO, proyección europea) y presentación.</p>
         <p className="phelp">Núcleo OpenCascade (LGPL) vía replicad · visor Three.js · visor DWG LibreDWG (GPL-3.0).</p>
         <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={close}>Cerrar</button></div>

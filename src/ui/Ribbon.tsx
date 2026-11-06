@@ -182,6 +182,7 @@ export default function Ribbon() {
             <Big icon="smface" label="Cara" onClick={() => s.openFeatureDialog('sm_face')} />
             <Big icon="smcontour" label="Pestaña de contorno" onClick={() => s.openFeatureDialog('sm_contour')} title="Perfil abierto de líneas con pliegues automáticos" />
             <Big icon="smflange" label="Pestaña" disabled={!hasSolid} onClick={() => s.openFeatureDialog('sm_flange')} />
+            <Big icon="smloft" label="Pestaña solevada" onClick={() => s.openFeatureDialog('sm_loft')} title="Transición entre dos contornos (rectangular a circular, reducciones) con desarrollo por triangulación" />
             <Col>
               <Small icon="hem" label="Dobladillo" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('sm_flange'); s.updateDraft({ angle: '180 deg', length: '10 mm', name: 'Dobladillo' }); }} title="Pestaña plegada a 180°" />
               <Small icon="fillet" label="Redondeo de esquina" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('fillet'); s.updateDraft({ radius: '5 mm' }); }} />
@@ -200,7 +201,10 @@ export default function Ribbon() {
           <Group label="Desarrollo"><Big icon="flat" label="Desarrollo" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Patrón desarrollado y DXF para corte" /></Group>
         </>)}
         {k === 'part' && cur === 'model' && (<>
-          <Group label="Boceto"><Big icon="sketch" label="Iniciar boceto 2D" kbd="S" active={tool === 'pickPlane'} onClick={P.startSketch} /></Group>
+          <Group label="Boceto">
+            <Big icon="sketch" label="Iniciar boceto 2D" kbd="S" active={tool === 'pickPlane'} onClick={P.startSketch} />
+            <Big icon="sketch3d" label="Boceto 3D" onClick={() => s.open({ kind: 'sketch3d' })} title="Líneas, splines y hélices en el espacio (trayectorias y contornos)" />
+          </Group>
           <Group label="Crear">
             <Big icon="extrude" label="Extrusión" kbd="E" onClick={() => s.openFeatureDialog('extrude')} />
             <Big icon="revolve" label="Revolución" kbd="R" onClick={() => s.openFeatureDialog('revolve')} />
@@ -237,6 +241,18 @@ export default function Ribbon() {
               <Small icon="copy2d" label="Copiar cuerpo" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('movebody'); s.updateDraft({ copy: true, name: 'Copiar cuerpo' }); }} />
             </Col>
           </Group>
+          <Group label="Superficie">
+            <Col>
+              <Small icon="surfext" label="Extruir" onClick={() => s.openFeatureDialog('surf_extrude')} title="Superficie extruida desde un perfil abierto o cerrado" />
+              <Small icon="surfrev" label="Revolución" onClick={() => s.openFeatureDialog('surf_revolve')} title="Superficie de revolución" />
+              <Small icon="surfloft" label="Solevación" onClick={() => s.openFeatureDialog('surf_loft')} title="Superficie solevada o reglada entre contornos" />
+            </Col>
+            <Col>
+              <Small icon="patch" label="Parche" onClick={() => s.openFeatureDialog('surf_patch')} title="Superficie limitada por un contorno cerrado 2D o 3D" />
+              <Small icon="stitch" label="Coser" onClick={() => s.openFeatureDialog('stitch')} title="Une superficies; si cierran un volumen crea un sólido" />
+              <Small icon="thicken" label="Engrosar sup." onClick={() => { s.openFeatureDialog('thicken'); const sf = s.doc.features.filter((f) => f.type.startsWith('surf_') || f.type === 'stitch').pop(); if (sf) s.updateDraft({ surface: sf.id }); }} title="Da espesor a una superficie" />
+            </Col>
+          </Group>
           <Group label="Operaciones de trabajo">
             <Big icon="workplane" label="Plano" onClick={() => s.openFeatureDialog('workplane')} title="Plano de trabajo desfasado o girado" />
             <Col>
@@ -254,7 +270,13 @@ export default function Ribbon() {
               <Small icon="pathpattern" label="Por trayectoria" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pathpattern')} />
             </Col>
           </Group>
-          <Group label="Parámetros"><Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} /></Group>
+          <Group label="Parámetros">
+            <Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} />
+            <Col>
+              <Small icon="ipart" label="Tabla iPart" onClick={() => s.open({ kind: 'ipart' })} title="Familia de piezas: una fila por miembro" />
+              <Small icon="ifeature" label="iFeature" onClick={() => s.open({ kind: 'ifeature' })} title="Extraer o insertar operaciones reutilizables" />
+            </Col>
+          </Group>
         </>)}
         {k === 'part' && cur === 'inspect' && (<>
           <Group label="Medir">
@@ -356,6 +378,10 @@ export default function Ribbon() {
             <Col>
               <Small icon="breakview" label="Partir" active={tool === 'drwBreak'} onClick={T('drwBreak')} title="Vista partida: suprime un tramo largo" />
               <Small icon="cropview" label="Recortar" active={tool === 'drwCrop'} onClick={T('drwCrop')} title="Recorta la vista a un rectángulo" />
+            </Col>
+            <Col>
+              <Small icon="section" label="Sección escalonada" active={tool === 'drwSectionPath'} onClick={T('drwSectionPath')} title="Sección por una línea quebrada (escalonada o alineada): clic en los puntos, Intro para terminar" />
+              <Small icon="breakout" label="Corte parcial" active={tool === 'drwBreakout'} onClick={T('drwBreakout')} title="Corte parcial (Break Out): rectángulo sobre la vista y profundidad" />
             </Col>
             <Col>
               <Small icon="centermark" label="Marcas de centro auto." disabled={!D.selView()} active={!!D.selView()?.centers} onClick={D.autoCenters} />

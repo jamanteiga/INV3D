@@ -1,6 +1,7 @@
 // Reconstrucción de piezas (incluida chapa) sobre OpenCascade vía replicad.
 import {
   Plane, draw, drawRectangle, drawCircle, drawEllipse, drawText, loadFont, importSTEP, compoundShapes, genericSweep, makeHelix, FaceFinder, getOC, cast, measureShapeVolumeProperties,
+  makeLine, makeBSplineApproximation, assembleWire, makeNonPlanarFace, makeAx1, loft, makeSolid, Vector,
 } from 'replicad';
 import { openSegments, findLoops, loopPolyline, polyArea, pointInPoly, type Seg } from '../core/sketch';
 import type { Drawing, Shape3D, EdgeFinder } from 'replicad';
@@ -8,7 +9,7 @@ import { makeEval } from '../core/expr';
 import {
   docParams, planeFrame, entityOutline, npolyPoints, toWorld, v3, workPlaneFrame, splineBeziers,
   type PartDoc, type SkEntity, type SketchF, type Feature, type EdgeSel, type Frame, type V3, type V2,
-  type WorkPlanes, type BoolOp, type SmFlangeF,
+  type WorkPlanes, type BoolOp, type SmFlangeF, type Sketch3dF, type E3,
 } from '../core/doc';
 
 export interface FeatStatus { ok: boolean; error?: string }
@@ -181,6 +182,101 @@ interface Ctx {
   ev: Ev; sketches: Map<string, SketchF>; work: WorkPlanes;
   tools: Map<string, { solid: Shape3D; op: BoolOp }>;
   sheet: { t: number; r: number; k: number } | null;
+  sk3d: Map<string, Sketch3dF>;
+  surfaces: Map<string, Shape3D>;
+}
+
+// ---------- Boceto 3D y superficies ----------
+const e3 = (p: E3, ev: Ev): V3 => [ev(p[0]), ev(p[1]), ev(p[2])];
+/** Alambre de un boceto 3D (las entidades se encadenan en el orden en que están). */
+export function wire3d(f: Sketch3dF, ev: Ev): any {
+  const parts: any[] = [];
+  for (const e of f.entities) {
+    if (e.type === 'line3') { const a = e3(e.a, ev), b = e3(e.b, ev); if (v3.len(v3.sub(b, a)) < 1e-9) throw new Error('Línea 3D de longitud nula'); parts.push(makeLine(a, b)); }
+    else if (e.type === 'spline3') { if (e.pts.length < 2) throw new Error('La spline 3D necesita al menos 2 puntos'); parts.push(makeBSplineApproximation(e.pts.map((p) => e3(p, ev)) as any)); }
+    else {
+      const r = ev(e.radius), pitch = ev(e.pitch), h = ev(e.height);
+      if (!(r > 0 && pitch > 0 && h > 0)) throw new Error('Hélice: radio, paso y altura deben ser mayores que 0');
+      const dir: V3 = e.axis === 'X' ? [1, 0, 0] : e.axis === 'Y' ? [0, 1, 0] : [0, 0, 1];
+      parts.push(makeHelix(pitch, h, r, e3(e.origin, ev), dir, !!e.left));
+    }
+  }
+  if (!parts.length) throw new Error('El boceto 3D está vacío');
+  return parts.length === 1 && parts[0].constructor?.name === 'Wire' ? parts[0] : assembleWire(parts);
+}
+/** Alambre de un boceto 2D (trayectoria abierta o contorno exterior) o de un boceto 3D. */
+function wireOf(id: string, ctx: Ctx): any {
+  const s3 = ctx.sk3d.get(id); if (s3) return wire3d(s3, ctx.ev);
+  const sk = ctx.sketches.get(id); if (!sk) throw new Error('Boceto no encontrado o con errores');
+  const pl = makePlane(planeFrame(sk.plane, ctx.ev, ctx.work));
+  try { return (sketchPath(sk, ctx.ev).sketchOnPlane(pl) as any).wire; }
+  catch { return (sketchProfile(sk, ctx.ev, true).sketchOnPlane(pl) as any).wire; }
+}
+function closedWireOf(id: string, ctx: Ctx): any {
+  const s3 = ctx.sk3d.get(id); if (s3) return wire3d(s3, ctx.ev);
+  const sk = ctx.sketches.get(id); if (!sk) throw new Error('Boceto no encontrado o con errores');
+  return (sketchProfile(sk, ctx.ev, true).sketchOnPlane(makePlane(planeFrame(sk.plane, ctx.ev, ctx.work))) as any).wire;
+}
+const castShape = (x: unknown) => cast(x as any) as unknown as Shape3D;
+function prismOf(sh: any, vec: V3): Shape3D {
+  const oc = getOC() as any;
+  const v = new Vector(vec);
+  const mk = new oc.BRepPrimAPI_MakePrism(sh.wrapped, v.wrapped, false, true);
+  const r = castShape(mk.Shape()); mk.delete(); v.delete();
+  return r;
+}
+function revolOf(sh: any, origin: V3, dir: V3, angDeg: number): Shape3D {
+  const oc = getOC() as any;
+  const ax = makeAx1(origin, dir);
+  const mk = new oc.BRepPrimAPI_MakeRevol(sh.wrapped, ax, (angDeg * Math.PI) / 180, false);
+  const r = castShape(mk.Shape()); mk.delete(); ax.delete();
+  return r;
+}
+function thickOf(sh: Shape3D, d: number): Shape3D {
+  const oc = getOC() as any;
+  const mk = new oc.BRepOffsetAPI_MakeThickSolid();
+  mk.MakeThickSolidBySimple((sh as any).wrapped, d);
+  mk.Build(new oc.Message_ProgressRange());
+  let sol = castShape(mk.Shape());
+  mk.delete();
+  if (measureShapeVolumeProperties(sol).volume < 0) sol = castShape((sol as any).wrapped.Reversed());
+  return sol;
+}
+/** Cose superficies; devuelve sólido si quedan cerradas. */
+function sewOf(shapes: Shape3D[]): { shape: Shape3D; solid: boolean } {
+  const oc = getOC() as any;
+  const sw = new oc.BRepBuilderAPI_Sewing(1e-3, true, true, true, false);
+  for (const x of shapes) sw.Add((x as any).wrapped);
+  sw.Perform(new oc.Message_ProgressRange());
+  const res = castShape(sw.SewedShape()); sw.delete();
+  try {
+    const sol = makeSolid([res as any]) as unknown as Shape3D;
+    const vol = measureShapeVolumeProperties(sol).volume;
+    if (Math.abs(vol) > 1e-6) return { shape: vol < 0 ? castShape((sol as any).wrapped.Reversed()) : sol, solid: true };
+  } catch { /* abierta */ }
+  return { shape: res, solid: false };
+}
+/** Puntos equiespaciados de un contorno cerrado (para desarrollar transiciones de chapa). */
+export function sampleClosed(w: any, n: number): V3[] {
+  // reparto por longitud, con un punto en el inicio de cada arista (las esquinas se conservan)
+  const edges = w.edges as any[];
+  const lens = edges.map((e) => e.length as number), tot = lens.reduce((a, b) => a + b, 0);
+  const cnt = lens.map((l) => Math.max(1, Math.round((n * l) / tot)));
+  let diff = n - cnt.reduce((a, b) => a + b, 0);
+  while (diff !== 0) { const i = lens.indexOf(Math.max(...lens.filter((_, k) => diff > 0 || cnt[k] > 1))); cnt[i] += Math.sign(diff); diff -= Math.sign(diff); }
+  const P = (e: any, t: number): V3 => { const p = e.pointAt(t); const r: V3 = [p.x, p.y, p.z]; p.delete?.(); return r; };
+  const ends = edges.map((e) => [P(e, 0), P(e, 1)] as [V3, V3]);
+  const d = (a: V3, b: V3) => v3.len(v3.sub(a, b));
+  // sentido de cada arista para que el recorrido sea continuo
+  const rev: boolean[] = [];
+  let cur: V3;
+  if (edges.length > 1) { const [s0, e0] = ends[0], [s1, e1] = ends[1]; rev[0] = Math.min(d(s0, s1), d(s0, e1)) < Math.min(d(e0, s1), d(e0, e1)); }
+  else rev[0] = false;
+  cur = rev[0] ? ends[0][0] : ends[0][1];
+  for (let k = 1; k < edges.length; k++) { rev[k] = d(ends[k][1], cur) < d(ends[k][0], cur); cur = rev[k] ? ends[k][0] : ends[k][1]; }
+  const out: V3[] = [];
+  edges.forEach((e, k) => { for (let j = 0; j < cnt[k]; j++) { const t = j / cnt[k]; out.push(P(e, rev[k] ? 1 - t : t)); } });
+  return out;
 }
 
 /** Sólido herramienta de un agujero (revolución de la media sección) en un punto. */
@@ -401,8 +497,9 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
       return { solid, op: f.op };
     }
     case 'thicken': {
-      if (!shape) throw new Error('No hay sólido');
       const d = ev(f.distance); if (!(Math.abs(d) > 1e-6)) throw new Error('Distancia no válida');
+      if (f.surface) { const sf = ctx.surfaces.get(f.surface); if (!sf) throw new Error('Superficie no encontrada'); return { solid: thickOf(sf, d), op: f.op }; }
+      if (!shape) throw new Error('No hay sólido');
       if (!f.faces.length) throw new Error('Selecciona caras');
       let tool: Shape3D | null = null;
       for (const p of f.faces) {
@@ -464,10 +561,10 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
       return { solid: sks[0].loftWith(sks.slice(1), { ruled: f.ruled }), op: f.op };
     }
     case 'sweep': {
-      const skP = getSk(f.profile), skT = getSk(f.path);
+      const skP = getSk(f.profile);
       const prof = (sketchProfile(skP, ev, true).sketchOnPlane(makePlane(planeFrame(skP.plane, ev, work))) as any);
-      const path = (sketchPath(skT, ev).sketchOnPlane(makePlane(planeFrame(skT.plane, ev, work))) as any);
-      const solid = genericSweep(prof.wire, path.wire, { frenet: true, transitionMode: 'round' }, false);
+      const pathW = wireOf(f.path, ctx);
+      const solid = genericSweep(prof.wire, pathW, { frenet: true, transitionMode: 'round' }, false);
       return { solid, op: f.op };
     }
     case 'sm_face': {
@@ -513,7 +610,7 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
   }
 }
 
-export interface PartBuild { shape: Shape3D | null; status: Record<string, FeatStatus> }
+export interface PartBuild { shape: Shape3D | null; status: Record<string, FeatStatus>; surfaces: Shape3D | null }
 
 export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild> {
   const ev = makeEval(docParams(doc));
@@ -521,6 +618,7 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
   const ctx: Ctx = {
     ev, sketches: new Map(), work: new Map(), tools: new Map(),
     sheet: doc.sheet ? { t: ev(doc.sheet.t), r: ev(doc.sheet.r), k: ev(doc.sheet.k) } : null,
+    sk3d: new Map(), surfaces: new Map(),
   };
   let shape: Shape3D | null = null;
   const feats = upTo !== undefined ? doc.features.slice(0, upTo) : doc.features;
@@ -536,6 +634,65 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
         case 'workplane':
           ctx.work.set(f.id, workPlaneFrame(f, ev, ctx.work));
           break;
+        case 'sketch3d':
+          wire3d(f, ev);
+          ctx.sk3d.set(f.id, f);
+          break;
+        case 'surf_extrude': {
+          const sk = ctx.sketches.get(f.profile); if (!sk) throw new Error('Boceto no encontrado');
+          const fr = planeFrame(sk.plane, ev, ctx.work), d = ev(f.distance);
+          if (!(d > 0)) throw new Error('La distancia debe ser mayor que 0');
+          let w = wireOf(f.profile, ctx);
+          if (f.dir === 'symmetric') w = w.clone().translate(v3.mul(fr.normal, -d / 2));
+          ctx.surfaces.set(f.id, prismOf(w, v3.mul(fr.normal, f.dir === 'reverse' ? -d : d)));
+          break;
+        }
+        case 'surf_revolve': {
+          const sk = ctx.sketches.get(f.profile); if (!sk) throw new Error('Boceto no encontrado');
+          const fr = planeFrame(sk.plane, ev, ctx.work), ang = ev(f.angle);
+          if (!(ang > 0 && ang <= 360)) throw new Error('Ángulo entre 0 y 360°');
+          let origin: V3 = fr.origin, dir: V3 = f.axis === 'sx' ? fr.xDir : fr.yDir;
+          if (f.axis !== 'sx' && f.axis !== 'sy') {
+            const ln = sk.entities.find((e) => e.id === f.axis);
+            if (!ln || ln.type !== 'line') throw new Error('Eje de revolución no encontrado');
+            const a = toWorld(fr, ev(ln.a[0]), ev(ln.a[1])), b = toWorld(fr, ev(ln.b[0]), ev(ln.b[1]));
+            origin = a; dir = v3.norm(v3.sub(b, a));
+          }
+          ctx.surfaces.set(f.id, revolOf(wireOf(f.profile, ctx), origin, dir, ang));
+          break;
+        }
+        case 'surf_loft': {
+          if (f.sections.length < 2) throw new Error('Selecciona al menos dos bocetos');
+          ctx.surfaces.set(f.id, loft(f.sections.map((id) => wireOf(id, ctx)), { ruled: f.ruled }, true) as unknown as Shape3D);
+          break;
+        }
+        case 'surf_patch': {
+          if (ctx.sk3d.has(f.sketch)) ctx.surfaces.set(f.id, makeNonPlanarFace(wire3d(ctx.sk3d.get(f.sketch)!, ev)) as unknown as Shape3D);
+          else {
+            const sk = ctx.sketches.get(f.sketch); if (!sk) throw new Error('Boceto no encontrado');
+            ctx.surfaces.set(f.id, (sketchProfile(sk, ev).sketchOnPlane(makePlane(planeFrame(sk.plane, ev, ctx.work))) as any).face());
+          }
+          break;
+        }
+        case 'stitch': {
+          const parts = f.surfaces.map((id) => { const x = ctx.surfaces.get(id); if (!x) throw new Error('Superficie no encontrada'); return x; });
+          if (!parts.length) throw new Error('Selecciona superficies');
+          const r = sewOf(parts);
+          if (!f.keep) for (const id of f.surfaces) ctx.surfaces.delete(id);
+          if (r.solid) { ctx.tools.set(f.id, { solid: r.shape.clone(), op: f.op }); shape = combine(shape, r.shape, f.op); }
+          else { ctx.surfaces.set(f.id, r.shape); status[f.id] = { ok: true, error: 'Las superficies no cierran un volumen: queda como superficie cosida' }; }
+          break;
+        }
+        case 'sm_loft': {
+          if (!ctx.sheet) throw new Error('La pieza no es de chapa');
+          const wa = closedWireOf(f.a, ctx), wb = closedWireOf(f.b, ctx);
+          const shell = loft([wa, wb], { ruled: true }, true) as unknown as Shape3D;
+          const t = ctx.sheet.t;
+          const sol = thickOf(shell, f.side === 'in' ? -t : t);
+          ctx.tools.set(f.id, { solid: sol.clone(), op: 'join' });
+          shape = combine(shape, sol, 'join');
+          break;
+        }
         case 'import': {
           const s = (await importSTEP(new Blob([f.step]))) as Shape3D;
           shape = shape ? shape.fuse(s) : s;
@@ -705,15 +862,53 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
           }
         }
       }
-      status[f.id] = { ok: true };
+      status[f.id] = status[f.id] ?? { ok: true };
     } catch (e) {
       status[f.id] = { ok: false, error: (e as Error)?.message || 'Error de geometría (OpenCascade)' };
     }
   }
-  return { shape, status };
+  const surfs = [...ctx.surfaces.values()];
+  return { shape, status, surfaces: surfs.length ? (surfs.length === 1 ? surfs[0] : compoundShapes(surfs) as unknown as Shape3D) : null };
 }
 
 /** Desarrollo de chapa (cara base + pestañas en sus aristas). Devuelve trayectorias SVG en el plano de la cara. */
+/** Desarrollo de una transición por triangulación (generatrices A[i]–B[i]); la costura está en i = 0. */
+export function developTransition(A0: V3[], B0: V3[]): { outline: V2[]; lines: [V2, V2][] } {
+  const N = A0.length;
+  // alinear el contorno B con A: mismo sentido de recorrido y arranque más cercano
+  const cA = A0.reduce((s, p) => v3.add(s, p), [0, 0, 0] as V3).map((x) => x / N) as V3;
+  const cB = B0.reduce((s, p) => v3.add(s, p), [0, 0, 0] as V3).map((x) => x / N) as V3;
+  const area = (P: V3[], c: V3) => P.reduce((s, p, i) => v3.add(s, v3.cross(v3.sub(p, c), v3.sub(P[(i + 1) % P.length], c))), [0, 0, 0] as V3);
+  let B = [...B0];
+  if (v3.dot(area(A0, cA), area(B, cB)) < 0) B = [B[0], ...B.slice(1).reverse()];
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < N; i++) { const d = v3.len(v3.sub(v3.sub(B[i], cB), v3.sub(A0[0], cA))); if (d < bd) { bd = d; best = i; } }
+  B = [...B.slice(best), ...B.slice(0, best)];
+  const A = [...A0, A0[0]]; B = [...B, B[0]];
+  const D = (p: V3, q: V3) => v3.len(v3.sub(p, q));
+  // colocar un punto a distancias da (de p) y db (de q), en el lado contrario a «opp» (el triángulo anterior)
+  const place = (p: V2, q: V2, da: number, db: number, opp: V2 | null): V2 => {
+    const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy) || 1e-9;
+    const a = (da * da - db * db + L * L) / (2 * L), h = Math.sqrt(Math.max(0, da * da - a * a));
+    const ux = dx / L, uy = dy / L;
+    const c1: V2 = [p[0] + a * ux - h * uy, p[1] + a * uy + h * ux], c2: V2 = [p[0] + a * ux + h * uy, p[1] + a * uy - h * ux];
+    if (!opp) return c1;
+    const side = (X: V2) => Math.sign(dx * (X[1] - p[1]) - dy * (X[0] - p[0]));
+    return side(c1) !== side(opp) ? c1 : c2;
+  };
+  const a2: V2[] = [[0, 0]], b2: V2[] = [[0, D(A[0], B[0])]];
+  let prev: V2 | null = null;
+  for (let i = 0; i < N; i++) {
+    // triángulos (A_i, B_i, A_i+1) y (A_i+1, B_i, B_i+1)
+    a2.push(place(a2[i], b2[i], D(A[i], A[i + 1]), D(B[i], A[i + 1]), prev));
+    b2.push(place(a2[i + 1], b2[i], D(A[i + 1], B[i + 1]), D(B[i], B[i + 1]), a2[i]));
+    prev = b2[i];
+  }
+  const lines: [V2, V2][] = [];
+  for (let i = 1; i < N; i++) lines.push([a2[i], b2[i]]);
+  return { outline: [...a2, ...[...b2].reverse()], lines };
+}
+
 export function flatPattern(doc: PartDoc) {
   if (!doc.sheet) throw new Error('La pieza no es de chapa');
   const ev = makeEval(docParams(doc));
@@ -723,10 +918,24 @@ export function flatPattern(doc: PartDoc) {
   let base: { fr: Frame; prof: Drawing } | null = null;
   const bends: { a: V2; b: V2; label: string }[] = [];
   let flat: Drawing | null = null;
+  const sk3 = new Map<string, Sketch3dF>();
   for (const f of doc.features) {
     if (f.suppressed) continue;
     if (f.type === 'sketch') sketches.set(f.id, f);
+    if (f.type === 'sketch3d') sk3.set(f.id, f);
     if (f.type === 'workplane') work.set(f.id, workPlaneFrame(f, ev, work));
+    if (f.type === 'sm_loft' && !base && !flat) {
+      const wire = (id: string) => { const a = sk3.get(id); if (a) return wire3d(a, ev); const sk = sketches.get(id); if (!sk) throw new Error('Boceto no encontrado'); return (sketchProfile(sk, ev, true).sketchOnPlane(makePlane(planeFrame(sk.plane, ev, work))) as any).wire; };
+      const N = Math.max(8, Math.min(200, Math.round(ev(f.segments) || 24)));
+      // costura en el centro del primer lado del contorno 1 (no en una esquina)
+      const wa = wire(f.a), es = wa.edges as any[], tot = es.reduce((t: number, e: any) => t + e.length, 0);
+      const k0 = Math.floor(Math.max(1, Math.round((N * es[0].length) / tot)) / 2) % N;
+      const SA = sampleClosed(wa, N), A = [...SA.slice(k0), ...SA.slice(0, k0)];
+      const dev = developTransition(A, sampleClosed(wire(f.b), N));
+      flat = polyDrawing(dev.outline);
+      for (const [a, b] of dev.lines) bends.push({ a, b, label: '' });
+      continue;
+    }
     if (f.type === 'sm_contour' && !base && !flat) {
       const sk = sketches.get(f.profile); if (!sk) continue;
       const W = ev(f.width);

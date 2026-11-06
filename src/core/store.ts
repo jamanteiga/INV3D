@@ -21,16 +21,18 @@ export type Tool = null
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
   | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge'
   | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember'
-  | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum';
+  | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum' | 'drwSectionPath' | 'drwBreakout';
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
   | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange' | 'rib' | 'coil' | 'split' | 'draft' | 'thicken' | 'thread' | 'workaxis' | 'workpoint'
-  | 'combine' | 'movebody' | 'derive' | 'pathpattern' | 'sm_contour' | 'sm_punch';
+  | 'combine' | 'movebody' | 'derive' | 'pathpattern' | 'sm_contour' | 'sm_punch'
+  | 'surf_extrude' | 'surf_revolve' | 'surf_loft' | 'surf_patch' | 'stitch' | 'sm_loft';
 export type AsmDialogKind = 'joint' | 'frame' | 'weld' | 'bolt' | 'skel' | 'endtreat';
 export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' }
+  | { kind: 'sketch3d'; id?: string }
   | { kind: 'fileinfo'; title: string; info: FileInfo }
   | { kind: 'skop'; op: SkOp; params: Record<string, string>; step: number; base?: string };
 export type SkOp = 'offset' | 'mirror' | 'rpattern' | 'cpattern' | 'move' | 'copy' | 'rotate' | 'scale' | 'fillet' | 'chamfer' | 'text';
@@ -443,6 +445,15 @@ export const useStore = create<State>((set, get) => ({
           draft = { id, name, type: 'sweep', profile, path: pathSk, op: 'join' }; break;
         }
         case 'sm_face': draft = { id, name, type: 'sm_face', profile }; break;
+        case 'surf_extrude': draft = { id, name, type: 'surf_extrude', profile: lastSketch(doc, () => true), distance: '20 mm', dir: 'normal' }; break;
+        case 'surf_revolve': draft = { id, name, type: 'surf_revolve', profile: lastSketch(doc, () => true), axis: 'sy', angle: '360 deg' }; break;
+        case 'surf_loft': draft = { id, name, type: 'surf_loft', sections: doc.features.filter((f) => (f.type === 'sketch' || f.type === 'sketch3d') && !consumedSketches(doc).has(f.id)).map((f) => f.id).slice(-2), ruled: true }; break;
+        case 'surf_patch': draft = { id, name, type: 'surf_patch', sketch: [...doc.features].reverse().find((f) => (f.type === 'sketch' || f.type === 'sketch3d') && !consumedSketches(doc).has(f.id))?.id ?? '' }; break;
+        case 'stitch': draft = { id, name, type: 'stitch', surfaces: doc.features.filter((f) => ['surf_extrude', 'surf_revolve', 'surf_loft', 'surf_patch'].includes(f.type) && !consumedSketches(doc).has(f.id)).map((f) => f.id), op: 'join' }; break;
+        case 'sm_loft': {
+          const free = doc.features.filter((f) => (f.type === 'sketch' || f.type === 'sketch3d') && !consumedSketches(doc).has(f.id)).map((f) => f.id);
+          draft = { id, name, type: 'sm_loft', a: free[free.length - 2] ?? '', b: free[free.length - 1] ?? '', side: 'in', segments: '24' }; break;
+        }
         case 'sm_flange': draft = { id, name, type: 'sm_flange', edge: null, length: '20 mm', angle: '90 deg', dir: 'up' }; break;
         case 'rib': draft = { id, name, type: 'rib', profile: lastSketch(doc, (s) => s.entities.some((e) => e.type === 'line' && !e.construction)), thickness: '5 mm', depth: '30 mm', flip: false, op: 'join' }; break;
         case 'coil': {

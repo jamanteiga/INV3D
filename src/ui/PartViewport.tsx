@@ -4,7 +4,7 @@ import { useStore, activeSketch, type State } from '../core/store';
 import { makeEval, fmt } from '../core/expr';
 import {
   docParams, planeFrame, toWorld, entityOutline, consumedSketches, uid, v3, MATERIALS, PLANE_STD, resolveWorkPlanes,
-  type Frame, type V3, type V2, type SkEntity, type SketchF, type StdPlane, type EdgeSel, type WorkPlanes, type GRef, type SkConstraint, type DimKind,
+  type Frame, type V3, type V2, type SkEntity, type SketchF, type StdPlane, type EdgeSel, type WorkPlanes, type GRef, type SkConstraint, type DimKind, type Sketch3dF, type E3,
 } from '../core/doc';
 import {
   sketchPoints, pointOf, segKeys, segOf, entG, refPoint, refLine, refCurve, refKind, makeConstraint, makeDim, dimValue,
@@ -39,6 +39,30 @@ function faceGroupContaining(m: MeshData, p: V3): number {
     }
   }
   return -1;
+}
+
+/** Polilíneas para mostrar un boceto 3D (la geometría exacta la calcula el núcleo). */
+function sketch3dPolyline(f: Sketch3dF, ev: (x: string) => number): V3[][] {
+  const P = (e: E3): V3 => [ev(e[0]), ev(e[1]), ev(e[2])];
+  return f.entities.map((e) => {
+    if (e.type === 'line3') return [P(e.a), P(e.b)];
+    if (e.type === 'spline3') {
+      const q = e.pts.map(P), out: V3[] = [];
+      for (let i = 0; i + 1 < q.length; i++) {
+        const p0 = q[Math.max(0, i - 1)], p1 = q[i], p2 = q[i + 1], p3 = q[Math.min(q.length - 1, i + 2)];
+        for (let k = 0; k < 12; k++) { const t = k / 12, t2 = t * t, t3 = t2 * t; out.push([0, 1, 2].map((c) => 0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t2 + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t3)) as V3); }
+      }
+      out.push(q[q.length - 1]);
+      return out;
+    }
+    const o = P(e.origin), r = ev(e.radius), pitch = ev(e.pitch), h = ev(e.height), n = Math.max(8, Math.ceil((h / pitch) * 48)), out: V3[] = [];
+    for (let i = 0; i <= n; i++) {
+      const t = (i / n) * (h / pitch) * Math.PI * 2 * (e.left ? -1 : 1), z = (i / n) * h;
+      const a = r * Math.cos(t), b = r * Math.sin(t);
+      out.push(e.axis === 'Z' ? [o[0] + a, o[1] + b, o[2] + z] : e.axis === 'X' ? [o[0] + z, o[1] + a, o[2] + b] : [o[0] + b, o[1] + z, o[2] + a]);
+    }
+    return out;
+  });
 }
 
 export default function PartViewport() {
@@ -110,7 +134,13 @@ export default function PartViewport() {
       const res = (s.dialog && 'draft' in s.dialog && s.preview) ? s.preview : s.result;
       const m = res?.mesh ?? null;
       state.mesh = m;
-      V.hasModel = !!m?.triangles.length;
+      const sm = res?.surfMesh;
+      if (sm?.triangles.length) {
+        const { grp, mesh } = V.meshFromData(sm, '#e9a23b', { opacity: 0.55, edges: true });
+        partGroup.add(grp);
+        if (!m?.triangles.length) { mesh.geometry.computeBoundingBox(); V.bbox.copy(mesh.geometry.boundingBox!); }
+      }
+      V.hasModel = !!m?.triangles.length || !!sm?.triangles.length;
       if (!m || !m.triangles.length) { buildOverlay(s); return; }
       const color = MATERIALS.find((x) => x.name === s.doc.iProperties.material)?.color ?? '#c3c8cf';
       const isPreview = res === s.preview && !!s.preview;
@@ -327,6 +357,14 @@ export default function PartViewport() {
               const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(o, 3));
               originGroup.add(new THREE.Points(g, new THREE.PointsMaterial({ color: css('--plane'), size: 9 * dpr(), sizeAttenuation: false })));
             }
+          } catch { /* expresión inválida */ }
+        }
+        if (f.type === 'sketch3d' && !f.suppressed && s.mode !== 'sketch') {
+          try {
+            const pts = sketch3dPolyline(f, safeEval(s));
+            const flat: number[] = [];
+            for (const pl of pts) for (let i = 0; i + 1 < pl.length; i++) flat.push(...pl[i], ...pl[i + 1]);
+            originGroup.add(V.segs(flat, V.lineMat('#d9480f', 2, true, false)));
           } catch { /* expresión inválida */ }
         }
       }

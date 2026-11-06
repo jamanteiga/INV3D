@@ -14,6 +14,7 @@ const ICON: Record<Feature['type'], string> = {
   hole: 'hole', pattern: 'prect', mirror: 'mirror', shell: 'shell', workplane: 'workplane', loft: 'loft', sweep: 'sweep',
   sm_face: 'smface', sm_flange: 'smflange', rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken',
   thread: 'thread', workaxis: 'axis', workpoint: 'point',
+  sketch3d: 'sketch3d', surf_extrude: 'surfext', surf_revolve: 'surfrev', surf_loft: 'surfloft', surf_patch: 'patch', stitch: 'stitch', sm_loft: 'smloft',
   combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch',
 };
 
@@ -70,6 +71,7 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
   }
   const edit = (f: Feature) => {
     if (f.type === 'sketch') s.editSketch(f.id);
+    else if (f.type === 'sketch3d') s.open({ kind: 'sketch3d', id: f.id });
     else if (f.type === 'import') s.notify('Un sólido importado no tiene parámetros editables');
     else s.openFeatureDialog(f.type as never, f.id);
   };

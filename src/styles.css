@@ -478,3 +478,19 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
 .file-menu { max-height: calc(100vh - 70px); overflow-y: auto; }
+
+.s3-list { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow: auto; margin: 8px 0; }
+.s3-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 4px; }
+.s3-row > b { min-width: 72px; }
+.xyz { display: inline-flex; gap: 2px; }
+.xyz input { width: 64px; }
+.s3-pts { display: flex; flex-direction: column; gap: 2px; }
+.s3-f { display: inline-flex; align-items: center; gap: 3px; }
+.s3-f input { width: 56px; }
+.ipart-wrap { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 4px; margin: 8px 0; }
+.ipart { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.ipart th, .ipart td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: left; white-space: nowrap; }
+.ipart th { position: sticky; top: 0; background: var(--panel, #f4f5f7); }
+.ipart input { width: 90px; }
+.ipart tr.on td { background: rgba(0, 110, 220, .07); }
+.nowrap { white-space: nowrap; }

@@ -10,6 +10,8 @@ export interface MeshData {
 export interface MassProps { volume: number; area: number; cog: V3; bbox: [V3, V3] }
 export interface RegenResult {
   mesh: MeshData | null;
+  /** Cuerpos de superficie (se muestran translúcidos) */
+  surfMesh?: MeshData | null;
   status: Record<string, { ok: boolean; error?: string }>;
   props: MassProps | null;
   ms: number;
@@ -67,7 +69,7 @@ class CadClient {
   exportSTL(target: 'part' | 'asm' = 'part') { return this.call<ArrayBuffer>('exportSTL', { target }); }
   checkSTEP(text: string) { return this.call<{ bbox: [V3, V3]; solids: number }>('checkSTEP', { text }); }
   splitSTEP(text: string) { return this.call<string[]>('splitSTEP', { text }); }
-  project(source: ProjSource, dir: V3, x: V3, section?: { origin: V3; normal: V3 }) { return this.call<Projection>('project', { source, dir, x, section }); }
+  project(source: ProjSource, dir: V3, x: V3, section?: { origin: V3; normal: V3; path?: V3[]; toward?: V3 }, breakout?: { loop: V3[]; depth: number }) { return this.call<Projection>('project', { source, dir, x, section, breakout }); }
   flat(doc: PartDoc) { return this.call<FlatResult>('flat', { doc }); }
   interference(asm: AsmDoc, parts: Record<string, PartDoc>) { return this.call<{ a: string; b: string; volume: number; mesh: MeshData }[]>('interf', { asm, parts }); }
 }

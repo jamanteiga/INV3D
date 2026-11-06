@@ -48,7 +48,7 @@ export function getProjection(s: State, v: DView): Promise<ProjData> | null {
   const key = src.kind === 'part' ? src.doc : src.asm;
   let m = projStore.get(key);
   if (!m) { m = new Map(); projStore.set(key, m); }
-  const k = v.kind === 'section' ? JSON.stringify(v.section && [v.section.origin, v.section.normal, v.section.x]) : v.kind === 'aux' ? JSON.stringify(v.aux && [v.aux.toward, v.aux.x]) : v.kind === 'flat' ? 'flat' : v.dir;
+  const k = v.breakout ? `${v.dir}|bo|${JSON.stringify(v.breakout)}` : v.kind === 'section' ? JSON.stringify(v.section && [v.section.origin, v.section.normal, v.section.x, v.section.path ?? null]) : v.kind === 'aux' ? JSON.stringify(v.aux && [v.aux.toward, v.aux.x]) : v.kind === 'flat' ? 'flat' : v.dir;
   if (!m.has(k) && v.kind === 'flat') {
     if (src.kind !== 'part') return null;
     const pr = cad.flat(src.doc).then((r) => {
@@ -61,7 +61,8 @@ export function getProjection(s: State, v: DView): Promise<ProjData> | null {
   }
   if (!m.has(k)) {
     const cam = viewCamera(v);
-    const pr = cad.project(src, cam.toward, cam.x, v.kind === 'section' && v.section ? { origin: v.section.origin, normal: v.section.normal } : undefined).then((r) => {
+    const sec = v.kind === 'section' && v.section ? { origin: v.section.origin, normal: v.section.normal, ...(v.section.path ? { path: v.section.path, toward: v.section.toward } : {}) } : undefined;
+    const pr = cad.project(src, cam.toward, cam.x, sec, v.breakout).then((r) => {
       // replicad devuelve Y hacia abajo: se invierte para tener Y hacia arriba (coincide con (p - c)·arriba)
       const flip = (polys: P2[][]) => polys.map((pp) => pp.map(([x, y]) => [x, -y] as P2));
       const vis = flip(r.visible.flatMap((d) => flattenPath(d)));
@@ -145,6 +146,8 @@ const TOOL_HINT: Record<string, string[]> = {
   drwBaseline: ['Cotas desde línea base: punto base', 'Puntos a acotar · Intro o clic derecho para crear las cotas'],
   drwFcf: ['Tolerancia geométrica: punta de la directriz sobre la arista', 'Posición del marco'],
   drwDatum: ['Referencia (datum): punto sobre la superficie', 'Posición del recuadro'],
+  drwSectionPath: ['Sección escalonada: primer punto de la línea de corte', 'Siguientes puntos · Intro o clic derecho para terminar'],
+  drwBreakout: ['Corte parcial: primera esquina sobre la vista', 'Esquina opuesta'],
 };
 
 export default function DrawingView() {
@@ -292,6 +295,27 @@ export default function DrawingView() {
         reset(); return;
       }
       if (tool === 'drwSurface') { addAnn({ kind: 'surface', pts: [snapPoint(p)?.pt ?? p], text: 'Ra 3,2' }); return; }
+      if (tool === 'drwSectionPath') {
+        const q = snapPoint(p)?.pt ?? p;
+        if (!P.length) { const v = viewAt(p); if (!v || v.kind === 'detail' || v.dir === 'iso') { s.notify('Haz clic sobre una vista ortogonal', 'error'); return; } setClicks({ view: v.id, pts: [q], refs: [] }); return; }
+        // tramos horizontales/verticales si casi lo son
+        const L = P[P.length - 1];
+        let B = q;
+        if (Math.abs(B[1] - L[1]) < Math.abs(B[0] - L[0]) * 0.08) B = [B[0], L[1]];
+        else if (Math.abs(B[0] - L[0]) < Math.abs(B[1] - L[1]) * 0.08) B = [L[0], B[1]];
+        setClicks({ ...clicks, pts: [...P, B] }); return;
+      }
+      if (tool === 'drwBreakout') {
+        if (!P.length) { const v = viewAt(p); if (!v || v.kind !== 'base' && v.kind !== 'proj' && v.kind !== undefined) { s.notify('Haz clic sobre una vista base o proyectada', 'error'); return; } setClicks({ view: v.id, pts: [p], refs: [] }); return; }
+        const v = drw.views.find((x) => x.id === clicks.view)!;
+        const A = P[0];
+        if (Math.abs(p[0] - A[0]) < 2 || Math.abs(p[1] - A[1]) < 2) { s.notify('Contorno demasiado pequeño', 'error'); return; }
+        const dep = prompt('Profundidad del corte parcial (mm) desde la cara más cercana:', '10');
+        reset(); s.setTool(null);
+        if (!dep) return;
+        createBreakout(v, [A, [p[0], A[1]], p, [A[0], p[1]]], Number(dep.replace(',', '.')) || 10);
+        return;
+      }
       if (tool === 'drwSection') {
         if (!P.length) { const v = viewAt(p); if (!v || v.kind === 'detail' || v.dir === 'iso') { s.notify('Haz clic sobre una vista ortogonal', 'error'); return; } setClicks({ view: v.id, pts: [snapPoint(p)?.pt ?? p], refs: [] }); return; }
         let B = snapPoint(p)?.pt ?? p;
@@ -417,6 +441,12 @@ export default function DrawingView() {
     setVb([p[0] - (p[0] - vb[0]) * k, yTop - (yTop - vb[1]) * k, vb[2] * k, vb[3] * k]);
   };
   useEffect(() => { reset(); }, [tool]);
+  const finishPath = () => {
+    const P = clicks.pts, v = drw.views.find((x) => x.id === clicks.view);
+    if (!v || P.length < 3) { if (P.length === 2 && v) createSection(v, P[0], P[1]); reset(); return; }
+    createSection(v, P[0], P[P.length - 1], P.slice(1, -1));
+    reset(); useStore.getState().setTool(null);
+  };
   const finishBaseline = () => {
     const P = clicks.pts, v = drw.views.find((x) => x.id === clicks.view), g = v && geoms[v.id];
     if (!v || !g || P.length < 2) { reset(); return; }
@@ -434,7 +464,7 @@ export default function DrawingView() {
     reset();
   };
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === 'Enter' && tool === 'drwBaseline') finishBaseline(); };
+    const k = (e: KeyboardEvent) => { if (e.key === 'Enter' && tool === 'drwBaseline') finishBaseline(); if (e.key === 'Enter' && tool === 'drwSectionPath') finishPath(); };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   });
 
@@ -450,7 +480,7 @@ export default function DrawingView() {
   return (
     <div className="drawing-host">
       <svg ref={svgRef} className="sheet-svg" viewBox={vb.join(' ')} preserveAspectRatio="xMidYMid meet"
-        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={(e) => { e.preventDefault(); if (tool === 'drwBaseline') finishBaseline(); else reset(); }}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={(e) => { e.preventDefault(); if (tool === 'drwBaseline') finishBaseline(); else if (tool === 'drwSectionPath') finishPath(); else reset(); }}
         style={{ cursor: tool ? 'crosshair' : 'default' }}>
         <defs>
           <pattern id="hatch45" patternUnits="userSpaceOnUse" width="2.5" height="2.5" patternTransform="rotate(45)">
@@ -479,6 +509,8 @@ export default function DrawingView() {
         })}
         {clicks.pts.map((q, i) => <circle key={i} cx={q[0]} cy={Y(q[1])} r={1.2} className="snap-pt" />)}
         {tool === 'drwDetail' && clicks.pts.length === 1 && cursor && <circle cx={clicks.pts[0][0]} cy={Y(clicks.pts[0][1])} r={Math.hypot(cursor[0] - clicks.pts[0][0], cursor[1] - clicks.pts[0][1])} className="ln-preview" />}
+        {tool === 'drwSectionPath' && clicks.pts.length >= 1 && cursor && <polyline points={pl([...clicks.pts, cursor])} className="ln-preview" />}
+        {tool === 'drwBreakout' && clicks.pts.length === 1 && cursor && <rect x={Math.min(clicks.pts[0][0], cursor[0])} y={Y(Math.max(clicks.pts[0][1], cursor[1]))} width={Math.abs(cursor[0] - clicks.pts[0][0])} height={Math.abs(cursor[1] - clicks.pts[0][1])} className="ln-preview" />}
         {(tool === 'drwBreak' || tool === 'drwCrop') && clicks.pts.length === 1 && cursor && (tool === 'drwCrop'
           ? <rect x={Math.min(clicks.pts[0][0], cursor[0])} y={Y(Math.max(clicks.pts[0][1], cursor[1]))} width={Math.abs(cursor[0] - clicks.pts[0][0])} height={Math.abs(cursor[1] - clicks.pts[0][1])} className="ln-preview" />
           : <polyline points={pl([clicks.pts[0], Math.abs(cursor[0] - clicks.pts[0][0]) >= Math.abs(cursor[1] - clicks.pts[0][1]) ? [cursor[0], clicks.pts[0][1]] : [clicks.pts[0][0], cursor[1]]])} className="ln-preview" />)}
@@ -507,7 +539,7 @@ function holeText(s: State, v: DView, dia: number) {
 }
 
 /** Crea una vista de sección a partir de una línea de corte dibujada sobre una vista. */
-function createSection(pv: DView, A: P2, B: P2) {
+function createSection(pv: DView, A: P2, B: P2, mids: P2[] = [], aligned = false) {
   const s = useStore.getState();
   const g = viewGeom(s, pv), p = getProjection(s, pv), pd = p ? resolved.get(p) : null;
   if (!g || !pd) { s.notify('La vista aún no está calculada', 'error'); return; }
@@ -515,6 +547,7 @@ function createSection(pv: DView, A: P2, B: P2) {
   const cam = viewCamera(pv);
   const to3 = (q: P2): V3 => { const m = g.inv(q); return v3.add(pd.center, v3.add(v3.mul(cam.x, m[0]), v3.mul(cam.up, m[1]))); };
   const A3 = to3(A), B3 = to3(B);
+  const ptsAll = [A, ...mids, B];
   let n = v3.norm(v3.cross(v3.sub(B3, A3), cam.toward));
   // mirada hacia el lado de la vista padre en que no queda el cursor no se conoce: se toma la normal que apunta «hacia abajo/derecha» en la hoja
   const n2raw: P2 = [v3.dot(n, cam.x), v3.dot(n, cam.up)];
@@ -540,13 +573,23 @@ function createSection(pv: DView, A: P2, B: P2) {
   const nv: DView = {
     id, name: `Sección ${label}-${label}`, source: pv.source, dir: pv.dir, scale: pv.scale, hidden: false, parent: pv.id, kind: 'section', label,
     x: px, y: py,
-    section: { origin: A3, normal: n, x, a: [A[0] - pv.x, A[1] - pv.y], b: [B[0] - pv.x, B[1] - pv.y], n2 },
+    section: { origin: A3, normal: n, x, a: [A[0] - pv.x, A[1] - pv.y], b: [B[0] - pv.x, B[1] - pv.y], n2,
+      ...(mids.length ? { pts: ptsAll.map((q) => [q[0] - pv.x, q[1] - pv.y] as P2), path: ptsAll.map(to3), toward: cam.toward, aligned } : {}) },
   };
   s.commitDrw((d) => { d.views.push(nv); });
   useStore.setState({ selItem: id });
 }
 
 const BREAK_MIN = 4;
+/** Corte parcial: el contorno se guarda en 3D para que no dependa del encuadre de la vista. */
+function createBreakout(v: DView, loop: P2[], depth: number) {
+  const s = useStore.getState();
+  const g = viewGeom(s, v), p = getProjection(s, v), pd = p ? resolved.get(p) : null;
+  if (!g || !pd) { s.notify('La vista aún no está calculada', 'error'); return; }
+  const cam = viewCamera(v);
+  const to3 = (q: P2): V3 => { const m = g.inv(q); return v3.add(pd.center, v3.add(v3.mul(cam.x, m[0]), v3.mul(cam.up, m[1]))); };
+  s.commitDrw((d) => { const t = d.views.find((x) => x.id === v.id)!; t.breakout = { loop: loop.map(to3), depth }; });
+}
 /** Vista auxiliar: mira perpendicular a una arista de la vista padre (verdadera magnitud de caras inclinadas). */
 function createAux(pv: DView, sg: { a: P2; b: P2 }, place: P2) {
   const s = useStore.getState();

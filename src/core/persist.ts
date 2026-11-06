@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   drawingStd: 'ISO', sheetDefault: 'A3', showEdges: true,
 };
 export interface UserMaterial { name: string; density: number; color: string }
-export interface UserLibs { materials: UserMaterial[] }
+export interface UserLibs { materials: UserMaterial[]; ifeatures?: import('./ifeature').IFeatureDef[]; sheetStyles?: { name: string; t: string; r: string; k: string }[] }
 export interface RecentItem { name: string; path?: string; kind: string; at: number }
 export interface Config { v: 1; settings: AppSettings; libs: UserLibs; savedAt: number }
 

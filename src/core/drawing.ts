@@ -38,7 +38,11 @@ export interface DView {
   crop?: [number, number, number, number];
   label?: string;           // A, B… (secciones y detalles)
   /** Sección: plano de corte (punto y normal = dirección de la mirada) y ejes de la vista */
-  section?: { origin: V3; normal: V3; x: V3; a: P2d; b: P2d; n2: P2d };
+  section?: { origin: V3; normal: V3; x: V3; a: P2d; b: P2d; n2: P2d;
+    /** Sección escalonada/alineada: puntos de la línea de corte (hoja, relativos a la padre) y en 3D, y eje de la vista padre */
+    pts?: P2d[]; path?: V3[]; toward?: V3; aligned?: boolean };
+  /** Corte parcial (Break Out): contorno en 3D y profundidad desde la cara más cercana (mm) */
+  breakout?: { loop: V3[]; depth: number };
   /** Detalle: centro y radio en coordenadas de la vista padre (relativas a su centro, mm de hoja) */
   detail?: { c: P2d; r: number };
   /** Marcas de centro automáticas en círculos */

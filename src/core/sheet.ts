@@ -493,10 +493,18 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
   for (const v of drw.views) {
     const pv = drw.views.find((x) => x.id === v.parent); if (!pv) continue;
     if (v.kind === 'section' && v.section) {
-      const A = add([pv.x, pv.y], v.section.a), B = add([pv.x, pv.y], v.section.b), u = unit(sub(B, A));
-      const A2 = sub(A, mul(u, 4)), B2 = add(B, mul(u, 4));
-      P.push({ t: 'pl', cls: 'cutline', pts: [A2, B2], id: v.id });
-      P.push({ t: 'pl', cls: 'cutend', pts: [A2, add(A2, mul(u, 6))], id: v.id }, { t: 'pl', cls: 'cutend', pts: [sub(B2, mul(u, 6)), B2], id: v.id });
+      const O: P2 = [pv.x, pv.y];
+      const pts = (v.section.pts ?? [v.section.a, v.section.b]).map((q) => add(O, q));
+      const A = pts[0], B = pts[pts.length - 1];
+      const u = unit(sub(pts[1], A)), uB = unit(sub(B, pts[pts.length - 2]));
+      const A2 = sub(A, mul(u, 4)), B2 = add(B, mul(uB, 4));
+      P.push({ t: 'pl', cls: 'cutline', pts: [A2, ...pts.slice(1, -1), B2], id: v.id });
+      P.push({ t: 'pl', cls: 'cutend', pts: [A2, add(A2, mul(u, 6))], id: v.id }, { t: 'pl', cls: 'cutend', pts: [sub(B2, mul(uB, 6)), B2], id: v.id });
+      // trazos gruesos en los cambios de dirección
+      for (let i = 1; i < pts.length - 1; i++) {
+        const a = unit(sub(pts[i - 1], pts[i])), b = unit(sub(pts[i + 1], pts[i]));
+        P.push({ t: 'pl', cls: 'cutend', pts: [add(pts[i], mul(a, 3)), pts[i], add(pts[i], mul(b, 3))], id: v.id });
+      }
       // flechas en la dirección de la mirada (proyección en la hoja de la normal)
       const nv: P2 = unit(v.section.n2 ?? [0, 0]);
       for (const E of [A2, B2]) {
