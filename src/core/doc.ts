@@ -1,3 +1,4 @@
+import { PIPE_MATERIALS } from './pipedata';
 // Modelo de datos del formato de pieza INV3D (.i3p)
 import type { Param } from './expr';
 
@@ -170,6 +171,7 @@ export const MATERIALS: { name: string; density: number; color: string }[] = [
   { name: 'Polietileno PE-HD', density: 950, color: '#e9e9e4' },
   { name: 'Madera de pino', density: 500, color: '#caa472' },
   { name: 'Genérico', density: 1000, color: '#c3c8cf' },
+  ...PIPE_MATERIALS.map(({ name, density, color }) => ({ name, density, color })),
 ];
 
 export const PLANE_STD: Record<StdPlane, { xDir: V3; normal: V3 }> = {

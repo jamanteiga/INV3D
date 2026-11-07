@@ -22,6 +22,8 @@ import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
 import { viewModelDims, viewGeom } from './DrawingView';
+import { makePipePart, flangeDims, od, wallOf, PIPE_KINDS, ASME_SIZES, type PipeKind, type PipeSpec, type FlangeStd } from '../core/piping';
+import { ASME_PIPE, EN_OD, EN_DN, EN_S, enWalls, enSizes, b165Sizes, B1647_TABLES, B165_CLASSES, EN_PN, EN_TYPES, B169, B1611, FITTING_NPS, REDUCER_H, reducedOptions, NPS_DN, DN_NPS, PIPE_MATERIALS } from '../core/pipedata';
 import { ipartCandidates, currentValue, applyIPartRow, extractIFeature, ifParams, insertIFeature, type IPartTable, type IFeatureDef } from '../core/ifeature';
 import type { ModelDim } from '../core/retrieve';
 import { folderApi, openFromFolder, exportConfig, importConfig } from './session';
@@ -1675,6 +1677,123 @@ function IFeatureDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function PipingDialog({ pk: pk0, norm: norm0, onClose }: { pk: string; norm: 'ASME' | 'EN'; onClose: () => void }) {
+  const s = useStore();
+  const [kind, setKind] = useState<PipeKind>(pk0 as PipeKind);
+  const [norm, setNorm] = useState<'ASME' | 'EN'>(norm0);
+  const [flStd, setFlStd] = useState<FlangeStd>(norm0 === 'EN' ? 'EN1092' : 'B16.5');
+  const [rating, setRating] = useState<number>(norm0 === 'EN' ? 16 : 150);
+  const [flType, setFlType] = useState<string>(norm0 === 'EN' ? '11' : 'WN');
+  const sizeList = (): string[] => {
+    if (kind === 'flange') {
+      if (flStd === 'EN1092') return enSizes(rating).map(String);
+      if (flStd === 'B16.5') return b165Sizes(rating);
+      return (B1647_TABLES[flStd === 'B16.47A' ? 'A' : 'B'][rating] ?? []).map((r) => r[0]);
+    }
+    if (kind === 'coupling') return norm === 'ASME' ? Object.keys(B1611) : Object.keys(B1611).map((n) => String(NPS_DN[n]));
+    if (kind === 'pipe') return norm === 'ASME' ? ASME_SIZES : EN_DN.map(String);
+    const fitSizes = FITTING_NPS.filter((n) => kind !== 'reducer' || REDUCER_H[n]).filter((n) => kind !== 'rtee' || reducedOptions(n).length).filter((n) => kind !== 'stub' || B169[n][5]);
+    return norm === 'ASME' ? fitSizes : fitSizes.map((n) => NPS_DN[n]).filter((dn) => EN_OD[dn]).map(String);
+  };
+  const sizes = sizeList();
+  const defSize = sizes.find((x) => x === '4' || x === '100') ?? sizes[Math.min(8, sizes.length - 1)] ?? '';
+  const [size, setSize] = useState<string>(defSize);
+  const sz = sizes.includes(size) ? size : defSize;
+  const npsBig = norm === 'ASME' ? sz : DN_NPS[Number(sz)] ?? '';
+  const size2List = (kind === 'rtee' || kind === 'reducer') ? reducedOptions(npsBig).map((n) => (norm === 'ASME' ? n : String(NPS_DN[n]))).filter((x) => norm === 'ASME' || EN_OD[Number(x)]) : [];
+  const [size2, setSize2] = useState('');
+  const sz2 = size2List.includes(size2) ? size2 : size2List[0] ?? '';
+  const schs = norm === 'ASME' && ASME_PIPE[norm === 'ASME' ? sz : npsBig] ? Object.keys(ASME_PIPE[sz]?.[1] ?? {}) : [];
+  const [sch, setSch] = useState('STD');
+  const schV = schs.includes(sch) ? sch : schs.includes('STD') ? 'STD' : schs[0] ?? 'STD';
+  const enW = norm === 'EN' ? enWalls(EN_OD[Number(sz)] ?? 0) : [];
+  const [wall, setWall] = useState(0);
+  const wallV = enW.includes(wall) ? wall : (EN_S[Number(sz)] ?? enW[0] ?? 0);
+  const [len, setLen] = useState(6000);
+  const [elbow, setElbow] = useState<'LR' | 'SR' | '3D' | '5D'>(norm0 === 'EN' ? '3D' : 'LR');
+  const [angle, setAngle] = useState<45 | 90 | 180>(90);
+  const [ecc, setEcc] = useState(false);
+  const [cls, setCls] = useState<3000 | 6000>(3000);
+  const [sw, setSw] = useState(false);
+  const [half, setHalf] = useState(false);
+  const [facing, setFacing] = useState<'RF' | 'FF'>('RF');
+  const [stubShort, setStubShort] = useState(false);
+  const use = kind === 'pipe' ? 'pipe' : kind === 'flange' ? 'flange' : 'fitting';
+  const mats = PIPE_MATERIALS.filter((m) => m.std === norm && m.use.includes(use));
+  const [mat, setMat] = useState('');
+  const matV = mats.some((m) => m.name === mat) ? mat : mats[0]?.name ?? 'Acero S275JR';
+  const ratings = flStd === 'EN1092' ? Object.keys(EN_PN).map(Number) : flStd === 'B16.5' ? B165_CLASSES : Object.keys(B1647_TABLES[flStd === 'B16.47A' ? 'A' : 'B']).map(Number);
+  const types: [string, string][] = flStd === 'EN1092' ? Object.entries(EN_TYPES) : [['WN', 'Cuello para soldar (WN)'], ['SO', 'Deslizante (SO)'], ['BL', 'Ciega (BL)'], ...(flStd === 'B16.5' ? [['LJ', 'Loca (LJ)'], ['SW', 'Socket weld (SW)'], ['TH', 'Roscada (TH)']] as [string, string][] : [])];
+  const spec: PipeSpec = {
+    kind, norm, size: sz, size2: sz2, sch: schV, wall: wallV, length: kind === 'stub' ? (stubShort ? 1 : 0) : len, flStd, rating, flType, facing,
+    elbow, angle, ecc, cls, sw, half, material: matV,
+  };
+  let info = '', err = '';
+  try {
+    const D = od(spec, sz), t = wallOf(spec, sz);
+    if (kind === 'flange') { const fd = flangeDims(spec); if (!fd) throw new Error('No existe en la norma'); info = `Ø${fd.D} · espesor ${fd.tf} · ${fd.n} × ${fd.bolt} en Ø${fd.bc} (taladros Ø${fd.hole}) · cara Ø${fd.rf}`; }
+    else if (kind === 'coupling') info = `Para tubo Ø${od({ norm: 'ASME' }, npsBig)}`;
+    else info = `Ø${D} × ${t} mm`;
+  } catch (e) { err = (e as Error).message; }
+  const create = (place: boolean) => {
+    try {
+      const doc = makePipePart(spec);
+      const FR: Record<string, string> = { '1/2': '½', '1/4': '¼', '3/4': '¾', '1/8': '⅛', '3/8': '⅜' };
+      const fn = doc.iProperties.partNumber.replace(/(\d)\/(\d)/g, (m) => FR[m] ?? m.replace('/', '-')).replace(/-(?=[½¼¾⅛⅜])/g, '').replace(/"/g, 'in').replace(/[\\/:*?<>|]+/g, '_') + '.i3p';
+      if (place && s.kind === 'assembly') {
+        const existing = s.docs.find((d) => d.fileName === fn);
+        const pid = existing?.id ?? s.addDocument('part', doc, fn, false);
+        asmActions.placePart(pid);
+        s.notify(`${doc.iProperties.description} colocado`);
+      } else { s.addDocument('part', doc, fn); onClose(); }
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
+  const kinds: [PipeKind, string][] = Object.entries(PIPE_KINDS).filter(([k]) => norm === 'ASME' || k !== 'stub') as [PipeKind, string][];
+  return (
+    <Modal title="Tubería · Centro de contenido" onClose={onClose} wide>
+      <div className="cc">
+        <div className="cc-tree">
+          <div style={{ padding: '4px 6px 8px' }}><Seg value={norm} onChange={(v) => { setNorm(v); setFlStd(v === 'EN' ? 'EN1092' : 'B16.5'); setRating(v === 'EN' ? 16 : 150); setFlType(v === 'EN' ? '11' : 'WN'); setElbow(v === 'EN' ? '3D' : 'LR'); }} options={[['ASME', 'ASME'], ['EN', 'EN']]} /></div>
+          {kinds.map(([k, n]) => <button key={k} className={`cc-item ${k === kind ? 'on' : ''}`} onClick={() => setKind(k)}><span>{n}</span></button>)}
+        </div>
+        <div className="cc-form">
+          <div className="psec-title">{PIPE_KINDS[kind]} · {kind === 'pipe' ? (norm === 'ASME' ? 'ASME B36.10M / B36.19M' : 'EN 10220 / EN 10216') : kind === 'flange' ? (flStd === 'EN1092' ? 'EN 1092-1' : ({ 'B16.5': 'ASME B16.5', 'B16.47A': 'ASME B16.47 Serie A', 'B16.47B': 'ASME B16.47 Serie B' } as Record<string, string>)[flStd]) : kind === 'coupling' ? 'ASME B16.11' : norm === 'ASME' ? 'ASME B16.9' : 'EN 10253'}</div>
+          {kind === 'flange' && (<>
+            {norm === 'ASME' && <Row label="Norma"><select value={flStd} onChange={(e) => { const v = e.target.value as FlangeStd; setFlStd(v); setRating(v === 'B16.47B' ? 150 : 150); if (v !== 'B16.5' && !['WN', 'BL'].includes(flType)) setFlType('WN'); }}><option value="B16.5">B16.5 (½"–24")</option><option value="B16.47A">B16.47 Serie A (26"–60")</option><option value="B16.47B">B16.47 Serie B (26"–60")</option></select></Row>}
+            <Row label={flStd === 'EN1092' ? 'PN' : 'Clase'}><select value={rating} onChange={(e) => setRating(Number(e.target.value))}>{ratings.map((r) => <option key={r} value={r}>{flStd === 'EN1092' ? `PN ${r}` : `${r} lb`}</option>)}</select></Row>
+            <Row label="Tipo"><select value={flType} onChange={(e) => setFlType(e.target.value)}>{types.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></Row>
+            <Row label="Cara"><Seg value={facing} onChange={setFacing} options={[['RF', flStd === 'EN1092' ? 'Realzada (B1)' : 'Realzada (RF)'], ['FF', 'Plana (FF / A)']]} /></Row>
+          </>)}
+          <Row label={norm === 'ASME' ? 'NPS' : 'DN'}><select value={sz} onChange={(e) => setSize(e.target.value)}>{sizes.map((x) => <option key={x} value={x}>{norm === 'ASME' ? `${x}"` : `DN ${x}`}</option>)}</select></Row>
+          {size2List.length > 0 && <Row label={kind === 'rtee' ? 'Derivación' : 'Extremo pequeño'}><select value={sz2} onChange={(e) => setSize2(e.target.value)}>{size2List.map((x) => <option key={x} value={x}>{norm === 'ASME' ? `${x}"` : `DN ${x}`}</option>)}</select></Row>}
+          {kind !== 'coupling' && !(kind === 'flange' && flType !== 'WN' && flType !== '11' && flType !== 'SW') && (norm === 'ASME'
+            ? <Row label="Schedule"><select value={schV} onChange={(e) => setSch(e.target.value)}>{schs.map((x) => <option key={x} value={x}>{x} · {ASME_PIPE[sz]?.[1][x as 'STD']} mm</option>)}</select></Row>
+            : <Row label="Espesor"><select value={wallV} onChange={(e) => setWall(Number(e.target.value))}>{enW.map((x) => <option key={x} value={x}>{String(x).replace('.', ',')} mm</option>)}</select></Row>)}
+          {kind === 'pipe' && <Row label="Longitud"><input type="number" value={len} min={1} onChange={(e) => setLen(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>}
+          {kind === 'elbow' && (<>
+            <Row label="Radio"><select value={elbow} onChange={(e) => setElbow(e.target.value as 'LR')}><option value="LR">Radio largo 1,5D (LR)</option><option value="SR">Radio corto 1D (SR)</option>{norm === 'EN' && <option value="3D">EN 10253 tipo 3D</option>}<option value="5D">Curva 5D</option></select></Row>
+            <Row label="Ángulo"><Seg value={String(angle)} onChange={(v) => setAngle(Number(v) as 90)} options={[['45', '45°'], ['90', '90°'], ['180', '180° (retorno)']]} /></Row>
+          </>)}
+          {kind === 'reducer' && <Row label="Tipo"><Seg value={ecc ? 'e' : 'c'} onChange={(v) => setEcc(v === 'e')} options={[['c', 'Concéntrica'], ['e', 'Excéntrica']]} /></Row>}
+          {kind === 'stub' && <Row label="Longitud"><Seg value={stubShort ? 's' : 'l'} onChange={(v) => setStubShort(v === 's')} options={[['l', 'Larga (ASME)'], ['s', 'Corta (MSS)']]} /></Row>}
+          {kind === 'coupling' && (<>
+            <Row label="Clase"><Seg value={String(cls)} onChange={(v) => setCls(Number(v) as 3000)} options={[['3000', '3000'], ['6000', '6000']]} /></Row>
+            <Row label="Unión"><Seg value={sw ? 'sw' : 'th'} onChange={(v) => setSw(v === 'sw')} options={[['th', 'Roscado NPT'], ['sw', 'Socket weld']]} /></Row>
+            <Row label="Forma"><Seg value={half ? 'h' : 'f'} onChange={(v) => setHalf(v === 'h')} options={[['f', 'Manguito'], ['h', 'Medio manguito']]} /></Row>
+          </>)}
+          <Row label="Material"><select value={matV} onChange={(e) => setMat(e.target.value)}>{mats.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>
+          {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
+          <p className="phelp">Se crea una pieza paramétrica con sus iProperties (designación, norma y material) para la lista de materiales. En un ensamblaje se coloca y se restringe con Insertar en las caras de los extremos.</p>
+          <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
+            <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
+            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function DriveDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const joints = s.asm.joints.filter((j) => j.type === 'rot' || j.type === 'slider');
@@ -1910,6 +2029,7 @@ export function Modals() {
     case 'cpattern': return <CompPatternDialog onClose={close} />;
     case 'drive': return <DriveDialog onClose={close} />;
     case 'motion': return <MotionDialog onClose={close} />;
+    case 'piping': return <PipingDialog pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} onClose={close} />;
     case 'ipart': return <IPartDialog onClose={close} />;
     case 'ifeature': return <IFeatureDialog onClose={close} />;
     case 'sketch3d': return <Sketch3dDialog id={(d as { id?: string }).id} onClose={close} />;
@@ -1930,7 +2050,7 @@ export function Modals() {
     case 'shortcuts': return <Modal title="Atajos de teclado y ratón" onClose={close}><table className="ptable kv"><tbody>{SHORTCUTS.map(([k, v]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{v}</td></tr>)}</tbody></table></Modal>;
     default: return (
       <Modal title="Acerca de INV3D" onClose={close}>
-        <p><b>INV3D 0.6</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
+        <p><b>INV3D 0.7</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
         <p className="phelp">Boceto con restricciones geométricas y cotas, pieza y chapa, ensamblaje con restricciones (solver simultáneo), Centro de contenido, estructura (perfiles EN), soldadura (ISO 2553), tornillería (ISO, cálculo EN 1993-1-8), planos con secciones y detalles (ISO, proyección europea) y presentación.</p>
         <p className="phelp">Núcleo OpenCascade (LGPL) vía replicad · visor Three.js · visor DWG LibreDWG (GPL-3.0).</p>
         <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={close}>Cerrar</button></div>

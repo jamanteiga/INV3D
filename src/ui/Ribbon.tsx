@@ -67,9 +67,9 @@ export default function Ribbon() {
     if (k === 'part') return [
       ...(inSketch ? [['sketch', 'Boceto'] as [Tab, string]] : []),
       ...(isSheet ? [['sheet', 'Chapa'] as [Tab, string]] : []),
-      ['model', 'Modelo 3D'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista'],
+      ['model', 'Modelo 3D'], ['pipe', 'Mecánica'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista'],
     ];
-    if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista']];
+    if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['pipe', 'Mecánica'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista']];
     return [['place', 'Colocar vistas'], ['annotate', 'Anotar'], ['export', 'Exportar'], ['tools', 'Herramientas']];
   };
   const tabs = tabsFor();
@@ -199,6 +199,26 @@ export default function Ribbon() {
             </Col>
           </Group>
           <Group label="Desarrollo"><Big icon="flat" label="Desarrollo" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Patrón desarrollado y DXF para corte" /></Group>
+        </>)}
+        {cur === 'pipe' && (<>
+          {([['ASME', 'Tubería ASME (B36.10 · B16.5 · B16.47 · B16.9 · B16.11)'], ['EN', 'Tubería EN (EN 10220 · EN 1092-1 · EN 10253)']] as const).map(([norm, lbl]) => (
+            <Group key={norm} label={lbl}>
+              <Big icon="pipe" label="Tubo" onClick={() => s.open({ kind: 'piping', pk: 'pipe', norm })} />
+              <Big icon="pflange" label="Brida" onClick={() => s.open({ kind: 'piping', pk: 'flange', norm })} />
+              <Big icon="pelbow" label="Codo" onClick={() => s.open({ kind: 'piping', pk: 'elbow', norm })} />
+              <Col>
+                <Small icon="ptee" label="Te" onClick={() => s.open({ kind: 'piping', pk: 'tee', norm })} />
+                <Small icon="ptee" label="Te reducida" onClick={() => s.open({ kind: 'piping', pk: 'rtee', norm })} />
+                <Small icon="pcross" label="Cruz" onClick={() => s.open({ kind: 'piping', pk: 'cross', norm })} />
+              </Col>
+              <Col>
+                <Small icon="preducer" label="Reducción" onClick={() => s.open({ kind: 'piping', pk: 'reducer', norm })} />
+                <Small icon="pcap" label="Casquete" onClick={() => s.open({ kind: 'piping', pk: 'cap', norm })} />
+                <Small icon="pcoupling" label="Manguito" onClick={() => s.open({ kind: 'piping', pk: 'coupling', norm })} />
+              </Col>
+              {norm === 'ASME' && <Col><Small icon="pstub" label="Portabridas" onClick={() => s.open({ kind: 'piping', pk: 'stub', norm })} /></Col>}
+            </Group>
+          ))}
         </>)}
         {k === 'part' && cur === 'model' && (<>
           <Group label="Boceto">
