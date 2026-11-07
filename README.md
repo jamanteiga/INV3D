@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador, con el flujo de trabajo de Autodesk Inventor.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.7
+## Versión 0.8
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -15,6 +15,7 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Chapa** | Estilo (t, R, K) con **biblioteca de estilos**, **pestaña solevada** (transiciones rectangular-circular, reducciones) con **desarrollo por triangulación**, cara, pestaña, **pestaña de contorno**, **dobladillo**, redondeo y chaflán de esquina, corte, **punzonado** (redondo, rectangular, colisa, cuadrado), desarrollo con líneas de pliegue y DXF para corte |
 | **Ensamblaje** | Colocar, crear pieza, mover/girar con gizmo, fijar. **Restricciones** coincidir (caras o ejes), al ras, ángulo, tangente, insertar y rígida; **uniones** de rotación, corredera, cilíndrica, planar y bola (con bloqueo, **límites de recorrido** y **conducir** para animar mecanismos); **restricciones de movimiento** rotación-rotación (engranajes) y rotación-traslación (piñón-cremallera), resueltas a la vez (Gauss-Newton) con grados de libertad por componente. **Centro de contenido** (ISO 4017, ISO 4762, ISO 4032, ISO 7089, ISO 2338, rodamientos 60/62, chavetas DIN 6885). **Patrón de componentes** y **simetría de componente** asociativos, **sustituir componente**, **representaciones de vista**, análisis de interferencias, vista de corte 3D, lista de materiales y STEP |
 | **Mecánica · Tubería** | Pestaña **Mecánica** (pieza y ensamblaje). ASME: tubo B36.10M/B36.19M (todos los NPS y schedules), bridas **B16.5** (WN, SO, ciega, loca, socket weld, roscada; clases 150–2500), **B16.47 Serie A y B** (26"–60"), codos B16.9 radio largo y corto 45/90/180°, tes, tes reducidas, cruces, reducciones concéntricas y excéntricas, casquetes, portabridas, manguitos y medios manguitos B16.11 (3000/6000, roscados NPT y socket weld). EN: tubo EN 10220, bridas **EN 1092-1** tipos 01, 05, 11, 12 y 13 (PN 6 a PN 100), accesorios EN 10253. Materiales ASTM/ASME (A106, A53, API 5L, A333, A312, A234, A403, A105, A350, A182…) y EN (P235GH, P265GH, P250GH, 16Mo3, 1.4301, 1.4404, 1.4571, dúplex…). Cada pieza lleva designación, norma y material en las iProperties |
+| **HVAC** | Pestaña **HVAC** con selector EN/UNE (EN 1505/1506) o SMACNA. **Conductos** rectangulares y circulares: tramo recto (bridas TDC, marco angular o enchufe), codos con radio, rectos con álabes, prensados y por gajos, transiciones, reducciones y desvíos con **desarrollo para corte**, te, toma de zapato, collarín, derivación a 45°, pantalón, tapas y plenums. **Terminales y equipos**: rejillas, difusores cuadrados y circulares, compuertas de regulación, cortafuegos, silenciadores, flexibles, UTA y fancoil. **Uniones, soportes y aislamiento**: bridas/marcos, soportes en trapecio o abrazadera con varilla, aislamiento. Espesor de chapa automático (UNE/EN 1507, EN 12237, calibres SMACNA). **Dimensionado** por pérdida de carga constante o velocidad (Darcy-Weisbach, Colebrook-White, Huebscher), pérdidas singulares y exportación CSV |
 | **Estructura** | Perfiles EN: IPE, HEA, HEB, UPN, L, SHS, RHS, CHS, pletina, redondo. Inglete, recortar/alargar, longitudes y ángulos de corte en la lista de materiales |
 | **Soldadura** | Cordón en ángulo entre dos caras, garganta *a*, símbolo ISO 2553 |
 | **Tornillería** | Conexión atornillada con taladros y cálculo EN 1993-1-8 |
@@ -35,6 +36,7 @@ Ejemplos en **Herramientas › Ejemplos**: brida paramétrica y escalera con mes
 - La sección por línea quebrada se proyecta (escalonada); los tramos inclinados no se giran al plano como en la sección alineada de Inventor.
 - Los miembros iPart se generan como piezas independientes; no se elige miembro al colocar en un ensamblaje.
 - Tubería: valores de referencia de catálogos públicos; verificar contra la edición vigente de la norma antes de fabricar. Las medidas M de tes reducidas que no están en la tabla se aproximan; los accesorios EN 10253 usan las medidas de referencia ISO 3419/B16.9 por DN.
+- HVAC: espesores de chapa y coeficientes ζ orientativos (práctica habitual); los equipos y terminales son bloques de implantación, no modelos de fabricante.
 - IGES no está disponible: la versión de OpenCascade para web no incluye ese módulo (usa STEP).
 - La carpeta de trabajo necesita Chrome o Edge en escritorio abriendo la web directamente; el navegador pide un clic de «Reconectar» en cada sesión.
 - Desarrollo de chapa: pestañas sobre la cara base o una pestaña de contorno; los punzonados no aparecen en el desarrollo.

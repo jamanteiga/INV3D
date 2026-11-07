@@ -1,4 +1,5 @@
 import { PIPE_MATERIALS } from './pipedata';
+import { HVAC_MATERIALS } from './hvacdata';
 // Modelo de datos del formato de pieza INV3D (.i3p)
 import type { Param } from './expr';
 
@@ -77,7 +78,7 @@ export interface MirrorF extends FBase { type: 'mirror'; features: string[]; pla
 export interface ShellF extends FBase { type: 'shell'; thickness: string; faces: V3[] }
 export interface WorkPlaneF extends FBase { type: 'workplane'; base: PlaneRef; offset: string; angle: string }
 export interface LoftF extends FBase { type: 'loft'; sections: string[]; ruled: boolean; op: BoolOp }
-export interface SweepF extends FBase { type: 'sweep'; profile: string; path: string; op: BoolOp }
+export interface SweepF extends FBase { type: 'sweep'; profile: string; path: string; op: BoolOp; /** unión entre tramos rectos de la trayectoria: redondeada o a inglete */ transition?: 'round' | 'right' }
 export interface SmFaceF extends FBase { type: 'sm_face'; profile: string }
 export type E3 = [string, string, string];
 export interface RibF extends FBase { type: 'rib'; profile: string; thickness: string; depth: string; flip: boolean; op: BoolOp }
@@ -172,6 +173,7 @@ export const MATERIALS: { name: string; density: number; color: string }[] = [
   { name: 'Madera de pino', density: 500, color: '#caa472' },
   { name: 'Genérico', density: 1000, color: '#c3c8cf' },
   ...PIPE_MATERIALS.map(({ name, density, color }) => ({ name, density, color })),
+  ...HVAC_MATERIALS,
 ];
 
 export const PLANE_STD: Record<StdPlane, { xDir: V3; normal: V3 }> = {

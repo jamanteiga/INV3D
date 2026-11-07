@@ -564,7 +564,7 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
       const skP = getSk(f.profile);
       const prof = (sketchProfile(skP, ev, true).sketchOnPlane(makePlane(planeFrame(skP.plane, ev, work))) as any);
       const pathW = wireOf(f.path, ctx);
-      const solid = genericSweep(prof.wire, pathW, { frenet: true, transitionMode: 'round' }, false);
+      const solid = genericSweep(prof.wire, pathW, { frenet: true, transitionMode: f.transition ?? 'round' }, false);
       return { solid, op: f.op };
     }
     case 'sm_face': {

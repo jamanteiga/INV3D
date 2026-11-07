@@ -22,6 +22,8 @@ import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
 import { viewModelDims, viewGeom } from './DrawingView';
+import { makeHvacPart, HVAC_KINDS, HVAC_GROUPS, type HvacKind, type HvacSpec } from '../core/hvac';
+import { EN_RECT, EN_ROUND, SM_RECT, SM_ROUND, INCH, sheetThickness, ductFriction, FITTING_LOSSES } from '../core/hvacdata';
 import { makePipePart, flangeDims, od, wallOf, PIPE_KINDS, ASME_SIZES, type PipeKind, type PipeSpec, type FlangeStd } from '../core/piping';
 import { ASME_PIPE, EN_OD, EN_DN, EN_S, enWalls, enSizes, b165Sizes, B1647_TABLES, B165_CLASSES, EN_PN, EN_TYPES, B169, B1611, FITTING_NPS, REDUCER_H, reducedOptions, NPS_DN, DN_NPS, PIPE_MATERIALS } from '../core/pipedata';
 import { ipartCandidates, currentValue, applyIPartRow, extractIFeature, ifParams, insertIFeature, type IPartTable, type IFeatureDef } from '../core/ifeature';
@@ -1677,6 +1679,267 @@ function IFeatureDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+const HVAC_DUCT_MATS = ['Acero galvanizado DX51D+Z275', 'Acero inoxidable 1.4301 (conducto)', 'Aluminio EN AW-3003'];
+const HVAC_INS_MATS = ['Lana mineral 40 kg/m³', 'Lana mineral 70 kg/m³ (panel)', 'Espuma elastomérica'];
+/** Campo de medida de conducto: mm (EN) o pulgadas (SMACNA), con lista de medidas normalizadas. */
+function DimIn({ label, mm, std, list, onChange }: { label: string; mm: number; std: 'EN' | 'SMACNA'; list: number[]; onChange: (mm: number) => void }) {
+  const k = std === 'SMACNA' ? INCH : 1;
+  const lid = `dl-${label.replace(/\W/g, '')}-${std}`;
+  return (
+    <Row label={label}>
+      <span className="unit-in"><input type="number" list={lid} value={+(mm / k).toFixed(std === 'SMACNA' ? 2 : 0)} min={1} step={std === 'SMACNA' ? 1 : 10} onChange={(e) => onChange(Number(e.target.value) * k)} onKeyDown={(e) => e.stopPropagation()} />
+      <span className="ro">{std === 'SMACNA' ? 'in' : 'mm'}</span></span>
+      <datalist id={lid}>{list.map((v) => <option key={v} value={v} />)}</datalist>
+    </Row>
+  );
+}
+
+function HvacDialog({ hk, onClose }: { hk: string; onClose: () => void }) {
+  const s = useStore();
+  const [kind, setKind] = useState<HvacKind>(hk as HvacKind);
+  const [std, setStd] = useState<'EN' | 'SMACNA'>(s.settings.drawingStd === 'ANSI' ? 'SMACNA' : 'EN');
+  const [shape, setShape] = useState<'rect' | 'round'>(['flex'].includes(hk) ? 'round' : 'rect');
+  const [W, setW] = useState(600), [H, setH] = useState(400), [D, setD] = useState(400);
+  const [shape2, setShape2] = useState<'rect' | 'round'>('round');
+  const [W2, setW2] = useState(400), [H2, setH2] = useState(300), [D2, setD2] = useState(250);
+  const [ex, setEx] = useState(0), [ey, setEy] = useState(0);
+  const [L, setL] = useState(1200);
+  const [tOv, setTOv] = useState(0);
+  const [angle, setAngle] = useState(90);
+  const [elType, setElType] = useState<'radius' | 'square' | 'smooth' | 'segmented'>('radius');
+  const [rw, setRw] = useState(1), [vanes, setVanes] = useState(true), [gores, setGores] = useState(5);
+  const [branch, setBranch] = useState<'tee' | 'shoe' | 'collar' | 'y'>('tee'), [bAng, setBAng] = useState(90);
+  const [ends, setEnds] = useState<'none' | 'tdc' | 'angle' | 'socket'>('none');
+  const [blAng, setBlAng] = useState(30), [plate, setPlate] = useState(595), [neck, setNeck] = useState(250), [split, setSplit] = useState(100), [spig, setSpig] = useState<'top' | 'side'>('top');
+  const [ins, setIns] = useState(25), [withIns, setWithIns] = useState(false), [insMat, setInsMat] = useState(HVAC_INS_MATS[0]);
+  const [rod, setRod] = useState('');
+  const [mat, setMat] = useState(HVAC_DUCT_MATS[0]);
+  const sm = std === 'SMACNA';
+  const RL = sm ? SM_RECT : EN_RECT, RD = sm ? SM_ROUND : EN_ROUND;
+  const roundOnly = kind === 'flex' || (kind === 'branch' && branch === 'y');
+  const rectOnly = ['grille', 'plenum', 'ahu', 'fancoil'].includes(kind) || (kind === 'branch' && branch === 'shoe');
+  const sh = roundOnly ? 'round' : rectOnly ? 'rect' : shape;
+  const elT = sh === 'rect' ? (elType === 'square' ? 'square' : 'radius') : elType === 'segmented' ? 'segmented' : 'smooth';
+  const material = kind === 'insulation' ? insMat : kind === 'ahu' ? 'Panel sándwich UTA 50 mm (equivalente)' : kind === 'flex' ? 'Lona flexible / aluminio' : mat;
+  const defL: Partial<Record<HvacKind, number>> = { transition: 400, branch: Math.max(sh === 'rect' ? W : D, 400) + 200, plenum: 300, damper: 0, firedamper: 0, silencer: 1500, flex: 1500, ahu: 4000, fancoil: 600, support: 500 };
+  const Lv = kind === 'duct' || kind === 'insulation' || !(kind in defL) ? L : (L === 1200 ? defL[kind]! : L);
+  const spec: HvacSpec = {
+    kind, std, shape: sh, W, H, D, shape2: kind === 'transition' || kind === 'branch' ? shape2 : undefined, W2, H2, D2, ex, ey, L: Lv, t: tOv || undefined,
+    angle, elbowType: elT, rw, vanes, gores, branch, branchAngle: branch === 'y' ? (bAng === 90 ? 30 : bAng) : bAng, ends,
+    bladeAngle: blAng, plate, neck, splitter: split, spigot: spig, ins, rod: rod || undefined, material,
+  };
+  if (kind === 'ahu') Object.assign(spec, { W: W < 900 ? 1400 : W, H: H < 900 ? 1600 : H });
+  const tInfo = sheetThickness(std, sh, sh === 'rect' ? Math.max(W, H) : D);
+  let err = '', info = '';
+  try {
+    const dd = makeHvacPart(spec);
+    info = dd.iProperties.description;
+  } catch (e) { err = (e as Error).message; }
+  const put = (doc: PartDoc, place: boolean) => {
+    const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_') + '.i3p';
+    if (place && s.kind === 'assembly') {
+      const ex2 = s.docs.find((d) => d.fileName === fn);
+      const pid = ex2?.id ?? s.addDocument('part', doc, fn, false);
+      asmActions.placePart(pid);
+    } else s.addDocument('part', doc, fn);
+  };
+  const create = (place: boolean) => {
+    try {
+      put(makeHvacPart(spec), place);
+      if (withIns && kind === 'duct') put(makeHvacPart({ ...spec, kind: 'insulation', material: insMat, ins }), place);
+      s.notify(`${info} ${place && s.kind === 'assembly' ? 'colocado' : 'creado'}`);
+      if (!place || s.kind !== 'assembly') onClose();
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
+  const ShapeSel = <Row label="Sección"><Seg value={sh} onChange={(v) => setShape(v)} options={[['rect', 'Rectangular'], ['round', 'Circular']]} /></Row>;
+  const Dims = (<>
+    {sh === 'rect' ? (<><DimIn label="Anchura (interior)" mm={W} std={std} list={RL} onChange={setW} /><DimIn label="Altura (interior)" mm={H} std={std} list={RL} onChange={setH} /></>)
+      : <DimIn label="Diámetro" mm={D} std={std} list={RD} onChange={setD} />}
+  </>);
+  const LenRow = (label = 'Longitud') => <Row label={label}><input type="number" value={Lv} min={0} step={50} onChange={(e) => setL(Number(e.target.value))} onKeyDown={(e) => e.stopPropagation()} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>;
+  const Thick = (
+    <Row label="Chapa"><select value={tOv} onChange={(e) => setTOv(Number(e.target.value))}>
+      <option value={0}>Automático: {tInfo.label}</option>
+      {[0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0].map((t) => <option key={t} value={t}>{String(t).replace('.', ',')} mm</option>)}
+    </select></Row>
+  );
+  const EndsRow = <Row label="Uniones"><select value={ends} onChange={(e) => setEnds(e.target.value as 'none')}><option value="none">Sin bridas</option><option value="tdc">{sh === 'rect' ? 'Brida TDC (marco de perfil)' : 'Brida de perfil'}</option><option value="angle">Marco de angular L30×3</option>{sh === 'round' && <option value="socket">Unión por enchufe (manguito)</option>}</select></Row>;
+  const groups: [string, HvacKind[]][] = HVAC_GROUPS;
+  return (
+    <Modal title="HVAC · Centro de contenido" onClose={onClose} wide>
+      <div className="cc">
+        <div className="cc-tree">
+          <div style={{ padding: '4px 6px 8px' }}><Seg value={std} onChange={setStd} options={[['EN', 'EN / UNE'], ['SMACNA', 'SMACNA']]} /></div>
+          {groups.map(([g, ks]) => (<div key={g}><div className="cc-cat">{g}</div>{ks.map((k) => <button key={k} className={`cc-item ${k === kind ? 'on' : ''}`} onClick={() => setKind(k)}><span>{HVAC_KINDS[k]}</span></button>)}</div>))}
+        </div>
+        <div className="cc-form">
+          <div className="psec-title">{HVAC_KINDS[kind]} · {sm ? 'SMACNA' : 'EN 1505 / EN 1506'}</div>
+          {!roundOnly && !rectOnly && kind !== 'ahu' && ShapeSel}
+          {kind === 'diffuser' && sh === 'rect' ? (<>
+            <Row label="Placa"><select value={plate} onChange={(e) => setPlate(Number(e.target.value))}><option value={595}>595 × 595 (techo 600)</option><option value={495}>495 × 495</option><option value={395}>395 × 395</option></select></Row>
+            <DimIn label="Cuello" mm={neck} std={std} list={RD} onChange={setNeck} />
+          </>) : kind === 'diffuser' ? <DimIn label="Cuello" mm={neck} std={std} list={RD} onChange={setNeck} /> : kind === 'ahu' || kind === 'fancoil' ? (<>
+            <DimIn label="Anchura" mm={kind === 'ahu' && W < 900 ? 1400 : W} std={std} list={RL} onChange={setW} /><DimIn label="Altura" mm={kind === 'ahu' && H < 900 ? 1600 : H} std={std} list={RL} onChange={setH} />
+            {LenRow('Longitud')}
+            <DimIn label="Bocas: anchura" mm={W2} std={std} list={RL} onChange={setW2} /><DimIn label="Bocas: altura" mm={H2} std={std} list={RL} onChange={setH2} />
+          </>) : Dims}
+          {kind === 'duct' && (<>{LenRow()}{EndsRow}
+            <label className="check"><input type="checkbox" checked={withIns} onChange={(e) => setWithIns(e.target.checked)} />Añadir aislamiento</label>
+            {withIns && <Row label="Aislamiento"><input type="number" value={ins} onChange={(e) => setIns(Number(e.target.value))} style={{ width: 70 }} /><span className="ro" style={{ margin: '0 6px' }}>mm</span><select value={insMat} onChange={(e) => setInsMat(e.target.value)}>{HVAC_INS_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row>}
+          </>)}
+          {kind === 'elbow' && (<>
+            <Row label="Tipo"><select value={elT} onChange={(e) => setElType(e.target.value as 'radius')}>{sh === 'rect' ? (<><option value="radius">Con radio</option><option value="square">Recto (inglete) con álabes</option></>) : (<><option value="smooth">Prensado (liso)</option><option value="segmented">Por gajos</option></>)}</select></Row>
+            {elT !== 'square' && <Row label="Ángulo"><Seg value={String(angle)} onChange={(v) => setAngle(Number(v))} options={[['30', '30°'], ['45', '45°'], ['60', '60°'], ['90', '90°']]} /></Row>}
+            {elT !== 'square' && <Row label={sh === 'rect' ? 'R/W (eje)' : 'R/D (eje)'}><Seg value={String(rw)} onChange={(v) => setRw(Number(v))} options={[['0.75', '0,75'], ['1', '1'], ['1.5', '1,5'], ['2', '2']]} /></Row>}
+            {elT === 'square' && <label className="check"><input type="checkbox" checked={vanes} onChange={(e) => setVanes(e.target.checked)} />Álabes directrices</label>}
+            {elT === 'segmented' && <Row label="Gajos"><Seg value={String(gores)} onChange={(v) => setGores(Number(v))} options={[['3', '3'], ['4', '4'], ['5', '5'], ['7', '7']]} /></Row>}
+            {sh === 'rect' && <p className="phelp">El codo gira en el plano de la anchura. Para girar en el lado de la altura, intercambia anchura y altura.</p>}
+          </>)}
+          {kind === 'transition' && (<>
+            <Row label="Boca 2"><Seg value={shape2} onChange={setShape2} options={[['rect', 'Rectangular'], ['round', 'Circular']]} /></Row>
+            {shape2 === 'rect' ? (<><DimIn label="Anchura 2" mm={W2} std={std} list={RL} onChange={setW2} /><DimIn label="Altura 2" mm={H2} std={std} list={RL} onChange={setH2} /></>) : <DimIn label="Diámetro 2" mm={D2} std={std} list={RD} onChange={setD2} />}
+            {LenRow()}
+            <Row label="Desplazamiento X / Y"><input type="number" value={ex} step={10} onChange={(e) => setEx(Number(e.target.value))} style={{ width: 80 }} /><input type="number" value={ey} step={10} onChange={(e) => setEy(Number(e.target.value))} style={{ width: 80, marginLeft: 4 }} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>
+            <p className="phelp">Igual tamaño con desplazamiento = desvío. Se crea como chapa: el desarrollo y el DXF para corte están en Chapa › Desarrollo.</p>
+          </>)}
+          {kind === 'branch' && (<>
+            <Row label="Tipo"><select value={branch} onChange={(e) => setBranch(e.target.value as 'tee')}><option value="tee">Te (derivación a 90°)</option><option value="shoe">Toma de zapato (45°)</option><option value="collar">Collarín</option><option value="y">Pantalón (circular)</option></select></Row>
+            {LenRow('Longitud principal')}
+            {branch !== 'y' && <Row label="Derivación"><Seg value={shape2} onChange={setShape2} options={[['rect', 'Rectangular'], ['round', 'Circular']]} /></Row>}
+            {branch !== 'y' && shape2 === 'rect' ? (<><DimIn label="Anchura deriv." mm={W2} std={std} list={RL} onChange={setW2} /><DimIn label="Altura deriv." mm={H2} std={std} list={RL} onChange={setH2} /></>) : <DimIn label={branch === 'y' ? 'Ø brazos' : 'Ø derivación'} mm={D2} std={std} list={RD} onChange={setD2} />}
+            {sh === 'round' && (branch === 'tee' || branch === 'y') && <Row label="Ángulo"><Seg value={String(branch === 'y' ? (bAng === 90 ? 30 : bAng) : bAng)} onChange={(v) => setBAng(Number(v))} options={branch === 'y' ? [['22.5', '22,5°'], ['30', '30°'], ['45', '45°']] : [['90', '90°'], ['45', '45°']]} /></Row>}
+          </>)}
+          {kind === 'plenum' && (<>{LenRow('Altura del plenum')}<DimIn label="Ø boca" mm={D2} std={std} list={RD} onChange={setD2} /><Row label="Boca"><Seg value={spig} onChange={setSpig} options={[['top', 'Superior'], ['side', 'Lateral']]} /></Row></>)}
+          {(kind === 'grille' || kind === 'damper' || kind === 'firedamper') && <Row label={kind === 'firedamper' ? 'Clapeta (0° abierta)' : kind === 'damper' ? 'Apertura de lamas' : 'Ángulo de lamas'}><input type="range" min={0} max={90} value={blAng} onChange={(e) => setBlAng(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>{blAng}°</span></Row>}
+          {(kind === 'damper' || kind === 'firedamper' || kind === 'silencer') && (<>{kind === 'silencer' ? LenRow() : <Row label="Longitud"><input type="number" value={L === 1200 ? 0 : L} min={0} step={50} onChange={(e) => setL(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm (0 = estándar)</span></Row>}{EndsRow}</>)}
+          {kind === 'silencer' && <Row label="Celdas"><Seg value={String(split)} onChange={(v) => setSplit(Number(v))} options={[['100', '100 mm'], ['200', '200 mm']]} /></Row>}
+          {kind === 'flex' && LenRow()}
+          {kind === 'flange' && <Row label="Tipo"><Seg value={ends === 'none' || ends === 'socket' ? 'angle' : ends} onChange={(v) => setEnds(v as 'tdc')} options={[['tdc', 'TDC / perfil'], ['angle', 'Angular L30×3']]} /></Row>}
+          {kind === 'support' && (<>{LenRow('Longitud de varilla')}<Row label="Varilla"><select value={rod} onChange={(e) => setRod(e.target.value)}><option value="">Automática</option>{['M6', 'M8', 'M10', 'M12', 'M16'].map((r) => <option key={r}>{r}</option>)}</select></Row></>)}
+          {kind === 'insulation' && (<>{LenRow()}<Row label="Espesor"><input type="number" value={ins} min={5} step={5} onChange={(e) => setIns(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>
+            <Row label="Material"><select value={insMat} onChange={(e) => setInsMat(e.target.value)}>{HVAC_INS_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row></>)}
+          {!['grille', 'diffuser', 'flex', 'ahu', 'insulation'].includes(kind) && Thick}
+          {!['insulation', 'ahu', 'flex'].includes(kind) && <Row label="Material"><select value={mat} onChange={(e) => setMat(e.target.value)}>{HVAC_DUCT_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row>}
+          {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
+          <p className="phelp">Medidas interiores. Pieza paramétrica con descripción y material para la lista de materiales; en un ensamblaje se restringe con Insertar en las bocas.</p>
+          <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
+            <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
+            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface CalcRow { name: string; q: number; len: number; shape: 'rect' | 'round'; auto: boolean; W: number; H: number; D: number; fits: string[]; extra: number }
+function DuctCalcDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [std, setStd] = useState<'EN' | 'SMACNA'>('EN');
+  const [method, setMethod] = useState<'friction' | 'velocity'>('friction');
+  const [rTarget, setRTarget] = useState(1.0), [vTarget, setVTarget] = useState(5);
+  const [hMax, setHMax] = useState(400), [ar, setAr] = useState(4), [rough, setRough] = useState(0.15), [temp, setTemp] = useState(20);
+  const [rows, setRows] = useState<CalcRow[]>([
+    { name: 'Tramo 1', q: 6000, len: 10, shape: 'rect', auto: true, W: 600, H: 400, D: 400, fits: ['elbow_r'], extra: 0 },
+    { name: 'Tramo 2', q: 3000, len: 8, shape: 'rect', auto: true, W: 400, H: 300, D: 315, fits: ['tee_run', 'trans'], extra: 0 },
+    { name: 'Tramo 3', q: 1000, len: 5, shape: 'round', auto: true, W: 300, H: 200, D: 250, fits: ['tee_branch', 'damper', 'diffuser'], extra: 0 },
+  ]);
+  const rho = 353 / (273.15 + temp), nu = 1.5e-5 * Math.pow((273.15 + temp) / 293.15, 1.75);
+  const sm = std === 'SMACNA';
+  const RL = sm ? SM_RECT.map((x) => x * INCH) : EN_RECT, RD = sm ? SM_ROUND.map((x) => x * INCH) : EN_ROUND;
+  const ok = (c: { v: number; R: number }) => (method === 'friction' ? c.R <= rTarget : c.v <= vTarget);
+  const size = (r: CalcRow): { W: number; H: number; D: number } => {
+    if (!r.auto) return r;
+    if (r.shape === 'round') return { ...r, D: RD.find((d) => ok(ductFriction('round', d, d, r.q, rough, rho, nu))) ?? RD[RD.length - 1] };
+    let best: { W: number; H: number; P: number } | null = null;
+    for (const h of RL.filter((x) => x <= hMax)) for (const w of RL.filter((x) => x >= h && x / h <= ar)) {
+      if (ok(ductFriction('rect', w, h, r.q, rough, rho, nu)) && (!best || w + h < best.P)) best = { W: w, H: h, P: w + h };
+    }
+    return best ? { ...r, W: best.W, H: best.H } : { ...r, W: RL[RL.length - 1], H: Math.min(hMax, RL[RL.length - 1]) };
+  };
+  const res = rows.map((r) => {
+    const z = size(r);
+    const c = ductFriction(r.shape, r.shape === 'rect' ? z.W : z.D, r.shape === 'rect' ? z.H : z.D, r.q, rough, rho, nu);
+    const pd = (rho * c.v * c.v) / 2;
+    const zeta = r.fits.reduce((t, f) => t + (FITTING_LOSSES.find((x) => x.id === f)?.zeta ?? 0), 0);
+    const fixed = r.fits.reduce((t, f) => t + (FITTING_LOSSES.find((x) => x.id === f)?.dp ?? 0), 0) + r.extra;
+    const dpf = c.R * r.len, dps = zeta * pd + fixed;
+    return { r, z, c, pd, zeta, dpf, dps, dp: dpf + dps };
+  });
+  const total = res.reduce((t, x) => t + x.dp, 0);
+  const up = (i: number, p: Partial<CalcRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  const fmtN = (v: number, d = 1) => v.toFixed(d).replace('.', ',');
+  const Qd = (q: number) => (sm ? `${Math.round(q / 1.699)} cfm` : `${q} m³/h`);
+  const Vd = (v: number) => (sm ? `${Math.round(v * 196.85)} fpm` : `${fmtN(v, 2)} m/s`);
+  const Rd = (R: number) => (sm ? `${(R * 0.1224).toFixed(3)} in.wg/100ft` : `${fmtN(R, 2)} Pa/m`);
+  const Sz = (r: CalcRow, z: { W: number; H: number; D: number }) => (r.shape === 'rect' ? (sm ? `${Math.round(z.W / INCH)}×${Math.round(z.H / INCH)}"` : `${Math.round(z.W)}×${Math.round(z.H)}`) : sm ? `Ø${Math.round(z.D / INCH)}"` : `Ø${Math.round(z.D)}`);
+  const createDuct = (x: (typeof res)[number]) => {
+    const doc = makeHvacPart({ kind: 'duct', std, shape: x.r.shape, W: x.z.W, H: x.z.H, D: x.z.D, L: Math.round(x.r.len * 1000), material: HVAC_DUCT_MATS[0] });
+    const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_') + '.i3p';
+    if (s.kind === 'assembly') { const pid = s.docs.find((d) => d.fileName === fn)?.id ?? s.addDocument('part', doc, fn, false); asmActions.placePart(pid); s.notify(`${x.r.name}: conducto ${Sz(x.r, x.z)} colocado`); }
+    else { s.addDocument('part', doc, fn); onClose(); }
+  };
+  const exportCsv = () => {
+    const head = 'Tramo;Caudal m3/h;Longitud m;Sección;Medida;Velocidad m/s;Dh mm;De mm;Re;lambda;R Pa/m;Fricción Pa;zeta;Singulares Pa;Total Pa';
+    const lines = res.map((x) => [x.r.name, x.r.q, x.r.len, x.r.shape === 'rect' ? 'Rectangular' : 'Circular', Sz(x.r, x.z), fmtN(x.c.v, 2), Math.round(x.c.dh), Math.round(x.c.de), Math.round(x.c.Re), x.c.lambda.toFixed(4).replace('.', ','), fmtN(x.c.R, 3), fmtN(x.dpf), fmtN(x.zeta, 2), fmtN(x.dps), fmtN(x.dp)].join(';'));
+    saveText([head, ...lines, `TOTAL;;;;;;;;;;;;;;${fmtN(total)}`].join('\n'), 'calculo-conductos.csv', 'CSV', '.csv', 'text/csv');
+  };
+  return (
+    <Modal title="Dimensionado de conductos" onClose={onClose} wide>
+      <div className="calc-top">
+        <Seg value={std} onChange={setStd} options={[['EN', 'SI (EN)'], ['SMACNA', 'Imperial (SMACNA)']]} />
+        <Seg value={method} onChange={setMethod} options={[['friction', 'Pérdida de carga constante'], ['velocity', 'Velocidad']]} />
+        {method === 'friction' ? <label>R máx. <input type="number" step={0.1} value={rTarget} onChange={(e) => setRTarget(Number(e.target.value))} style={{ width: 60 }} /> Pa/m</label>
+          : <label>v máx. <input type="number" step={0.5} value={vTarget} onChange={(e) => setVTarget(Number(e.target.value))} style={{ width: 60 }} /> m/s</label>}
+        <label>Altura máx. <input type="number" step={50} value={hMax} onChange={(e) => setHMax(Number(e.target.value))} style={{ width: 70 }} /> mm</label>
+        <label>Relación máx. <input type="number" step={0.5} value={ar} onChange={(e) => setAr(Number(e.target.value))} style={{ width: 50 }} /></label>
+        <label>ε <input type="number" step={0.01} value={rough} onChange={(e) => setRough(Number(e.target.value))} style={{ width: 60 }} /> mm</label>
+        <label>Aire <input type="number" value={temp} onChange={(e) => setTemp(Number(e.target.value))} style={{ width: 50 }} /> °C (ρ {fmtN(rho, 3)})</label>
+      </div>
+      <div className="ipart-wrap">
+        <table className="ipart calc">
+          <thead><tr><th>Tramo</th><th>Caudal (m³/h)</th><th>L (m)</th><th>Sección</th><th>Medida</th><th>v</th><th>R</th><th>Accesorios</th><th>Δp fricción</th><th>Δp singular</th><th>Total</th><th></th></tr></thead>
+          <tbody>
+            {res.map((x, i) => (
+              <tr key={i}>
+                <td><input value={x.r.name} onChange={(e) => up(i, { name: e.target.value })} onKeyDown={(e) => e.stopPropagation()} style={{ width: 80 }} /></td>
+                <td><input type="number" value={x.r.q} step={100} onChange={(e) => up(i, { q: Number(e.target.value) })} style={{ width: 70 }} /><div className="ro small">{sm ? Qd(x.r.q) : ''}</div></td>
+                <td><input type="number" value={x.r.len} step={0.5} onChange={(e) => up(i, { len: Number(e.target.value) })} style={{ width: 55 }} /></td>
+                <td><select value={x.r.shape} onChange={(e) => up(i, { shape: e.target.value as 'rect' })}><option value="rect">Rect.</option><option value="round">Circ.</option></select></td>
+                <td>
+                  <label className="check"><input type="checkbox" checked={x.r.auto} onChange={(e) => up(i, { auto: e.target.checked, ...x.z })} />auto</label>
+                  {x.r.auto ? <b>{Sz(x.r, x.z)}</b> : x.r.shape === 'rect'
+                    ? <><input type="number" value={x.r.W} step={50} onChange={(e) => up(i, { W: Number(e.target.value) })} style={{ width: 55 }} />×<input type="number" value={x.r.H} step={50} onChange={(e) => up(i, { H: Number(e.target.value) })} style={{ width: 55 }} /></>
+                    : <input type="number" value={x.r.D} step={25} onChange={(e) => up(i, { D: Number(e.target.value) })} style={{ width: 60 }} />}
+                </td>
+                <td>{Vd(x.c.v)}</td>
+                <td className={method === 'friction' && x.c.R > rTarget * 1.001 ? 'warn' : ''}>{Rd(x.c.R)}</td>
+                <td className="calc-fits">
+                  <select value="" onChange={(e) => e.target.value && up(i, { fits: [...x.r.fits, e.target.value] })}><option value="">+ añadir…</option>{FITTING_LOSSES.map((f) => <option key={f.id} value={f.id}>{f.name}{f.zeta !== undefined ? ` (ζ ${String(f.zeta).replace('.', ',')})` : ` (${f.dp} Pa)`}</option>)}</select>
+                  <div className="fit-chips">{x.r.fits.map((f, k) => <button key={k} className="chip" title="Quitar" onClick={() => up(i, { fits: x.r.fits.filter((_, j) => j !== k) })}>{FITTING_LOSSES.find((y) => y.id === f)?.name ?? f} ×</button>)}</div>
+                  <label className="small">Otros <input type="number" value={x.r.extra} onChange={(e) => up(i, { extra: Number(e.target.value) })} style={{ width: 50 }} /> Pa</label>
+                </td>
+                <td>{fmtN(x.dpf)} Pa</td>
+                <td>{fmtN(x.dps)} Pa<div className="ro small">ζ {fmtN(x.zeta, 2)} · pd {fmtN(x.pd)}</div></td>
+                <td><b>{fmtN(x.dp)} Pa</b></td>
+                <td className="nowrap"><button className="btn" title="Crear el conducto de este tramo" onClick={() => createDuct(x)}>Crear</button><button className="btn icon" onClick={() => setRows(rows.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="modal-btns">
+        <button className="btn" onClick={() => setRows([...rows, { ...rows[rows.length - 1], name: `Tramo ${rows.length + 1}`, fits: [] }])}>Añadir tramo</button>
+        <button className="btn" onClick={exportCsv}>Exportar CSV</button>
+        <span className="grow" />
+        <span className="calc-total">Pérdida total del recorrido: <b>{fmtN(total)} Pa</b>{sm ? ` (${(total / 249.09).toFixed(2)} in.wg)` : ''}</span>
+        <button className="btn primary" onClick={onClose}>Cerrar</button>
+      </div>
+      <p className="phelp">Darcy-Weisbach con λ de Colebrook-White sobre el diámetro hidráulico; medida rectangular elegida con el menor perímetro que cumple el criterio (altura y relación de lados limitadas). Diámetro equivalente de Huebscher en el CSV. Introduce los tramos del recorrido más desfavorable para obtener la presión disponible necesaria en el ventilador.</p>
+    </Modal>
+  );
+}
+
 function PipingDialog({ pk: pk0, norm: norm0, onClose }: { pk: string; norm: 'ASME' | 'EN'; onClose: () => void }) {
   const s = useStore();
   const [kind, setKind] = useState<PipeKind>(pk0 as PipeKind);
@@ -2029,6 +2292,8 @@ export function Modals() {
     case 'cpattern': return <CompPatternDialog onClose={close} />;
     case 'drive': return <DriveDialog onClose={close} />;
     case 'motion': return <MotionDialog onClose={close} />;
+    case 'hvac': return <HvacDialog hk={(d as { hk: string }).hk} onClose={close} />;
+    case 'ductcalc': return <DuctCalcDialog onClose={close} />;
     case 'piping': return <PipingDialog pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} onClose={close} />;
     case 'ipart': return <IPartDialog onClose={close} />;
     case 'ifeature': return <IFeatureDialog onClose={close} />;
@@ -2050,7 +2315,7 @@ export function Modals() {
     case 'shortcuts': return <Modal title="Atajos de teclado y ratón" onClose={close}><table className="ptable kv"><tbody>{SHORTCUTS.map(([k, v]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{v}</td></tr>)}</tbody></table></Modal>;
     default: return (
       <Modal title="Acerca de INV3D" onClose={close}>
-        <p><b>INV3D 0.7</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
+        <p><b>INV3D 0.8</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
         <p className="phelp">Boceto con restricciones geométricas y cotas, pieza y chapa, ensamblaje con restricciones (solver simultáneo), Centro de contenido, estructura (perfiles EN), soldadura (ISO 2553), tornillería (ISO, cálculo EN 1993-1-8), planos con secciones y detalles (ISO, proyección europea) y presentación.</p>
         <p className="phelp">Núcleo OpenCascade (LGPL) vía replicad · visor Three.js · visor DWG LibreDWG (GPL-3.0).</p>
         <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={close}>Cerrar</button></div>

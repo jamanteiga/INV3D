@@ -67,9 +67,9 @@ export default function Ribbon() {
     if (k === 'part') return [
       ...(inSketch ? [['sketch', 'Boceto'] as [Tab, string]] : []),
       ...(isSheet ? [['sheet', 'Chapa'] as [Tab, string]] : []),
-      ['model', 'Modelo 3D'], ['pipe', 'Mecánica'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista'],
+      ['model', 'Modelo 3D'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista'],
     ];
-    if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['pipe', 'Mecánica'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista']];
+    if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista']];
     return [['place', 'Colocar vistas'], ['annotate', 'Anotar'], ['export', 'Exportar'], ['tools', 'Herramientas']];
   };
   const tabs = tabsFor();
@@ -200,6 +200,42 @@ export default function Ribbon() {
           </Group>
           <Group label="Desarrollo"><Big icon="flat" label="Desarrollo" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Patrón desarrollado y DXF para corte" /></Group>
         </>)}
+        {cur === 'hvac' && (() => { const H = (hk: string) => () => s.open({ kind: 'hvac', hk }); return (<>
+          <Group label="Conductos (EN 1505/1506 · SMACNA)">
+            <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular o circular" />
+            <Big icon="helbow" label="Codo" onClick={H('elbow')} title="Codo con radio, recto con álabes, prensado o por gajos" />
+            <Col>
+              <Small icon="htrans" label="Transición" onClick={H('transition')} title="Transición, reducción o desvío con desarrollo para corte" />
+              <Small icon="hbranch" label="Derivación" onClick={H('branch')} title="Te, toma de zapato, collarín, derivación a 45° y pantalón" />
+              <Small icon="hcap" label="Tapa" onClick={H('cap')} />
+            </Col>
+            <Col><Small icon="hplenum" label="Plenum" onClick={H('plenum')} /></Col>
+          </Group>
+          <Group label="Terminales y equipos">
+            <Col>
+              <Small icon="hgrille" label="Rejilla" onClick={H('grille')} />
+              <Small icon="hdiff" label="Difusor" onClick={H('diffuser')} />
+              <Small icon="hflex" label="Flexible" onClick={H('flex')} />
+            </Col>
+            <Col>
+              <Small icon="hdamper" label="Compuerta" onClick={H('damper')} />
+              <Small icon="hfire" label="Cortafuegos" onClick={H('firedamper')} />
+              <Small icon="hsil" label="Silenciador" onClick={H('silencer')} />
+            </Col>
+            <Col>
+              <Small icon="hahu" label="UTA" onClick={H('ahu')} />
+              <Small icon="hfc" label="Fancoil" onClick={H('fancoil')} />
+            </Col>
+          </Group>
+          <Group label="Uniones, soportes y aislamiento">
+            <Col>
+              <Small icon="hflange" label="Brida / marco" onClick={H('flange')} />
+              <Small icon="hsupport" label="Soporte" onClick={H('support')} />
+              <Small icon="hins" label="Aislamiento" onClick={H('insulation')} />
+            </Col>
+          </Group>
+          <Group label="Cálculo"><Big icon="hcalc" label="Dimensionar" onClick={() => s.open({ kind: 'ductcalc' })} title="Dimensionado de conductos por pérdida de carga o velocidad (Darcy-Weisbach / Colebrook)" /></Group>
+        </>); })()}
         {cur === 'pipe' && (<>
           {([['ASME', 'Tubería ASME (B36.10 · B16.5 · B16.47 · B16.9 · B16.11)'], ['EN', 'Tubería EN (EN 10220 · EN 1092-1 · EN 10253)']] as const).map(([norm, lbl]) => (
             <Group key={norm} label={lbl}>
