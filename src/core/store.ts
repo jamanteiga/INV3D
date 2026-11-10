@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS, type AppSettings, type UserLibs, type RecentItem } fr
 
 export type DocKind = 'part' | 'assembly' | 'drawing';
 export type AnyDoc = PartDoc | AsmDoc | DrawingDoc;
-export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean; /** ruta relativa en la carpeta de trabajo */ path?: string }
+export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean; /** ruta relativa en la carpeta de trabajo */ path?: string; /** pieza cargada solo como referencia de un ensamblaje (en memoria, sin pestaña), como en Inventor */ hidden?: boolean }
 
 export type Mode = 'model' | 'sketch' | 'present';
 export type Tool = null
@@ -26,7 +26,7 @@ export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hol
   | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange' | 'rib' | 'coil' | 'split' | 'draft' | 'thicken' | 'thread' | 'workaxis' | 'workpoint'
   | 'combine' | 'movebody' | 'derive' | 'pathpattern' | 'sm_contour' | 'sm_punch'
   | 'surf_extrude' | 'surf_revolve' | 'surf_loft' | 'surf_patch' | 'stitch' | 'sm_loft';
-export type AsmDialogKind = 'joint' | 'frame' | 'weld' | 'bolt' | 'skel' | 'endtreat';
+export type AsmDialogKind = 'joint' | 'frame' | 'weld' | 'bolt' | 'skel' | 'endtreat' | 'asmwp';
 export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
@@ -117,6 +117,8 @@ export interface State {
   addDocument: (kind: DocKind, data: AnyDoc, fileName: string, activate?: boolean, id?: string) => string;
   activate: (id: string) => void;
   closeDocument: (id: string) => void;
+  /** Quita la pestaña de una pieza que usa un ensamblaje (queda en memoria) */
+  hideDocument: (id: string) => void;
   docData: (id: string) => AnyDoc | null;
   partsMap: (ids?: string[]) => Record<string, PartDoc>;
 
@@ -244,7 +246,7 @@ export const useStore = create<State>((set, get) => ({
   addDocument: (kind, data, fileName, activate = true, id) => {
     const nid = id ?? uid('d');
     if (kind === 'part') { data = clone(data); resolveAll(data as PartDoc); }
-    set({ docs: [...get().docs, { id: nid, kind, fileName, data, past: [], future: [], dirty: false }] });
+    set({ docs: [...get().docs, { id: nid, kind, fileName, data, past: [], future: [], dirty: false, hidden: !activate && kind === 'part' ? true : undefined }] });
     if (activate) get().activate(nid);
     return nid;
   },
@@ -277,7 +279,7 @@ export const useStore = create<State>((set, get) => ({
     // Colocación pendiente: se descarta el componente que seguía al cursor
     if (s.placing && s.kind === 'assembly') { const pend = s.placing.occ; set({ asm: { ...s.asm, occurrences: s.asm.occurrences.filter((o) => o.id !== pend) }, placing: null }); return get().activate(id); }
     // Guardar el documento activo en el registro
-    const docs = s.docs.map((d) => (d.id === s.active ? { ...d, data: s.docData(s.active)!, past: s.past, future: s.future, dirty: s.dirty, fileName: s.fileName } : d));
+    const docs = s.docs.map((d) => (d.id === s.active ? { ...d, data: s.docData(s.active)!, past: s.past, future: s.future, dirty: s.dirty, fileName: s.fileName } : d.id === id && d.hidden ? { ...d, hidden: undefined } : d));
     const t = docs.find((d) => d.id === id);
     if (!t) return;
     const common = {
@@ -289,18 +291,38 @@ export const useStore = create<State>((set, get) => ({
     else if (t.kind === 'assembly') set({ ...common, asm: t.data as AsmDoc, asmResult: null, explodeT: 0 });
     else set({ ...common, drw: t.data as DrawingDoc });
   },
+  hideDocument: (id) => {
+    const s = get();
+    if (id === s.active) {
+      const asmId = s.docs.find((o) => o.kind === 'assembly' && !o.hidden && ((o.data as any)?.occurrences ?? []).some((x: any) => x.part === id))?.id
+        ?? s.docs.find((o) => o.id !== id && !o.hidden)?.id;
+      if (!asmId) return;
+      get().activate(asmId);
+    }
+    set({ docs: get().docs.map((d) => (d.id === id ? { ...d, hidden: true } : d)) });
+  },
   closeDocument: (id) => {
     const s = get();
-    const rest = s.docs.filter((d) => d.id !== id);
+    let rest = s.docs.filter((d) => d.id !== id);
+    // Piezas en memoria que ya no usa ningún documento abierto: se descargan
+    const used = new Set<string>();
+    for (const d of rest) {
+      const data = (d.id === s.active ? s.docData(d.id) : d.data) as any;
+      if (d.kind === 'assembly') for (const o of data?.occurrences ?? []) used.add(o.part);
+      if (d.kind === 'drawing') for (const v of data?.views ?? []) used.add(v.source);
+    }
+    rest = rest.filter((d) => !d.hidden || used.has(d.id));
+    if (!rest.some((d) => !d.hidden)) rest = rest.map((d) => ({ ...d, hidden: undefined }));
     if (!rest.length) {
       const d = newDoc();
       set({ docs: [{ id: 'd' + Date.now(), kind: 'part', fileName: 'Pieza1.i3p', data: d, past: [], future: [], dirty: false }] });
       get().activate(get().docs[0].id);
       return;
     }
-    if (id === s.active) {
+    if (id === s.active || !rest.some((d) => d.id === s.active)) {
       set({ docs: rest, active: '__none' });
-      get().activate(rest[rest.length - 1].id);
+      const vis = rest.filter((d) => !d.hidden);
+      get().activate((vis[vis.length - 1] ?? rest[rest.length - 1]).id);
     } else set({ docs: rest });
   },
 
@@ -518,10 +540,10 @@ export const useStore = create<State>((set, get) => ({
       return;
     }
     if (s.kind === 'assembly') {
-      const coll = ({ joint: 'joints', frame: 'frames', weld: 'welds', bolt: 'bolts', skel: 'skeleton', endtreat: 'frames' } as const)[d.kind as AsmDialogKind];
+      const coll = ({ joint: 'joints', frame: 'frames', weld: 'welds', bolt: 'bolts', skel: 'skeleton', endtreat: 'frames', asmwp: 'workPlanes' } as const)[d.kind as AsmDialogKind];
       const items: any[] = Array.isArray(draft) ? draft : [draft];
       s.commitAsm((a) => {
-        const arr = (a as any)[coll] as any[];
+        const arr = ((a as any)[coll] ??= []) as any[];
         for (const it of items) {
           const i = arr.findIndex((x) => x.id === it.id);
           if (i >= 0) arr[i] = it; else arr.push(it);

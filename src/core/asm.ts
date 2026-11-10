@@ -27,14 +27,16 @@ export interface CompPattern { id: string; name: string; parent: string; p: Reco
 export interface FaceRef { occ: string; point: V3; normal: V3; kind?: 'plane' | 'axis'; radius?: number; convex?: boolean; /** dirección de referencia X y centro de la cara (uniones) */ xdir?: V3; center?: V3 }
 
 /** Coincidir, al ras, rígida, ángulo, tangente e insertar (como las restricciones de ensamblaje de Inventor). */
-export type JointType = 'mate' | 'flush' | 'rigid' | 'angle' | 'tangent' | 'insert' | 'rot' | 'slider' | 'cyl' | 'planar' | 'ball';
-export const JOINT_NAMES: Record<JointType, string> = { mate: 'Coincidir', flush: 'Al ras', rigid: 'Rígida', angle: 'Ángulo', tangent: 'Tangente', insert: 'Insertar',
+export type JointType = 'mate' | 'flush' | 'rigid' | 'angle' | 'tangent' | 'insert' | 'perp' | 'sym' | 'rot' | 'slider' | 'cyl' | 'planar' | 'ball';
+export const JOINT_NAMES: Record<JointType, string> = { mate: 'Coincidir', flush: 'Al ras', rigid: 'Rígida', angle: 'Ángulo', tangent: 'Tangente', insert: 'Insertar', perp: 'Perpendicular', sym: 'Simetría',
   rot: 'Unión de rotación', slider: 'Unión corredera', cyl: 'Unión cilíndrica', planar: 'Unión planar', ball: 'Unión de bola' };
 /** Uniones de Inventor (orígenes con eje): grados de libertad que dejan libres */
 export const JOINT_DOF: Partial<Record<JointType, string>> = { rot: '1 giro', slider: '1 traslación', cyl: '1 giro + 1 traslación', planar: '2 traslaciones + 1 giro', ball: '3 giros', rigid: 'ninguno' };
 export interface Joint {
   id: string; name: string; type: JointType;
   a: FaceRef; b: FaceRef;
+  /** Simetría: plano de simetría */
+  c?: FaceRef;
   offset: string; angle: string;
   /** Insertar: ejes en el mismo sentido (alineada) en lugar de opuestos */
   aligned?: boolean;
@@ -64,6 +66,20 @@ export interface FrameMember {
   ext: [string, string];  // alargamiento en cada extremo (mm)
   suppressed?: boolean;
 }
+
+/** Geometría de referencia del propio ensamblaje (planos y ejes de origen, planos de trabajo): componente virtual fijo. */
+export const ASM_REF = '__asm';
+/** Plano de trabajo (auxiliar) del ensamblaje, en coordenadas del ensamblaje */
+export interface AsmWorkPlane { id: string; name: string; origin: V3; normal: V3; xdir: V3; hidden?: boolean }
+export const ORIGIN_REFS: { key: string; label: string; ref: FaceRef }[] = [
+  { key: 'YZ', label: 'Plano YZ', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [1, 0, 0], kind: 'plane', center: [0, 0, 0], xdir: [0, 1, 0] } },
+  { key: 'XZ', label: 'Plano XZ', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 1, 0], kind: 'plane', center: [0, 0, 0], xdir: [1, 0, 0] } },
+  { key: 'XY', label: 'Plano XY', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 0, 1], kind: 'plane', center: [0, 0, 0], xdir: [1, 0, 0] } },
+  { key: 'X', label: 'Eje X', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [1, 0, 0], kind: 'axis', radius: 0, center: [0, 0, 0], xdir: [0, 1, 0] } },
+  { key: 'Y', label: 'Eje Y', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 1, 0], kind: 'axis', radius: 0, center: [0, 0, 0], xdir: [1, 0, 0] } },
+  { key: 'Z', label: 'Eje Z', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 0, 1], kind: 'axis', radius: 0, center: [0, 0, 0], xdir: [1, 0, 0] } },
+];
+export const workPlaneRef = (w: AsmWorkPlane): FaceRef => ({ occ: ASM_REF, point: w.origin, normal: w.normal, kind: 'plane', center: w.origin, xdir: w.xdir });
 
 /** Línea de esqueleto 3D del ensamblaje. */
 export interface SkelLine { id: string; a: V3; b: V3 }
@@ -119,6 +135,7 @@ export interface AsmDoc {
   frames: FrameMember[];
   welds: Weld[];
   bolts: BoltGroup[];
+  workPlanes?: AsmWorkPlane[];
   /** desplazamientos de explosionado por id (componente o barra) */
   explode: Record<string, V3>;
 }
@@ -190,17 +207,18 @@ export const xfInvDir = (x: Xform, d: V3): V3 => q.rotate([-x.quat[0], -x.quat[1
 export function solveJoints(asm: AsmDoc, ev: (s: string) => number): { xf: Record<string, Xform>; errors: Record<string, string> } {
   const xf: Record<string, Xform> = {};
   for (const o of asm.occurrences) xf[o.id] = { pos: [...o.xf.pos], quat: [...o.xf.quat] };
+  xf[ASM_REF] = { pos: [0, 0, 0], quat: [0, 0, 0, 1] };
   const errors: Record<string, string> = {};
-  const grounded = new Set(asm.occurrences.filter((o) => o.grounded).map((o) => o.id));
+  const grounded = new Set([ASM_REF, ...asm.occurrences.filter((o) => o.grounded).map((o) => o.id)]);
   for (const j of asm.joints) {
     if (j.suppressed) continue;
     const A = xf[j.a.occ], B = xf[j.b.occ];
-    if (!A || !B) { errors[j.id] = 'Componente no encontrado'; continue; }
+    if (!A || !B || (j.c && !xf[j.c.occ])) { errors[j.id] = 'Componente no encontrado'; continue; }
     if (grounded.has(j.b.occ) && !grounded.has(j.a.occ)) { errors[j.id] = 'El componente B está fijo; invierte la selección'; continue; }
     try {
       const pa = xfPoint(A, j.a.point), na = v3.norm(xfDir(A, j.a.normal));
       const nbW = v3.norm(xfDir(B, j.b.normal));
-      if (j.type === 'angle' || j.type === 'tangent') continue; // los resuelve el método numérico
+      if (j.type === 'angle' || j.type === 'tangent' || j.type === 'perp' || j.type === 'sym') continue; // los resuelve el método numérico
       const pac = xfPoint(A, j.a.center ?? j.a.point);
       if (j.type === 'ball') { xf[j.b.occ] = { pos: v3.add(B.pos, v3.sub(pac, xfPoint(B, j.b.center ?? j.b.point))), quat: B.quat }; continue; }
       if (j.type === 'rot' || j.type === 'slider' || j.type === 'cyl' || j.type === 'planar') {
@@ -290,7 +308,7 @@ const sub3 = v3.sub, dot3 = v3.dot, cross3 = v3.cross;
 
 /** Residuos de una restricción con las poses dadas de A y B. */
 const UNION = new Set<JointType>(['rot', 'slider', 'cyl', 'planar', 'ball']);
-export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => number): number[] {
+export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => number, C?: Xform): number[] {
   const u = UNION.has(j.type);
   const pa = xfPoint(A, u ? j.a.center ?? j.a.point : j.a.point), na = v3.norm(xfDir(A, j.a.normal));
   const pb = xfPoint(B, u ? j.b.center ?? j.b.point : j.b.point), nb = v3.norm(xfDir(B, j.b.normal));
@@ -306,6 +324,15 @@ export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => 
       return [dot3(N, D), dot3(sub3(Q, P), N) - off];
     }
     case 'flush': return [...sub3(na, nb), dot3(sub3(pb, pa), na) - off];
+    case 'perp': return [dot3(na, nb)];
+    case 'sym': {
+      if (!j.c || !C) return [];
+      // reflejo de la geometría A en el plano C: B debe coincidir con ese reflejo
+      const pc = xfPoint(C, j.c.point), nc = v3.norm(xfDir(C, j.c.normal));
+      const ra = sub3(pa, v3.mul(nc, 2 * dot3(sub3(pa, pc), nc))), rn = sub3(na, v3.mul(nc, 2 * dot3(na, nc)));
+      if (ka === 'axis' && kb === 'axis') return [...cross3(rn, nb), ...perp(sub3(pb, ra), rn)];
+      return [...sub3(rn, nb), dot3(sub3(pb, ra), nb)];
+    }
     case 'insert': return [...(j.aligned ? sub3(na, nb) : v3.add(na, nb)), ...perp(sub3(pb, pa), na), dot3(sub3(pb, pa), na) - off];
     case 'rigid': return [...v3.add(na, nb), ...sub3(pb, v3.add(pa, v3.mul(na, off)))];
     case 'angle': return [dot3(na, nb) - Math.cos(((ev(j.angle || '0') || 0) * Math.PI) / 180)];
@@ -376,15 +403,15 @@ export function solveAssembly(asm: AsmDoc, ev: (s: string) => number, opts: { do
   const seq = solveJoints(asm, ev);
   const xf0 = seq.xf;
   const errors: Record<string, string> = {};
-  const active = asm.joints.filter((j) => !j.suppressed && xf0[j.a.occ] && xf0[j.b.occ]);
-  const grounded = new Set(asm.occurrences.filter((o) => o.grounded).map((o) => o.id));
-  const movers = [...new Set(active.flatMap((j) => [j.a.occ, j.b.occ]))].filter((id) => !grounded.has(id));
+  const active = asm.joints.filter((j) => !j.suppressed && xf0[j.a.occ] && xf0[j.b.occ] && (!j.c || xf0[j.c.occ]) && (j.type !== 'sym' || j.c));
+  const grounded = new Set([ASM_REF, ...asm.occurrences.filter((o) => o.grounded).map((o) => o.id)]);
+  const movers = [...new Set(active.flatMap((j) => [j.a.occ, j.b.occ, ...(j.c ? [j.c.occ] : [])]))].filter((id) => !grounded.has(id));
   const idx = new Map(movers.map((id, i) => [id, i * 6]));
   const n = movers.length * 6;
   const pose = (v: number[], id: string) => (idx.has(id) ? poseWith(xf0[id], v, idx.get(id)!) : xf0[id]);
   const motions = (asm.motions ?? []).filter((m) => !m.suppressed).map((m) => ({ m, j1: active.find((j) => j.id === m.j1), j2: active.find((j) => j.id === m.j2) })).filter((x) => x.j1 && x.j2) as { m: Motion; j1: Joint; j2: Joint }[];
   const R = (v: number[]) => [
-    ...active.flatMap((j) => { try { return [...jointResiduals(j, pose(v, j.a.occ), pose(v, j.b.occ), ev), ...limitResidual(j, pose(v, j.a.occ), pose(v, j.b.occ), ev)].map((x) => (isFinite(x) ? x : 0)); } catch { return []; } }),
+    ...active.flatMap((j) => { try { return [...jointResiduals(j, pose(v, j.a.occ), pose(v, j.b.occ), ev, j.c ? pose(v, j.c.occ) : undefined), ...limitResidual(j, pose(v, j.a.occ), pose(v, j.b.occ), ev)].map((x) => (isFinite(x) ? x : 0)); } catch { return []; } }),
     ...motions.map(({ m, j1, j2 }) => { try { const r = motionResidual(m, j1, j2, (id) => pose(v, id), ev); return isFinite(r) ? r : 0; } catch { return 0; } }),
   ];
   let x = new Array(n).fill(0);
@@ -415,7 +442,7 @@ export function solveAssembly(asm: AsmDoc, ev: (s: string) => number, opts: { do
   const xf: Record<string, Xform> = { ...xf0 };
   for (const id of movers) xf[id] = pose(x, id);
   for (const j of active) {
-    try { const rr = jointResiduals(j, xf[j.a.occ], xf[j.b.occ], ev); if (Math.sqrt(norm2(rr)) > 1e-3) errors[j.id] = 'Restricción no satisfecha (conflicto con otras o con componentes fijos)'; } catch (e) { errors[j.id] = (e as Error).message; }
+    try { const rr = jointResiduals(j, xf[j.a.occ], xf[j.b.occ], ev, j.c ? xf[j.c.occ] : undefined); if (Math.sqrt(norm2(rr)) > 1e-3) errors[j.id] = 'Restricción no satisfecha (conflicto con otras o con componentes fijos)'; } catch (e) { errors[j.id] = (e as Error).message; }
   }
   for (const [k, v] of Object.entries(seq.errors)) if (!/invierte/.test(v)) errors[k] ??= v;
   // Grados de libertad por componente

@@ -11,7 +11,7 @@ import { openFile, recentCtl } from '../core/files';
 const S = () => useStore.getState();
 let ready = false;
 
-interface SessionData { v: 1; active: string; docs: { id: string; kind: DocEntry['kind']; fileName: string; path?: string; dirty: boolean; data: AnyDoc }[]; project?: unknown; at: number }
+interface SessionData { v: 1; active: string; docs: { id: string; kind: DocEntry['kind']; fileName: string; path?: string; dirty: boolean; hidden?: boolean; data: AnyDoc }[]; project?: unknown; at: number }
 
 function configNow(): Config { const s = S(); return { v: 1, settings: s.settings, libs: s.libs, savedAt: Date.now() }; }
 
@@ -40,7 +40,7 @@ export async function initSession() {
 }
 
 function restoreSession(sess: SessionData) {
-  const docs: DocEntry[] = sess.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, path: d.path, data: d.data, past: [], future: [], dirty: d.dirty }));
+  const docs: DocEntry[] = sess.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, path: d.path, data: d.data, past: [], future: [], dirty: d.dirty, hidden: d.hidden }));
   const act = docs.find((d) => d.id === sess.active) ?? docs[docs.length - 1];
   useStore.setState({ docs, active: '__none' });
   S().activate(act.id);
@@ -82,7 +82,7 @@ export async function saveSession() {
     v: 1, active: s.active, at: Date.now(),
     docs: s.docs.map((d) => {
       const on = d.id === s.active;
-      return { id: d.id, kind: d.kind, fileName: on ? s.fileName : d.fileName, path: d.path, dirty: on ? s.dirty : d.dirty, data: s.docData(d.id)! };
+      return { id: d.id, kind: d.kind, fileName: on ? s.fileName : d.fileName, path: d.path, dirty: on ? s.dirty : d.dirty, hidden: d.hidden, data: s.docData(d.id)! };
     }),
   };
   await kvSet('session', data);

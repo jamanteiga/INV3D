@@ -4,7 +4,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { useStore, type State } from '../core/store';
 import { makeEval } from '../core/expr';
 import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
-import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, type Xform, type AsmDoc } from '../core/asm';
+import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
 import { asmActions } from './actions';
 import type { MeshData } from '../core/cadClient';
 import { View3D, css, tv, vArr, planarFaceAt, faceVertices } from './view3d';
@@ -75,6 +75,7 @@ export default function AsmViewport() {
   const host = useRef<HTMLDivElement>(null);
   const cubeHost = useRef<HTMLDivElement>(null);
   const [hint, setHint] = useState('');
+  const [ctx, setCtx] = useState<{ x: number; y: number; ref: FaceRef; pW: V3; label: string } | null>(null);
 
   useEffect(() => {
     const V = new View3D(host.current!, cubeHost.current!);
@@ -83,6 +84,33 @@ export default function AsmViewport() {
     const modelGroup = new THREE.Group(); scene.add(modelGroup);
     const lineGroup = new THREE.Group(); scene.add(lineGroup);
     const overlayGroup = new THREE.Group(); scene.add(overlayGroup);
+    const refGroup = new THREE.Group(); scene.add(refGroup);
+    let refHover: THREE.Object3D | null = null;
+    /** Planos y ejes de origen del ensamblaje (al restringir) y planos de trabajo: visibles y seleccionables */
+    const buildRefs = (s: State) => {
+      V.clearGroup(refGroup); refHover = null;
+      const joint = s.dialog?.kind === 'joint' || s.dialog?.kind === 'asmwp';
+      const box = V.viewBox(), size = Math.max(100, box.getSize(new THREE.Vector3()).length() * 0.45);
+      const plane = (ref: FaceRef, label: string, color: string) => {
+        const n = tv(ref.normal).normalize(), x = tv(ref.xdir ?? [1, 0, 0]).normalize(), y = n.clone().cross(x);
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+        m.matrixAutoUpdate = false; m.matrix.makeBasis(x, y, n).setPosition(tv(ref.center ?? ref.point));
+        m.userData = { kind: 'ref', ref, label, base: 0.12 }; m.renderOrder = 3;
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.6 }));
+        m.add(e); refGroup.add(m);
+      };
+      const axis = (ref: FaceRef, label: string, color: string) => {
+        const d = tv(ref.normal).normalize();
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(size * 0.006, size * 0.006, size * 1.2, 8), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false }));
+        m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d); m.position.copy(tv(ref.point));
+        m.userData = { kind: 'ref', ref, label, base: 0.55 }; m.renderOrder = 4; refGroup.add(m);
+      };
+      if (joint) for (const o of ORIGIN_REFS) (o.ref.kind === 'axis' ? axis : plane)(o.ref, `Ensamblaje · ${o.label}`, o.key.includes('X') && o.key.length === 1 ? '#d9480f' : o.key === 'Y' ? '#2b8a3e' : o.key === 'Z' ? '#1c7ed6' : '#e8a33d');
+      for (const w of s.asm.workPlanes ?? []) if (!w.hidden || joint) plane(workPlaneRef(w), w.name, '#e8a33d');
+      refGroup.updateMatrixWorld(true);
+      V.request();
+    };
+    const refAt = (ev: MouseEvent) => V.ray(ev).intersectObjects(refGroup.children.filter((c) => c.userData.kind === 'ref'), false)[0];
     const tc = new TransformControls(camera, V.renderer.domElement);
     tc.setSize(0.8);
     const tcHelper = (tc as any).getHelper ? (tc as any).getHelper() : tc;
@@ -140,7 +168,8 @@ export default function AsmViewport() {
       if (!d?.a || !d?.b || d.a.occ === d.b.occ) return false;
       try {
         const a = structuredClone(s.asm);
-        a.joints.push({ id: '__prev', name: '', type: d.type, a: d.a, b: d.b, offset: d.offset, angle: d.angle, aligned: d.type === 'insert' ? !!d.aligned : undefined, lock: d.lock, min: d.min, max: d.max });
+        if (d.type === 'sym' && !d.c) return false;
+        a.joints.push({ id: '__prev', name: '', type: d.type, a: d.a, b: d.b, c: d.type === 'sym' ? d.c : undefined, offset: d.offset, angle: d.angle, aligned: d.type === 'insert' ? !!d.aligned : undefined, lock: d.lock, min: d.min, max: d.max });
         const r = solveAssembly(a, (x) => { try { return makeEval([])(x); } catch { return NaN; } });
         for (const m of pickables) if (m.userData.kind === 'occ' && r.xf[m.userData.id]) { m.parent!.matrix.copy(xfMatrix(r.xf[m.userData.id], explodeOf(s, m.userData.id))); m.parent!.matrixWorldNeedsUpdate = true; }
         V.request();
@@ -289,6 +318,17 @@ export default function AsmViewport() {
       const [centerL, xdirL] = toL(cW, vArr(xd));
       return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: vArr(hit.point), normalW: vArr(nW), pointL, normalL, vertsW, kind: 'plane', centerL, xdirL };
     };
+    /** Geometría para restringir bajo el cursor: cara/eje de componente o plano/eje de referencia (el más cercano). */
+    const pickRef = (ev: MouseEvent): { ref: FaceRef; pW: V3; label: string } | null => {
+      const h = hitAt(ev), r = refAt(ev);
+      const useRef = r && (!h || r.object.userData.ref.kind === 'axis' || r.distance < h.distance - 1e-6);
+      if (useRef) return { ref: r!.object.userData.ref, pW: vArr(r!.point), label: r!.object.userData.label };
+      if (!h) return null;
+      const f = faceFromHit(h);
+      if (!f || f.ownerKind !== 'occ') return null;
+      const nm = useStore.getState().asm.occurrences.find((o) => o.id === f.owner)?.name ?? '';
+      return { ref: { occ: f.owner, point: f.pointL, normal: f.normalL, kind: f.kind, radius: f.radius, convex: f.convex, center: f.centerL, xdir: f.xdirL }, pW: f.pointW, label: `${nm} · ${f.kind === 'axis' ? `eje Ø${Math.round((f.radius ?? 0) * 20) / 10}` : 'cara'}` };
+    };
     const nearestCand = (ev: MouseEvent): CandLine | null => {
       const P = V.local(ev);
       let best: CandLine | null = null, bd = 8;
@@ -367,6 +407,13 @@ export default function AsmViewport() {
       if (endDrag(ev)) { downAt = null; return; }
       const small = !!downAt && Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y) <= 4;
       if (small && ev.button === 2 && useStore.getState().tool === 'place') { downAt = null; asmActions.finishPlace(); return; }
+      if (small && ev.button === 2 && !useStore.getState().tool) {
+        downAt = null;
+        const pk = pickRef(ev);
+        if (pk) { const o = useStore.getState().asm.occurrences.find((x) => x.id === pk.ref.occ); useStore.setState({ selItem: o?.id ?? null }); setCtx({ x: ev.clientX, y: ev.clientY, ref: pk.ref, pW: pk.pW, label: pk.label }); }
+        else setCtx(null);
+        return;
+      }
       if (!downAt || !small || ev.button !== 0 || (tc as any).dragging) { downAt = null; return; }
       downAt = null;
       const s = useStore.getState();
@@ -397,6 +444,24 @@ export default function AsmViewport() {
         if (!d.member || (d.member && d.target)) s.updateDraft({ member: id, target: '' });
         else if (id !== d.member) s.updateDraft({ target: id });
         useStore.setState({ selItem: id });
+        return;
+      }
+      if (s.tool === 'asmFace' && (dlg?.kind === 'joint' || dlg?.kind === 'asmwp')) {
+        const pk = pickRef(ev);
+        if (!pk) { s.notify('Selecciona una cara o eje de un componente, o un plano/eje de origen', 'error'); return; }
+        if (dlg.kind === 'asmwp') {
+          if (pk.ref.kind === 'axis') { s.notify('Elige una cara plana o un plano', 'error'); return; }
+          const X = pk.ref.occ === ASM_REF ? { pos: [0, 0, 0] as V3, quat: [0, 0, 0, 1] as [number, number, number, number] } : (s.asmResult?.xf[pk.ref.occ] ?? s.asm.occurrences.find((o) => o.id === pk.ref.occ)!.xf);
+          s.updateDraft({ base: 'face', face: { origin: xfPoint(X, pk.ref.center ?? pk.ref.point), normal: v3.norm(vArr(tv(xfPoint(X, pk.ref.normal)).sub(tv(xfPoint(X, [0, 0, 0]))))), xdir: v3.norm(vArr(tv(xfPoint(X, pk.ref.xdir ?? [1, 0, 0])).sub(tv(xfPoint(X, [0, 0, 0]))))) }, faceLabel: pk.label });
+          return;
+        }
+        const ref = pk.ref, step = dlg.step ?? 0;
+        if (step === 0) useStore.setState({ dialog: { ...dlg, draft: { ...d, a: ref, aW: pk.pW, aL: pk.label }, step: 1 } });
+        else if (step === 1) useStore.setState({ dialog: { ...dlg, draft: { ...d, b: ref, bW: pk.pW, bL: pk.label, aligned: d.a?.kind === 'axis' && ref.kind === 'axis' ? d.a.convex !== ref.convex : d.aligned }, step: d.type === 'sym' ? 2 : 0 } });
+        else {
+          if (ref.kind === 'axis') { s.notify('El plano de simetría debe ser una cara plana o un plano', 'error'); return; }
+          useStore.setState({ dialog: { ...dlg, draft: { ...d, c: ref, cL: pk.label }, step: 0 } });
+        }
         return;
       }
       if (s.tool === 'asmFace' || s.tool === 'weldFace' || s.tool === 'boltFace') {
@@ -443,6 +508,14 @@ export default function AsmViewport() {
       } else if (s.tool === 'asmFace' || s.tool === 'weldFace' || s.tool === 'boltFace') {
         const hit = hitAt(ev);
         V.clearGroup(overlayGroup);
+        const r = s.tool === 'asmFace' ? refAt(ev) : undefined;
+        const rh = r && (!hit || r.object.userData.ref.kind === 'axis' || r.distance < hit.distance) ? r.object : null;
+        if (rh !== refHover) {
+          if (refHover) ((refHover as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = refHover.userData.base;
+          if (rh) ((rh as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = Math.min(0.9, rh.userData.base + 0.3);
+          refHover = rh; setHint(rh ? rh.userData.label : '');
+        }
+        if (rh) { V.request(); return; }
         if (hit) {
           const f = faceFromHit(hit);
           if (f) {
@@ -467,7 +540,7 @@ export default function AsmViewport() {
     };
 
     const s0 = useStore.getState();
-    applyMouse(s0); build(s0);
+    applyMouse(s0); build(s0); buildRefs(s0);
     let first = !s0.asmResult;
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
@@ -475,6 +548,7 @@ export default function AsmViewport() {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }
+      if (s.dialog?.kind !== p.dialog?.kind || s.asm.workPlanes !== p.asm.workPlanes) buildRefs(s);
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); }
@@ -490,7 +564,7 @@ export default function AsmViewport() {
   const hints: Record<string, string> = {
     frameLine: 'Selecciona líneas de esqueleto o de boceto · clic de nuevo para quitar',
     skelPoint: step === 0 ? 'Punto inicial: vértice, extremo de línea o punto de una cara' : 'Punto final',
-    asmFace: step === 0 ? 'Cara del componente A (referencia)' : 'Cara del componente B (se moverá)',
+    asmFace: dialog?.kind === 'asmwp' ? 'Cara plana o plano de base para el plano de trabajo' : step === 0 ? 'Primera geometría: cara, eje o plano de origen' : step === 1 ? 'Segunda geometría (se moverá el componente libre)' : 'Plano de simetría',
     weldFace: step === 0 ? 'Primera cara a soldar' : 'Segunda cara a soldar',
     boltFace: 'Cara de inicio: donde apoya la cabeza del tornillo',
     move: 'Arrastra el gizmo para mover o girar el componente seleccionado',
@@ -505,6 +579,50 @@ export default function AsmViewport() {
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </button>
       {(hint || (tool && hints[tool])) && <div className="vp-hint">{hint || hints[tool!]}</div>}
+      {ctx && <AsmCtxMenu ctx={ctx} close={() => setCtx(null)} />}
+    </div>
+  );
+}
+
+/** Menú contextual del visor de ensamblaje: restringir la geometría pulsada (como el clic derecho de Inventor). */
+function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef; pW: V3; label: string }; close: () => void }) {
+  const s = useStore.getState();
+  useEffect(() => {
+    const off = (e: Event) => { if (!(e.target as HTMLElement).closest?.('.ctx')) close(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('pointerdown', off, true); window.addEventListener('keydown', esc, true);
+    return () => { window.removeEventListener('pointerdown', off, true); window.removeEventListener('keydown', esc, true); };
+  }, [close]);
+  const occ = s.asm.occurrences.find((o) => o.id === ctx.ref.occ);
+  const isAxis = ctx.ref.kind === 'axis';
+  const start = (type: JointType, extra: Record<string, unknown> = {}, b?: { ref: FaceRef; label: string }) => {
+    close();
+    asmActions.openJoint();
+    const st = useStore.getState(); const dlg = st.dialog as any;
+    const name = `${({ mate: 'Coincidir', flush: 'Al ras', angle: 'Ángulo', tangent: 'Tangente', insert: 'Insertar', perp: 'Perpendicular', sym: 'Simetría' } as Record<string, string>)[type] ?? 'Unión'}${st.asm.joints.length + 1}`;
+    useStore.setState({ dialog: { ...dlg, draft: { ...dlg.draft, type, name, a: ctx.ref, aW: ctx.pW, aL: ctx.label, ...(b ? { b: b.ref, bL: b.label } : {}), ...extra }, step: b ? 0 : 1 } });
+  };
+  const items: [string, () => void][] = [
+    ['Coincidencia', () => start('mate')],
+    [isAxis ? 'Eje (coaxial)' : 'Cara plana (enfrentada)', () => start('mate')],
+    ['Al ras (mismo sentido)', () => start('flush')],
+    ['Tangencia', () => start('tangent')],
+    ['Perpendicularidad', () => start('perp')],
+    ['Ángulo…', () => start('angle', { angle: '90 deg' })],
+    ['Inserción', () => start('insert')],
+    ['Simetría…', () => start('sym')],
+  ];
+  const orig = ORIGIN_REFS.filter((o) => (o.ref.kind === 'axis') === isAxis);
+  return (
+    <div className="ctx" style={{ left: ctx.x, top: ctx.y, position: 'fixed' }} onContextMenu={(e) => e.preventDefault()}>
+      <div className="ctx-title">{ctx.label}</div>
+      {items.map(([l, f]) => <button key={l} onClick={f}>Restringir · {l}</button>)}
+      <hr />
+      {orig.map((o) => <button key={o.key} onClick={() => start(isAxis ? 'mate' : 'flush', {}, { ref: o.ref, label: `Ensamblaje · ${o.label}` })}>{isAxis ? 'Coaxial con' : 'Al ras con'} {o.label} del ensamblaje</button>)}
+      {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}
+      {occ && (<><hr />
+        <button onClick={() => { close(); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.grounded = !t.grounded; }); }}>{occ.grounded ? 'Liberar' : 'Fijar'}</button>
+        <button onClick={() => { close(); s.activate(occ.part); }}>Abrir pieza</button></>)}
     </div>
   );
 }

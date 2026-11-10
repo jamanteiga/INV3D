@@ -9,7 +9,7 @@ import {
 import { PROFILES, profileLabel, BOLTS, BOLT_GRADES, boltLength } from '../core/catalog';
 import { checkBolts } from '../core/ec3';
 import { CONSTRAINT_NAMES, CONSTRAINT_GLYPH, transformEntities, offsetEntity, refLine, refPoint, makeConstraint, num } from '../core/sketch';
-import { weldFromFaces, q, solveAssembly, type AsmDoc, type Joint } from '../core/asm';
+import { weldFromFaces, q, solveAssembly, ORIGIN_REFS, workPlaneRef, ASM_REF, type AsmDoc, type Joint, type FaceRef } from '../core/asm';
 import { SCALES, scaleLabel, VIEW_NAMES, type ViewDir } from '../core/drawing';
 import { Icon } from './icons';
 import { openFile, newIpj, saveText, pickFile, loadPartForPlace } from '../core/files';
@@ -621,15 +621,36 @@ function JointDialog() {
   const s = useStore();
   const d = s.dialog as { kind: 'joint'; draft: any; step?: number };
   const j = d.draft;
-  const ok = j.a && j.b;
-  const occName = (id?: string) => s.asm.occurrences.find((o) => o.id === id)?.name ?? '—';
-  const kindName = (r: any) => (r?.kind === 'axis' ? `eje Ø${fmt((r.radius ?? 0) * 2, 2)}` : 'cara');
+  const ok = j.a && j.b && (j.type !== 'sym' || j.c);
+  const occName = (id?: string) => (id === ASM_REF ? 'Ensamblaje' : s.asm.occurrences.find((o) => o.id === id)?.name ?? '—');
+  const kindName = (r: any) => (r?.kind === 'axis' ? (r.radius ? `eje Ø${fmt((r.radius ?? 0) * 2, 2)}` : 'eje') : 'cara');
+  const lab = (r: any, l?: string) => (r ? l ?? `${occName(r.occ)} · ${kindName(r)}` : '');
+  // Geometría de referencia elegible de la lista: origen del ensamblaje, planos de trabajo y origen de cada componente
+  const refList: { key: string; group: string; label: string; ref: FaceRef }[] = [
+    ...ORIGIN_REFS.map((o) => ({ key: `asm:${o.key}`, group: 'Ensamblaje', label: o.label, ref: o.ref })),
+    ...(s.asm.workPlanes ?? []).map((w) => ({ key: `wp:${w.id}`, group: 'Ensamblaje', label: w.name, ref: workPlaneRef(w) })),
+    ...s.asm.occurrences.filter((o) => !o.suppressed).flatMap((o) => ORIGIN_REFS.map((r) => ({ key: `${o.id}:${r.key}`, group: o.name, label: `${r.label} (origen)`, ref: { ...r.ref, occ: o.id } }))),
+  ];
+  const groups = [...new Set(refList.map((r) => r.group))];
+  const RefSel = ({ slot, planesOnly }: { slot: 'a' | 'b' | 'c'; planesOnly?: boolean }) => (
+    <select className="ref-sel" value="" onChange={(e) => {
+      const it = refList.find((r) => r.key === e.target.value); if (!it) return;
+      const label = `${it.group} · ${it.label}`;
+      const step = slot === 'a' ? 1 : slot === 'b' ? (j.type === 'sym' ? 2 : 0) : 0;
+      useStore.setState({ dialog: { ...d, draft: { ...j, [slot]: it.ref, [`${slot}L`]: label, [`${slot}W`]: undefined }, step } as any });
+    }}>
+      <option value="">o elegir plano/eje de origen…</option>
+      {groups.map((g) => <optgroup key={g} label={g}>{refList.filter((r) => r.group === g && (!planesOnly || r.ref.kind !== 'axis')).map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</optgroup>)}
+    </select>
+  );
   const help: Record<string, string> = {
     mate: 'Coincidir: caras enfrentadas (normales opuestas) o ejes alineados. Eje con cara: el eje queda sobre el plano.',
     flush: 'Al ras: caras paralelas en el mismo sentido, a la distancia del desfase.',
     angle: 'Ángulo entre las normales de dos caras (o direcciones de dos ejes).',
     tangent: 'Tangente: cara plana y cilíndrica (o dos cilindros) en contacto.',
     insert: 'Insertar: dos ejes (tornillo y taladro) alineados y sus caras extremas coincidentes. Elige cada cilindro cerca del extremo que debe coincidir.',
+    perp: 'Perpendicular: las dos caras (normales) o ejes quedan a 90°.',
+    sym: 'Simetría: la segunda geometría queda simétrica de la primera respecto al plano elegido (cara, plano de origen o plano de trabajo).',
     rigid: 'Rígida: caras enfrentadas y puntos de selección coincidentes.',
     rot: 'Rotación: el origen es el centro de la cara o el eje del cilindro elegido; B gira alrededor del eje de A (bisagra, eje, rueda).',
     slider: 'Corredera: B se desplaza a lo largo del eje de A sin girar (guía, carro).',
@@ -642,11 +663,13 @@ function JointDialog() {
     if (j.type === 'insert' && (j.a.kind !== 'axis' || j.b.kind !== 'axis')) { s.notify('Insertar necesita dos caras cilíndricas (eje del tornillo y del taladro)', 'error'); return false; }
     if (j.type === 'tangent' && j.a.kind !== 'axis' && j.b.kind !== 'axis') { s.notify('Tangente necesita al menos una cara cilíndrica', 'error'); return false; }
     if (j.type === 'flush' && (j.a.kind === 'axis' || j.b.kind === 'axis')) { s.notify('Al ras se aplica a caras planas', 'error'); return false; }
-    const ga = s.asm.occurrences.find((o) => o.id === j.a.occ)?.grounded, gb = s.asm.occurrences.find((o) => o.id === j.b.occ)?.grounded;
-    if (ga && gb) { s.notify('Los dos componentes están fijos: libera uno (Fijar / liberar) para que pueda moverse', 'error'); return false; }
+    const fixed = (id: string) => id === ASM_REF || !!s.asm.occurrences.find((o) => o.id === id)?.grounded;
+    const ga = fixed(j.a.occ), gb = fixed(j.b.occ);
+    if (ga && gb) { s.notify('Las dos geometrías son fijas (componentes fijos u origen del ensamblaje): libera un componente para que pueda moverse', 'error'); return false; }
+    if (j.type === 'sym' && j.c?.kind === 'axis') { s.notify('El plano de simetría debe ser plano', 'error'); return false; }
     // Se mueve siempre el componente libre: si B está fijo se intercambian A y B
     const [A, B] = gb && !ga ? [j.b, j.a] : [j.a, j.b];
-    const joint: Joint = { id: j.id, name: j.name, type: j.type, a: A, b: B, offset: j.offset, angle: j.angle, aligned: j.type === 'insert' ? !!j.aligned : undefined, lock: j.lock || undefined, min: j.min || undefined, max: j.max || undefined };
+    const joint: Joint = { id: j.id, name: j.name, type: j.type, a: A, b: B, c: j.type === 'sym' ? j.c : undefined, offset: j.offset, angle: j.angle, aligned: j.type === 'insert' ? !!j.aligned : undefined, lock: j.lock || undefined, min: j.min || undefined, max: j.max || undefined };
     s.commitAsm((a) => { a.joints.push(joint); });
     const err = solveAssembly(useStore.getState().asm, (x) => { try { return makeEval([])(x); } catch { return NaN; } }).errors[joint.id];
     if (err) s.notify(`${joint.name}: ${err}`, 'error'); else s.notify(`${joint.name} (${JOINT_NAMES[joint.type] ?? joint.type}) aplicada`);
@@ -656,7 +679,7 @@ function JointDialog() {
     <div className="fdlg">
       <Head icon="constraint3d" name={j.name} onName={(v) => s.updateDraft({ name: v })} />
       <div className="jt-grid">
-        {([['mate', 'Coincidir', 'constraint3d'], ['flush', 'Al ras', 'joint'], ['angle', 'Ángulo', 'angle3d'], ['tangent', 'Tangente', 'c_tangent'], ['insert', 'Insertar', 'insert3d'], ['rigid', 'Rígida', 'ground']] as const).map(([t, l, ic]) => (
+        {([['mate', 'Coincidir', 'constraint3d'], ['flush', 'Al ras', 'joint'], ['angle', 'Ángulo', 'angle3d'], ['perp', 'Perpendicular', 'c_perpendicular'], ['tangent', 'Tangente', 'c_tangent'], ['insert', 'Insertar', 'insert3d'], ['sym', 'Simetría', 'mirror'], ['rigid', 'Rígida', 'ground']] as const).map(([t, l, ic]) => (
           <button key={t} className={`jt ${j.type === t ? 'on' : ''}`} onClick={() => s.updateDraft({ type: t })}><Icon name={ic} size={20} />{l}</button>
         ))}
       </div>
@@ -667,8 +690,13 @@ function JointDialog() {
         ))}
       </div>
       {JOINT_DOF[j.type as keyof typeof JOINT_DOF] && <div className="pick-info">Movimiento libre: <b>{JOINT_DOF[j.type as keyof typeof JOINT_DOF]}</b></div>}
-      <Steps current={d.step ?? 0} items={[[`A: ${j.a ? `${occName(j.a.occ)} · ${kindName(j.a)}` : 'elegir cara o eje'}`, !!j.a], [`B (se mueve): ${j.b ? `${occName(j.b.occ)} · ${kindName(j.b)}` : 'elegir cara o eje'}`, !!j.b]]} />
-      {j.type !== 'angle' && j.type !== 'rot' && j.type !== 'ball' && j.type !== 'cyl' && <Row label="Desfase"><Expr value={j.offset} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>}
+      <Steps current={d.step ?? 0} items={[
+        [`1: ${j.a ? lab(j.a, j.aL) : 'cara, eje o plano'}`, !!j.a],
+        [`2: ${j.b ? lab(j.b, j.bL) : 'cara, eje o plano'}`, !!j.b],
+        ...(j.type === 'sym' ? [[`Plano de simetría: ${j.c ? lab(j.c, j.cL) : 'elegir'}`, !!j.c] as [string, boolean]] : []),
+      ]} />
+      <div className="ref-row"><RefSel slot={(d.step ?? 0) === 0 ? 'a' : (d.step ?? 0) === 1 ? 'b' : 'c'} planesOnly={(d.step ?? 0) === 2} /></div>
+      {j.type !== 'angle' && j.type !== 'perp' && j.type !== 'sym' && j.type !== 'rot' && j.type !== 'ball' && j.type !== 'cyl' && <Row label="Desfase"><Expr value={j.offset} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>}
       {(j.type === 'rot' || j.type === 'slider') && (<>
         <label className="check"><input type="checkbox" checked={!!j.lock} onChange={(e) => s.updateDraft({ lock: e.target.checked })} />Bloquear {j.type === 'rot' ? 'ángulo' : 'posición'}</label>
         {j.lock && j.type === 'rot' && <Row label="Ángulo"><Expr value={j.angle || '0 deg'} unit="deg" onCommit={(v) => s.updateDraft({ angle: v })} /></Row>}
@@ -682,7 +710,37 @@ function JointDialog() {
       {j.type === 'insert' && <Row label="Solución"><Seg value={j.aligned ? 'al' : 'op'} onChange={(v) => s.updateDraft({ aligned: v === 'al' })} options={[['al', 'Alineada'], ['op', 'Opuesta']]} /></Row>}
       <p className="phelp">{help[j.type]}</p>
       {ok && <p className="phelp">Vista previa en el visor. <b>Aplicar</b> crea la restricción y deja el comando abierto para la siguiente.</p>}
-      <Btns okDisabled={!ok} onOk={() => { if (applyJoint()) s.closeDialog(); }} onPlus={ok ? () => { if (applyJoint()) { const n = useStore.getState().asm.joints.length + 1; useStore.setState({ dialog: { ...d, draft: { ...j, id: uid('j'), name: `Unión${n}`, a: undefined, b: undefined, aW: undefined, bW: undefined }, step: 0 }, tool: 'asmFace' }); } } : undefined} onCancel={s.closeDialog} />
+      <Btns okDisabled={!ok} onOk={() => { if (applyJoint()) s.closeDialog(); }} onPlus={ok ? () => { if (applyJoint()) { const n = useStore.getState().asm.joints.length + 1; useStore.setState({ dialog: { ...d, draft: { ...j, id: uid('j'), name: `Unión${n}`, a: undefined, b: undefined, c: undefined, aW: undefined, bW: undefined, aL: undefined, bL: undefined, cL: undefined }, step: 0 }, tool: 'asmFace' }); } } : undefined} onCancel={s.closeDialog} />
+    </div>
+  );
+}
+
+/** Plano de trabajo (auxiliar) del ensamblaje: desfase de un plano de origen o de una cara, con giro opcional. */
+function AsmWpDialog() {
+  const s = useStore();
+  const d = s.dialog as { kind: 'asmwp'; draft: any };
+  const k = d.draft;
+  const ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+  const base = k.base === 'face' && k.face ? k.face : (() => { const o = ORIGIN_REFS.find((r) => r.key === (k.base === 'face' ? 'XY' : k.base))!.ref; return { origin: o.point, normal: o.normal, xdir: o.xdir! }; })();
+  const off = ev(k.offset || '0'), ang = (ev(k.angle || '0') * Math.PI) / 180;
+  const ok = isFinite(off) && isFinite(ang) && (k.base !== 'face' || k.face);
+  const make = () => {
+    const n = v3.norm(base.normal), x0 = v3.norm(base.xdir), y0 = v3.cross(n, x0);
+    // giro alrededor del eje X del plano base (charnela)
+    const nn = v3.add(v3.mul(n, Math.cos(ang)), v3.mul(y0, -Math.sin(ang)));
+    return { id: k.id, name: k.name, origin: v3.add(base.origin, v3.mul(n, off)), normal: v3.norm(nn), xdir: x0 };
+  };
+  return (
+    <div className="fdlg">
+      <Head icon="workplane" name={k.name} onName={(v) => s.updateDraft({ name: v })} />
+      <Row label="Base"><select value={k.base} onChange={(e) => s.updateDraft({ base: e.target.value })}>
+        <option value="XY">Plano XY del ensamblaje</option><option value="XZ">Plano XZ del ensamblaje</option><option value="YZ">Plano YZ del ensamblaje</option>
+        <option value="face">Cara de un componente (clic en el visor)</option></select></Row>
+      {k.base === 'face' && <div className="pick-info">{k.face ? k.faceLabel : 'Haz clic en una cara plana'}</div>}
+      <Row label="Desfase"><Expr value={k.offset} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>
+      <Row label="Giro (eje X del plano)"><Expr value={k.angle} unit="deg" onCommit={(v) => s.updateDraft({ angle: v })} /></Row>
+      <p className="phelp">Plano auxiliar fijo del ensamblaje para restringir componentes (Al ras, Coincidir, Simetría…).</p>
+      <Btns okDisabled={!ok} onOk={() => { const w = make(); s.commitAsm((a) => { (a.workPlanes ??= []).push(w); }); s.closeDialog(); s.notify(`${w.name} creado`); }} onCancel={s.closeDialog} />
     </div>
   );
 }
@@ -1072,7 +1130,7 @@ export function PropertyPanel() {
   let body: ReactNode = null;
   if (s.kind === 'part') body = s.dialog && 'draft' in s.dialog ? <FeatureDialog /> : dk === 'skop' ? <SkOpDialog /> : s.mode === 'sketch' && sk ? <SketchPanel sk={sk} /> : <PartSummary />;
   else if (s.kind === 'assembly') {
-    body = dk === 'joint' ? <JointDialog /> : dk === 'skel' ? <SkelDialog /> : dk === 'frame' ? <FrameDialog /> : dk === 'endtreat' ? <EndDialog /> : dk === 'weld' ? <WeldDialog /> : dk === 'bolt' ? <BoltDialog />
+    body = dk === 'joint' ? <JointDialog /> : dk === 'skel' ? <SkelDialog /> : dk === 'frame' ? <FrameDialog /> : dk === 'endtreat' ? <EndDialog /> : dk === 'weld' ? <WeldDialog /> : dk === 'bolt' ? <BoltDialog /> : dk === 'asmwp' ? <AsmWpDialog />
       : (<>{s.mode === 'present' && <PresentPanel />}<SelectionPanel /><AsmSummary /></>);
   } else body = <DrwPanel />;
   return (

@@ -113,7 +113,7 @@ function DocTabs() {
   const icon = { part: 'part', assembly: 'assembly', drawing: 'drawing' } as const;
   return (
     <div className="doc-tabs" role="tablist">
-      {s.docs.map((d) => {
+      {s.docs.filter((d) => !d.hidden).map((d) => {
         const on = d.id === s.active;
         const dirty = on ? s.dirty : d.dirty;
         return (
@@ -122,7 +122,8 @@ function DocTabs() {
             <button className="doc-x" title="Cerrar" onClick={async (e) => {
               e.stopPropagation();
               const used = s.docs.some((o) => o.kind === 'assembly' && (s.docData(o.id) as any)?.occurrences?.some((x: any) => x.part === d.id));
-              if (used) { s.notify('Esta pieza la usa un ensamblaje abierto; cierra antes el ensamblaje', 'error'); return; }
+              // Como en Inventor: la pieza se cierra pero sigue cargada en memoria mientras la use el ensamblaje
+              if (used) { s.hideDocument(d.id); return; }
               if (dirty && !(await s.ask(`${d.fileName} tiene cambios sin guardar. ¿Cerrarlo?`, 'Cerrar sin guardar'))) return;
               s.closeDocument(d.id);
             }}>×</button>
@@ -176,7 +177,7 @@ export default function App() {
         if (s.kind === 'assembly' && s.selItem && !s.dialog) {
           const id = s.selItem;
           return s.commitAsm((a) => {
-            a.occurrences = a.occurrences.filter((x) => x.id !== id); a.joints = a.joints.filter((j) => j.id !== id && j.a.occ !== id && j.b.occ !== id);
+            a.occurrences = a.occurrences.filter((x) => x.id !== id); a.joints = a.joints.filter((j) => j.id !== id && j.a.occ !== id && j.b.occ !== id && j.c?.occ !== id); if (a.workPlanes) a.workPlanes = a.workPlanes.filter((w) => w.id !== id);
             a.frames = a.frames.filter((x) => x.id !== id); for (const f of a.frames) f.ends = f.ends.map((en) => (en.other === id ? { type: 'none' } : en)) as typeof f.ends;
             a.welds = a.welds.filter((x) => x.id !== id); a.bolts = a.bolts.filter((x) => x.id !== id); a.skeleton = a.skeleton.filter((x) => x.id !== id);
           });

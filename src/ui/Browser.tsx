@@ -7,7 +7,7 @@ import { planeLabel, ENTITY_NAMES, type Feature, type StdPlane, type PartDoc } f
 import { profileLabel } from '../core/catalog';
 import { scaleLabel } from '../core/drawing';
 import { asmActions } from './actions';
-import { JOINT_NAMES } from '../core/asm';
+import { JOINT_NAMES, ORIGIN_REFS, ASM_REF } from '../core/asm';
 
 const ICON: Record<Feature['type'], string> = {
   sketch: 'sketch', extrude: 'extrude', revolve: 'revolve', fillet: 'fillet', chamfer: 'chamfer', import: 'import',
@@ -139,7 +139,7 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
   const rowCls = (id: string, extra = '') => `tree-row ${s.selItem === id ? 'sel' : ''} ${extra}`;
   const del = (coll: 'occurrences' | 'joints' | 'frames' | 'welds' | 'bolts' | 'skeleton', id: string) => s.commitAsm((a) => {
     (a as any)[coll] = (a as any)[coll].filter((x: { id: string }) => x.id !== id);
-    if (coll === 'occurrences') a.joints = a.joints.filter((j) => j.a.occ !== id && j.b.occ !== id);
+    if (coll === 'occurrences') a.joints = a.joints.filter((j) => j.a.occ !== id && j.b.occ !== id && j.c?.occ !== id);
     if (coll === 'frames') for (const f of a.frames) f.ends = f.ends.map((e) => (e.other === id ? { type: 'none' } : e)) as typeof f.ends;
     delete a.explode[id];
   });
@@ -167,6 +167,19 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
         </div>
       ))}
     </Folder>}
+    <Folder icon="origin" label="Origen" defaultOpen={false}>
+      {ORIGIN_REFS.map((r) => <div key={r.key} className="tree-row" style={{ paddingLeft: 30 }}><Icon name={r.ref.kind === 'axis' ? 'axis' : 'workplane'} size={15} /><span className="tree-name">{r.label}</span></div>)}
+      <div className="tree-row" style={{ paddingLeft: 30 }}><Icon name="point" size={15} /><span className="tree-name">Punto central</span></div>
+    </Folder>
+    {(s.asm.workPlanes ?? []).map((w) => (
+      <div key={w.id} className={rowCls(w.id, w.hidden ? 'supp' : '')} style={{ paddingLeft: 14 }} onClick={() => sel(w.id)}
+        onContextMenu={(e) => { e.preventDefault(); sel(w.id); setMenu({ x: e.clientX, y: e.clientY, items: [
+          { label: w.hidden ? 'Mostrar' : 'Ocultar', run: () => s.commitAsm((a) => { const t = a.workPlanes!.find((x) => x.id === w.id); if (t) t.hidden = !t.hidden; }) },
+          { label: 'Eliminar', danger: true, run: () => s.commitAsm((a) => { a.workPlanes = a.workPlanes!.filter((x) => x.id !== w.id); a.joints = a.joints.filter((j) => !(j.a.occ === ASM_REF && j.a.point === w.origin) && !(j.b.occ === ASM_REF && j.b.point === w.origin)); }) },
+        ] }); }}>
+        <Icon name="workplane" size={16} /><span className="tree-name">{w.name}</span>
+      </div>
+    ))}
     <Folder icon="joint" label="Relaciones" count={s.asm.joints.length} defaultOpen={false}>
       {s.asm.joints.map((j) => (
         <div key={j.id} className={rowCls(j.id, j.suppressed ? 'supp' : '')} style={{ paddingLeft: 30 }} onClick={() => sel(j.id)} title={errs[j.id]}

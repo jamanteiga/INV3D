@@ -363,7 +363,7 @@ export default function Ribbon() {
             </Col>
           </Group>
           <Group label="Relaciones">
-            <Big icon="constraint3d" label="Restringir" kbd="J" onClick={() => A.openJoint()} title="Coincidir, al ras, ángulo, tangente, insertar o rígida (J)" />
+            <Big icon="constraint3d" label="Restringir" kbd="J" onClick={() => A.openJoint()} title="Coincidir, al ras, ángulo, perpendicular, tangente, insertar, simetría o rígida, entre componentes o con planos/ejes de origen (J). También con clic derecho sobre una cara" />
             <Big icon="joint" label="Unión" onClick={() => { A.openJoint(); s.updateDraft({ type: 'rot', name: 'Unión' }); }} title="Unión de rotación, corredera, cilíndrica, planar o bola" />
             <Col>
               <Small icon="insert3d" label="Insertar" onClick={() => { A.openJoint(); s.updateDraft({ type: 'insert' }); }} />
@@ -374,6 +374,9 @@ export default function Ribbon() {
               <Small icon="joint2" label="Movimiento" disabled={!s.asm.joints.some((j) => j.type === 'rot' || j.type === 'cyl')} onClick={() => s.open({ kind: 'motion' })} title="Restricción de movimiento: engranajes (rotación-rotación) y piñón-cremallera (rotación-traslación)" />
               <Small icon="drive" label="Conducir" disabled={!s.asm.joints.some((j) => j.type === 'rot' || j.type === 'slider')} onClick={() => s.open({ kind: 'drive' })} title="Animar una unión de rotación o corredera" />
             </Col>
+          </Group>
+          <Group label="Geometría de trabajo">
+            <Big icon="workplane" label="Plano" onClick={() => A.openWorkPlane()} title="Plano de trabajo (auxiliar) del ensamblaje: desfase de un plano de origen o de una cara" />
           </Group>
           <Group label="Esqueleto">
             <Big icon="skel" label="Línea 3D" onClick={() => A.openSkel()} title="Línea de esqueleto para la estructura" />
