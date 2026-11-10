@@ -41,6 +41,7 @@ function StatusBar() {
       {s.spaceMouse && <span className="st-item sm" title="Ratón 3D conectado">⬤ {s.spaceMouse}</span>}
       {s.busy && <span className="st-item">Regenerando…</span>}
       {!s.busy && ms !== undefined && <span className="st-item">{fmt(ms, 0)} ms</span>}
+      <span className="st-item" title="Versión de INV3D cargada (Ctrl+F5 si no es la última)">v{__APP_VERSION__}</span>
       <span className={`st-item oc ${s.oc}`}>{s.oc === 'ready' ? 'OpenCascade listo' : s.oc === 'error' ? 'Núcleo con error' : `Cargando núcleo ${Math.round(s.ocProgress * 100)}%`}</span>
     </footer>
   );

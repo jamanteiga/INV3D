@@ -41,6 +41,11 @@ export async function initSession() {
 
 function restoreSession(sess: SessionData) {
   const docs: DocEntry[] = sess.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, path: d.path, data: d.data, past: [], future: [], dirty: d.dirty, hidden: d.hidden }));
+  // Sesiones anteriores a la 0.9.1: las piezas que usa un ensamblaje pasan a estar en memoria (sin pestaña), salvo la activa
+  if (sess.docs.every((d) => d.hidden === undefined)) {
+    const used = new Set(docs.filter((d) => d.kind === 'assembly').flatMap((d) => ((d.data as any)?.occurrences ?? []).map((o: any) => o.part)));
+    for (const d of docs) if (d.kind === 'part' && used.has(d.id) && d.id !== sess.active) d.hidden = true;
+  }
   const act = docs.find((d) => d.id === sess.active) ?? docs[docs.length - 1];
   useStore.setState({ docs, active: '__none' });
   S().activate(act.id);
