@@ -1,7 +1,7 @@
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
 import { useStore, type SkOp } from '../core/store';
 import { uid, v3, newDoc, MATERIALS, type V3, type SketchF, type PartDoc } from '../core/doc';
-import { IDENTITY, solveAssembly, patternPoses, mirrorPose, q as qq, type FrameMember, type BoltGroup, type EndType } from '../core/asm';
+import { IDENTITY, solveAssembly, patternPoses, mirrorPose, q as qq, type FrameMember, type BoltGroup, type EndType, type Xform } from '../core/asm';
 import { CONTENT } from '../core/content';
 import { makeEval } from '../core/expr';
 import { cad } from '../core/cadClient';
@@ -45,6 +45,12 @@ export const partActions = {
 };
 
 // ---------------- Ensamblaje ----------------
+/** Nombre libre «Pieza:n» para una nueva ocurrencia de la pieza. */
+function occName(a: { occurrences: { name: string }[] }, partId: string) {
+  const base = (S().docs.find((d) => d.id === partId)?.fileName ?? 'Pieza').replace(/\.[^.]+$/, '');
+  let k = 1; while (a.occurrences.some((o) => o.name === `${base}:${k}`)) k++;
+  return `${base}:${k}`;
+}
 export const asmActions = {
   createPart: () => {
     const s = S();
@@ -70,6 +76,50 @@ export const asmActions = {
       a.occurrences.push({ id: uid('o'), name: `${e.fileName.replace(/\.[^.]+$/, '')}:${count + 1}`, part: partId, xf: { pos: [shift, 0, 0], quat: [0, 0, 0, 1] }, grounded: a.occurrences.length === 0 });
     });
   },
+  /** Colocar como en Inventor: el primer componente queda fijo en el origen; después cada copia sigue al cursor y se suelta con un clic.
+   *  Esc o clic derecho terminan. X/Y/Z giran 90° la copia pendiente. */
+  startPlace: (partId: string, extras: string[] = []) => {
+    const s = S();
+    if (s.kind !== 'assembly') return;
+    const e = s.docs.find((d) => d.id === partId); if (!e) return;
+    if (s.placing) s.setTool(null);
+    const base = e.fileName.replace(/\.[^.]+$/, '');
+    const nextName = (a: { occurrences: { name: string }[] }) => { let k = 1; while (a.occurrences.some((o) => o.name === `${base}:${k}`)) k++; return `${base}:${k}`; };
+    const first = !s.asm.occurrences.length;
+    const occ = uid('o');
+    s.commitAsm((a) => {
+      if (first) {
+        a.occurrences.push({ id: uid('o'), name: nextName(a), part: partId, xf: { ...IDENTITY }, grounded: true });
+        for (const x of extras) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { ...IDENTITY }, grounded: true });
+      }
+      a.occurrences.push({ id: occ, name: nextName(a), part: partId, xf: { pos: [0, 0, 0], quat: [0, 0, 0, 1] } });
+    });
+    useStore.setState({ placing: { part: partId, occ, quat: [0, 0, 0, 1], extras }, tool: 'place', selItem: null, dialog: null });
+    s.notify(first ? `${base}: primer componente fijo en el origen. Clic para colocar más copias · Esc para terminar` : `${base}: clic para colocar · X/Y/Z gira 90° · Esc o clic derecho para terminar`);
+  },
+  /** Suelta la copia pendiente en la posición indicada y prepara la siguiente. */
+  dropPlace: (xf: Xform) => {
+    const s = S(); const p = s.placing; if (!p) return;
+    const e = s.docs.find((d) => d.id === p.part);
+    const base = (e?.fileName ?? 'Pieza').replace(/\.[^.]+$/, '');
+    const occ = uid('o');
+    s.commitAsm((a) => {
+      const o = a.occurrences.find((x) => x.id === p.occ); if (o) o.xf = xf;
+      for (const x of p.extras ?? []) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { pos: [...xf.pos], quat: [...xf.quat] } });
+      let k = 1; while (a.occurrences.some((x) => x.name === `${base}:${k}`)) k++;
+      a.occurrences.push({ id: occ, name: `${base}:${k}`, part: p.part, xf: { pos: [...xf.pos], quat: [...p.quat] } });
+    });
+    useStore.setState({ placing: { ...p, occ }, selItem: null });
+  },
+  finishPlace: () => { const s = S(); if (s.placing) { s.setTool(null); s.notify('Colocación terminada · Restringir (J) para relacionar los componentes'); } },
+  rotatePlace: (axis: 0 | 1 | 2) => {
+    const s = S(); const p = s.placing; if (!p) return;
+    const h = Math.SQRT1_2, r: [number, number, number, number] = [axis === 0 ? h : 0, axis === 1 ? h : 0, axis === 2 ? h : 0, h];
+    const [ax, ay, az, aw] = r, [bx, by, bz, bw] = p.quat;
+    const qn: [number, number, number, number] = [aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz];
+    const l = Math.hypot(...qn) * (qn[3] < 0 ? -1 : 1);
+    useStore.setState({ placing: { ...p, quat: qn.map((v) => (Math.abs(v / l) < 1e-12 ? 0 : v / l)) as typeof qn } });
+  },
   placeContent: (fam: string, size: string, len: number) => {
     const s = S();
     const F = CONTENT.find((f) => f.id === fam); if (!F) return;
@@ -77,8 +127,7 @@ export const asmActions = {
     const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_').replace(/ - /g, ' ') + '.i3p';
     const existing = s.docs.find((d) => d.fileName === fn);
     const pid = existing?.id ?? s.addDocument('part', doc, fn, false);
-    asmActions.placePart(pid);
-    s.notify(`${doc.iProperties.description} colocado`);
+    asmActions.startPlace(pid);
   },
   patternComponent: (occId: string, p: Record<string, string>) => {
     const s = S();

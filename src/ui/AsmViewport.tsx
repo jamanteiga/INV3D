@@ -4,7 +4,8 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { useStore, type State } from '../core/store';
 import { makeEval } from '../core/expr';
 import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
-import { xfPoint, xfInvPoint, xfInvDir, type Xform, type AsmDoc } from '../core/asm';
+import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, type Xform, type AsmDoc } from '../core/asm';
+import { asmActions } from './actions';
 import type { MeshData } from '../core/cadClient';
 import { View3D, css, tv, vArr, planarFaceAt, faceVertices } from './view3d';
 
@@ -103,6 +104,49 @@ export default function AsmViewport() {
     });
 
     let pickables: THREE.Mesh[] = [];
+    let ghost: { grp: THREE.Object3D; part: string } | null = null;
+    let lastCursor: { x: number; y: number } | null = null;
+    let ghostXf: Xform | null = null;
+    /** Posición de la copia pendiente bajo el cursor: sobre la cara apuntada (apoyada en ella) o en el plano de la vista por el centro del modelo. */
+    const moveGhost = (c: { x: number; y: number }) => {
+      const s = useStore.getState(); const p = s.placing; if (!ghost || !p) return;
+      const bb = s.asmResult?.parts[p.part]?.props?.bbox; if (!bb) return;
+      const ev = { clientX: c.x, clientY: c.y } as MouseEvent;
+      const q = new THREE.Quaternion(...p.quat);
+      const cL = new THREE.Vector3((bb[0][0] + bb[1][0]) / 2, (bb[0][1] + bb[1][1]) / 2, (bb[0][2] + bb[1][2]) / 2);
+      const half = new THREE.Vector3((bb[1][0] - bb[0][0]) / 2, (bb[1][1] - bb[0][1]) / 2, (bb[1][2] - bb[0][2]) / 2);
+      const hit = hitAt(ev);
+      let target: THREE.Vector3;
+      if (hit && hit.face) {
+        const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+        const nl = n.clone().applyQuaternion(q.clone().invert());
+        const ext = Math.abs(nl.x) * half.x + Math.abs(nl.y) * half.y + Math.abs(nl.z) * half.z;
+        target = hit.point.clone().addScaledVector(n, ext);
+      } else {
+        const ray = V.ray(ev).ray;
+        const vb = V.hasModel ? V.bbox.getCenter(new THREE.Vector3()) : new THREE.Vector3();
+        const dir = camera.getWorldDirection(new THREE.Vector3());
+        const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(dir, vb);
+        target = ray.intersectPlane(pl, new THREE.Vector3()) ?? vb;
+      }
+      const pos = target.clone().sub(cL.clone().applyQuaternion(q));
+      ghostXf = { pos: vArr(pos, 3), quat: p.quat };
+      ghost.grp.matrix.compose(pos, q, new THREE.Vector3(1, 1, 1)); ghost.grp.matrixWorldNeedsUpdate = true;
+      V.request();
+    };
+    /** Vista previa de la restricción en curso: posiciones resueltas sin confirmar. */
+    const preview = (s: State) => {
+      const d = s.dialog?.kind === 'joint' && 'draft' in s.dialog ? s.dialog.draft : null;
+      if (!d?.a || !d?.b || d.a.occ === d.b.occ) return false;
+      try {
+        const a = structuredClone(s.asm);
+        a.joints.push({ id: '__prev', name: '', type: d.type, a: d.a, b: d.b, offset: d.offset, angle: d.angle, aligned: d.type === 'insert' ? !!d.aligned : undefined, lock: d.lock, min: d.min, max: d.max });
+        const r = solveAssembly(a, (x) => { try { return makeEval([])(x); } catch { return NaN; } });
+        for (const m of pickables) if (m.userData.kind === 'occ' && r.xf[m.userData.id]) { m.parent!.matrix.copy(xfMatrix(r.xf[m.userData.id], explodeOf(s, m.userData.id))); m.parent!.matrixWorldNeedsUpdate = true; }
+        V.request();
+        return true;
+      } catch { return false; }
+    };
     let cands: CandLine[] = [];
     let hoverKey = '';
     const meshOf = (kind: string, id: string): MeshData | null => {
@@ -132,11 +176,21 @@ export default function AsmViewport() {
           mesh.geometry.computeBoundingBox();
           box.union(mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld));
         };
+        ghost = null;
         for (const o of s.asm.occurrences) {
           if (o.suppressed || o.hidden) continue;
           const doc = s.docData(o.part) as PartDoc | null;
           const color = MATERIALS.find((x) => x.name === doc?.iProperties.material)?.color ?? '#c3c8cf';
           const xf = r.xf[o.id] ?? o.xf;
+          if (s.placing?.occ === o.id) {
+            const m = r.parts[o.part]?.mesh; if (!m) continue;
+            const { grp } = V.meshFromData(m, color, { edges: true, emissive: css('--accent') });
+            grp.traverse((x: any) => { if (x.material) { x.material = x.material.clone(); x.material.transparent = true; x.material.opacity = 0.55; x.material.depthWrite = false; } x.renderOrder = 7; });
+            grp.matrixAutoUpdate = false; grp.matrix.copy(xfMatrix(xf));
+            ghost = { grp, part: o.part };
+            modelGroup.add(grp);
+            continue;
+          }
           add('occ', o.id, meshOf('occ', o.id), color, xfMatrix(xf, explodeOf(s, o.id)));
         }
         for (const m of r.members) {
@@ -153,6 +207,8 @@ export default function AsmViewport() {
         }
         for (const b of r.bolts) add('bolt', b.id, b.mesh, '#7d858f', null);
       }
+      if (ghost && lastCursor) moveGhost(lastCursor);
+      preview(s);
       V.hasModel = !box.isEmpty();
       if (V.hasModel) V.bbox.copy(box);
       V.applyVisual(s.clip, s.wire, pickables.map((m) => m.parent!).filter(Boolean));
@@ -186,6 +242,7 @@ export default function AsmViewport() {
       if (sel.length) lineGroup.add(V.segs(sel, V.lineMat(css('--accent'), 3, false, false)));
       // Puntos ya elegidos en diálogos
       if (d && s.dialog?.kind === 'skel') for (const p of [d.a, d.b].filter(Boolean)) lineGroup.add(marker(p));
+      if (d && s.dialog?.kind === 'joint' && !(d.a && d.b)) for (const p of [d.aW].filter(Boolean)) lineGroup.add(marker(p));
       V.request();
     };
     const marker = (p: V3) => {
@@ -270,13 +327,54 @@ export default function AsmViewport() {
       return Math.round((end - 0.01) * 10) / 10;
     };
 
-    let downAt: { x: number; y: number } | null = null;
+    let downAt: { x: number; y: number; button: number } | null = null;
     const cvs = V.renderer.domElement;
-    cvs.addEventListener('pointerdown', (ev) => { downAt = { x: ev.clientX, y: ev.clientY }; });
+    // Arrastre libre (como Inventor): clic izquierdo mantenido sobre un componente no fijo lo mueve en el plano de la vista;
+    // al soltar se vuelven a resolver las restricciones (se mueve solo en sus grados de libertad libres).
+    let drag: { id: string; grp: THREE.Object3D; plane: THREE.Plane; start: THREE.Vector3; xf: Xform; moved: boolean } | null = null;
+    host.current!.addEventListener('pointerdown', (ev) => {
+      const s = useStore.getState();
+      if (ev.button !== 0 || s.tool || s.mode === 'present') return;
+      const hit = hitAt(ev);
+      if (!hit || hit.object.userData.kind !== 'occ') return;
+      const o = s.asm.occurrences.find((x) => x.id === hit.object.userData.id);
+      if (!o || o.grounded || o.mirrorOf || o.patternOf) return;
+      V.controls.enabled = false;
+      const dir = camera.getWorldDirection(new THREE.Vector3());
+      drag = { id: o.id, grp: hit.object.parent!, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(dir, hit.point), start: hit.point.clone(), xf: s.asmResult?.xf[o.id] ?? o.xf, moved: false };
+    }, { capture: true });
+    window.addEventListener('pointermove', (ev) => {
+      if (!drag || !downAt) return;
+      if (!drag.moved && Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y) <= 4) return;
+      drag.moved = true;
+      const p = V.ray(ev).ray.intersectPlane(drag.plane, new THREE.Vector3()); if (!p) return;
+      const d = p.sub(drag.start);
+      drag.grp.matrix.compose(tv(drag.xf.pos).add(d), new THREE.Quaternion(...drag.xf.quat), new THREE.Vector3(1, 1, 1)); drag.grp.matrixWorldNeedsUpdate = true;
+      cvs.style.cursor = 'move';
+      V.request();
+    });
+    const endDrag = (ev: PointerEvent) => {
+      const dd = drag; drag = null; V.controls.enabled = true;
+      if (!dd || !dd.moved) return false;
+      cvs.style.cursor = 'default';
+      const p = V.ray(ev).ray.intersectPlane(dd.plane, new THREE.Vector3());
+      const d = p ? p.sub(dd.start) : new THREE.Vector3();
+      useStore.getState().commitAsm((a) => { const t = a.occurrences.find((x) => x.id === dd.id); if (t) t.xf = { pos: vArr(tv(dd.xf.pos).add(d), 4), quat: [...dd.xf.quat] }; });
+      return true;
+    };
+    cvs.addEventListener('pointerdown', (ev) => { downAt = { x: ev.clientX, y: ev.clientY, button: ev.button }; });
     cvs.addEventListener('pointerup', (ev) => {
-      if (!downAt || Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y) > 4 || ev.button !== 0 || (tc as any).dragging) { downAt = null; return; }
+      if (endDrag(ev)) { downAt = null; return; }
+      const small = !!downAt && Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y) <= 4;
+      if (small && ev.button === 2 && useStore.getState().tool === 'place') { downAt = null; asmActions.finishPlace(); return; }
+      if (!downAt || !small || ev.button !== 0 || (tc as any).dragging) { downAt = null; return; }
       downAt = null;
       const s = useStore.getState();
+      if (s.tool === 'place') {
+        lastCursor = { x: ev.clientX, y: ev.clientY }; moveGhost(lastCursor);
+        if (ghostXf) asmActions.dropPlace(ghostXf);
+        return;
+      }
       const dlg = s.dialog && 'draft' in s.dialog ? s.dialog : null;
       const d = dlg?.draft;
       if (s.tool === 'frameLine' && dlg?.kind === 'frame') {
@@ -338,6 +436,7 @@ export default function AsmViewport() {
     });
     cvs.addEventListener('pointermove', (ev) => {
       const s = useStore.getState();
+      if (s.tool === 'place') { lastCursor = { x: ev.clientX, y: ev.clientY }; moveGhost(lastCursor); return; }
       if (s.tool === 'frameLine') {
         const c = nearestCand(ev); const k = c?.key ?? '';
         if (k !== hoverKey) { hoverKey = k; buildLines(s); setHint(c ? c.label : ''); }
@@ -376,7 +475,8 @@ export default function AsmViewport() {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }
-      if (s.dialog !== p.dialog) buildLines(s);
+      if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
+      if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); }
       if (s.view !== p.view) V.setView(s.view.name);
     });
@@ -394,6 +494,7 @@ export default function AsmViewport() {
     weldFace: step === 0 ? 'Primera cara a soldar' : 'Segunda cara a soldar',
     boltFace: 'Cara de inicio: donde apoya la cabeza del tornillo',
     move: 'Arrastra el gizmo para mover o girar el componente seleccionado',
+    place: 'Clic: soltar copia · X / Y / Z: girar 90° · Esc o clic derecho: terminar',
     pickMember: 'Selecciona la barra y después la barra de referencia',
   };
 

@@ -20,7 +20,7 @@ export type Tool = null
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
   | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge'
-  | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember'
+  | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember' | 'place'
   | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum' | 'drwSectionPath' | 'drwBreakout';
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
   | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange' | 'rib' | 'coil' | 'split' | 'draft' | 'thicken' | 'thread' | 'workaxis' | 'workpoint'
@@ -80,6 +80,8 @@ export interface State {
   interf: { a: string; b: string; volume: number; mesh: MeshData }[] | null;
   /** Parámetros de la herramienta de boceto activa (radio de empalme, etc.) */
   toolParam: string;
+  /** Colocación interactiva: componente pendiente que sigue al cursor */
+  placing: { part: string; occ: string; quat: [number, number, number, number]; extras?: string[] } | null;
   selItem: string | null;        // ensamblaje: componente/barra/cordón/tornillo/unión; plano: vista
   dialog: Dialog;
   result: RegenResult | null;
@@ -210,7 +212,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '',
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null,
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
@@ -272,6 +274,8 @@ export const useStore = create<State>((set, get) => ({
   activate: (id) => {
     const s = get();
     if (id === s.active) return;
+    // Colocación pendiente: se descarta el componente que seguía al cursor
+    if (s.placing && s.kind === 'assembly') { const pend = s.placing.occ; set({ asm: { ...s.asm, occurrences: s.asm.occurrences.filter((o) => o.id !== pend) }, placing: null }); return get().activate(id); }
     // Guardar el documento activo en el registro
     const docs = s.docs.map((d) => (d.id === s.active ? { ...d, data: s.docData(s.active)!, past: s.past, future: s.future, dirty: s.dirty, fileName: s.fileName } : d));
     const t = docs.find((d) => d.id === id);
@@ -393,7 +397,11 @@ export const useStore = create<State>((set, get) => ({
   },
   editSketch: (id) => set({ mode: 'sketch', sketchId: id, tool: null, selFeature: id, selEntity: null, selEntities: [], selCon: null, dialog: null, view: { name: 'sketch', n: get().view.n + 1 } }),
   finishSketch: () => set({ mode: 'model', sketchId: null, tool: null, selEntity: null, selEntities: [], selCon: null, skInfo: null, view: { name: 'restore', n: get().view.n + 1 } }),
-  setTool: (tool) => set({ tool }),
+  setTool: (tool) => {
+    const s = get();
+    if (s.placing && tool !== 'place') { const pend = s.placing.occ; set({ asm: { ...s.asm, occurrences: s.asm.occurrences.filter((o) => o.id !== pend) }, placing: null }); }
+    set({ tool });
+  },
 
   addEntity: (e) => {
     const sid = get().sketchId;
@@ -486,7 +494,7 @@ export const useStore = create<State>((set, get) => ({
     set({ dialog: { kind, editId, draft }, tool, preview: null, pickBase: null });
     if (tool === 'pickEdges' || tool === 'pickFaces' || tool === 'pickFlangeEdge') runPickBase(draft.id);
   },
-  openAsmDialog: (kind, draft, editId, tool = null) => set({ dialog: { kind, editId, draft, step: 0 }, tool, menuOpen: false }),
+  openAsmDialog: (kind, draft, editId, tool = null) => { get().setTool(tool); set({ dialog: { kind, editId, draft, step: 0 }, tool, menuOpen: false }); },
   updateDraft: (patch) => {
     const d = get().dialog;
     if (!d || !('draft' in d)) return;
@@ -523,7 +531,7 @@ export const useStore = create<State>((set, get) => ({
       if (close) set({ dialog: null, tool: null });
     }
   },
-  closeDialog: () => set({ dialog: null, tool: get().mode === 'sketch' ? get().tool : null, preview: null, pickBase: null }),
+  closeDialog: () => { const s = get(); const keep = s.mode === 'sketch' || s.tool === 'place'; set({ dialog: null, tool: keep ? s.tool : null, preview: null, pickBase: null }); },
   open: (dialog) => set({ dialog, menuOpen: false }),
 
   deleteFeature: (id) => {

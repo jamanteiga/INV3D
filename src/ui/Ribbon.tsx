@@ -202,14 +202,14 @@ export default function Ribbon() {
         </>)}
         {cur === 'hvac' && (() => { const H = (hk: string) => () => s.open({ kind: 'hvac', hk }); return (<>
           <Group label="Conductos (EN 1505/1506 · SMACNA)">
-            <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular o circular" />
+            <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular, circular, espiral u oval plano" />
             <Big icon="helbow" label="Codo" onClick={H('elbow')} title="Codo con radio, recto con álabes, prensado o por gajos" />
             <Col>
-              <Small icon="htrans" label="Transición" onClick={H('transition')} title="Transición, reducción o desvío con desarrollo para corte" />
+              <Small icon="htrans" label="Transición" onClick={H('transition')} title="Transición, reducción o desvío (rectangular, circular u oval) con desarrollo para corte" />
               <Small icon="hbranch" label="Derivación" onClick={H('branch')} title="Te, toma de zapato, collarín, derivación a 45° y pantalón" />
               <Small icon="hcap" label="Tapa" onClick={H('cap')} />
             </Col>
-            <Col><Small icon="hplenum" label="Plenum" onClick={H('plenum')} /></Col>
+            <Col><Small icon="hplenum" label="Plenum" onClick={H('plenum')} /><Small icon="hflange" label="Manguito" onClick={H('coupling')} title="Manguito de unión interior para conducto espiral (circular u oval)" /></Col>
           </Group>
           <Group label="Terminales y equipos">
             <Col>

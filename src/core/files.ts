@@ -213,6 +213,36 @@ export async function openFile(file?: File | null) {
   }
 }
 
+/** Carga una pieza (.i3p o STEP) como documento en segundo plano, sin activarla, para colocarla en el ensamblaje.
+ *  Si ya está abierta con el mismo nombre se reutiliza. Devuelve el id del documento. */
+export async function loadPartForPlace(file: File): Promise<string | null> {
+  const s = useStore.getState();
+  try {
+    if (/\.zip$/i.test(file.name)) file = await unzipFirst(file);
+    const ext = file.name.split('.').pop()!.toLowerCase();
+    const same = (fn: string) => s.docs.find((d) => d.kind === 'part' && d.fileName === fn)?.id;
+    if (ext === 'i3p' || ext === 'json') {
+      const fn = file.name.replace(/\.json$/i, '.i3p');
+      const ex = same(fn); if (ex) return ex;
+      const id = s.addDocument('part', validateDoc(JSON.parse(await file.text())), fn, false);
+      remember(file);
+      return id;
+    }
+    if (ext === 'step' || ext === 'stp') {
+      const fn = `${baseName(file.name)}.i3p`;
+      const ex = same(fn); if (ex) return ex;
+      const text = await file.text();
+      if (!/ISO-10303-21/.test(text.slice(0, 200))) throw new Error('El fichero no es un STEP (ISO 10303-21)');
+      const d = newDoc();
+      d.iProperties.partNumber = baseName(file.name);
+      d.features.push({ id: uid('f'), name: 'Sólido importado1', type: 'import', fileName: file.name, step: text });
+      return s.addDocument('part', d, fn, false);
+    }
+    if (ext === 'i3a') throw new Error('Los subensamblajes todavía no se pueden colocar: abre el .i3a y coloca sus piezas');
+    throw new Error(`Formato .${ext} no se puede colocar (usa .i3p o STEP)`);
+  } catch (e) { s.notify((e as Error).message, 'error'); return null; }
+}
+
 export const recentCtl = { skip: false };
 function remember(file: File) {
   if (recentCtl.skip) return;

@@ -4,16 +4,22 @@ import { newDoc, type PartDoc, type SkEntity, type Feature, type PlaneRef, type 
 import { sheetThickness, INCH } from './hvacdata';
 
 export type HvacKind =
-  | 'duct' | 'elbow' | 'transition' | 'branch' | 'cap' | 'plenum'
+  | 'duct' | 'elbow' | 'transition' | 'branch' | 'coupling' | 'cap' | 'plenum'
   | 'grille' | 'diffuser' | 'damper' | 'firedamper' | 'silencer' | 'flex' | 'ahu' | 'fancoil'
   | 'flange' | 'support' | 'insulation';
 
+/** Sección: rectangular, circular u oval plana (dos semicírculos unidos por tramos rectos: anchura = eje mayor) */
+export type DuctShape = 'rect' | 'round' | 'oval';
 export interface HvacSpec {
-  kind: HvacKind; std: 'EN' | 'SMACNA'; shape: 'rect' | 'round';
-  /** Interior: anchura (X), altura (Y) o diámetro */
+  kind: HvacKind; std: 'EN' | 'SMACNA'; shape: DuctShape;
+  /** Conducto circular: costura longitudinal o helicoidal (espiral, EN 12237 / SMACNA) */
+  seam?: 'long' | 'spiral';
+  /** Modelar la grapa helicoidal en relieve (geometría pesada: varios segundos por metro) */
+  seamGeo?: boolean;
+  /** Interior: anchura (X), altura (Y) o diámetro. En oval, anchura = eje mayor y altura = eje menor */
   W: number; H: number; D: number;
   /** Segunda boca: transiciones y derivaciones */
-  shape2?: 'rect' | 'round'; W2?: number; H2?: number; D2?: number; ex?: number; ey?: number;
+  shape2?: DuctShape; W2?: number; H2?: number; D2?: number; ex?: number; ey?: number;
   L: number; t?: number;
   /** Codos */
   angle?: number; elbowType?: 'radius' | 'square' | 'segmented' | 'smooth'; rw?: number; vanes?: boolean; gores?: number;
@@ -42,6 +48,18 @@ const rpoly = (w: number, h: number, ang: number, cx = 0, cy = 0): SkEntity => {
   return poly(([[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]] as [number, number][]).map(([x, y]) => [cx + x * c - y * s, cy + x * s + y * c]));
 };
 
+const oval = (w: number, h: number, cx = 0, cy = 0): SkEntity => {
+  if (!(w > h && h > 0)) throw new Error('En oval plano la anchura (eje mayor) debe ser mayor que la altura (eje menor)');
+  const a = (w - h) / 2;
+  return { id: id('o'), type: 'slot', x1: f1(cx - a), y1: f1(cy), x2: f1(cx + a), y2: f1(cy), w: f1(h) };
+};
+/** Contorno de una sección con crecimiento g (2·espesor para el exterior, etc.) */
+const secE = (shape: DuctShape, W: number, H: number, D: number, g = 0, cx = 0, cy = 0): SkEntity =>
+  shape === 'rect' ? rect(W + g, H + g, cx, cy) : shape === 'round' ? circ(D + g, cx, cy) : oval(W + g, H + g, cx, cy);
+const SHAPE_NAME: Record<DuctShape, string> = { rect: 'rectangular', round: 'circular', oval: 'oval' };
+/** Paso de la grapa helicoidal (banda de 137 mm habitual; 100 mm en diámetros pequeños) */
+export const spiralPitch = (D: number) => (D <= 200 ? 100 : 137);
+
 class B {
   f: Feature[] = [];
   private n = 0;
@@ -64,11 +82,12 @@ export function sizeLabel(s: HvacSpec, second = false): string {
   const d = dims(s);
   const sh = second ? s.shape2 ?? s.shape : s.shape;
   if (sh === 'round') return `Ø${d(second ? s.D2 ?? s.D : s.D)}`;
+  if (sh === 'oval') return `${d(second ? s.W2 ?? s.W : s.W)}×${d(second ? s.H2 ?? s.H : s.H)} oval`;
   return `${d(second ? s.W2 ?? s.W : s.W)}×${d(second ? s.H2 ?? s.H : s.H)}`;
 }
 export function autoT(s: HvacSpec): number {
   if (s.t && s.t > 0) return s.t;
-  return sheetThickness(s.std, s.shape, s.shape === 'rect' ? Math.max(s.W, s.H) : s.D).t;
+  return sheetThickness(s.std, s.shape, s.shape === 'rect' ? Math.max(s.W, s.H) : s.shape === 'oval' ? s.W : s.D).t;
 }
 
 function doc(s: HvacSpec, pn: string, desc: string, params: [string, number, string][] = []): PartDoc {
@@ -83,40 +102,50 @@ function endJoints(b: B, s: HvacSpec, t: number, L: number, shape = s.shape, W =
   const e = s.ends ?? 'none';
   if (e === 'none' || e === 'socket') return;
   const fh = e === 'tdc' ? (Math.max(W, H, D) > 1000 ? 40 : 30) : 30, ft = e === 'tdc' ? Math.max(t, 0.8) * 1.5 : 3, coll = e === 'angle' ? 30 : 0;
-  for (const z of [0, L - ft]) {
-    if (shape === 'rect') b.ext(e === 'tdc' ? 'Brida TDC' : 'Marco angular', XY(z), [rect(W + 2 * t + 2 * fh, H + 2 * t + 2 * fh), rect(W + 2 * t, H + 2 * t)], ft);
-    else b.ext(e === 'tdc' ? 'Brida de perfil' : 'Aro angular', XY(z), [circ(D + 2 * t + 2 * fh), circ(D + 2 * t)], ft);
-  }
-  if (coll) for (const z of [0, L - coll]) {
-    if (shape === 'rect') b.ext('Ala del angular', XY(z), [rect(W + 2 * t + 2 * ft, H + 2 * t + 2 * ft), rect(W + 2 * t, H + 2 * t)], coll);
-    else b.ext('Ala del aro', XY(z), [circ(D + 2 * t + 2 * ft), circ(D + 2 * t)], coll);
-  }
+  for (const z of [0, L - ft]) b.ext(shape === 'rect' ? (e === 'tdc' ? 'Brida TDC' : 'Marco angular') : e === 'tdc' ? 'Brida de perfil' : 'Aro angular', XY(z), [secE(shape, W, H, D, 2 * t + 2 * fh), secE(shape, W, H, D, 2 * t)], ft);
+  if (coll) for (const z of [0, L - coll]) b.ext(shape === 'rect' ? 'Ala del angular' : 'Ala del aro', XY(z), [secE(shape, W, H, D, 2 * t + 2 * ft), secE(shape, W, H, D, 2 * t)], coll);
 }
 const endsLabel = (s: HvacSpec) => ({ none: '', tdc: ' · bridas TDC', angle: ' · marco angular', socket: ' · unión enchufe' }[s.ends ?? 'none']);
 
 // ---------- Conducto recto ----------
 function makeDuct(s: HvacSpec): PartDoc {
-  const t = autoT(s), L = s.L, b = new B();
-  if (s.shape === 'rect') b.ext('Conducto', XY(), [rect(s.W + 2 * t, s.H + 2 * t), rect(s.W, s.H)], L);
-  else {
-    b.ext('Conducto', XY(), [circ(s.D + 2 * t), circ(s.D)], L);
-    if (s.ends === 'socket') b.ext('Manguito de unión', XY(L - 60), [circ(s.D + 4 * t + 1), circ(s.D + 2 * t)], 60);
+  const t = autoT(s), L = s.L, b = new B(), sh = s.shape;
+  b.ext('Conducto', XY(), [secE(sh, s.W, s.H, s.D, 2 * t), secE(sh, s.W, s.H, s.D)], L);
+  if (s.ends === 'socket' && sh !== 'rect') b.ext('Manguito de unión', XY(L - 60), [secE(sh, s.W, s.H, s.D, 4 * t + 1), secE(sh, s.W, s.H, s.D, 2 * t)], 60);
+  const spiral = s.seam === 'spiral' && sh !== 'rect';
+  let pitch = 0;
+  if (spiral && sh === 'round') pitch = spiralPitch(s.D);
+  if (spiral && sh === 'round' && s.seamGeo) {
+    // grapa helicoidal en relieve por el exterior (se solapa con la pared para unirse bien)
+    const hs = Math.max(2, 3 * t), ws = Math.max(6, 8 * t), R0 = s.D / 2 + t / 2, turns = (L - ws - 4) / pitch;
+    if (turns > 0.2) {
+      const ax: SkEntity = { id: 'sax', type: 'line', a: ['0', '0'], b: ['0', '10'], construction: true };
+      const pr = b.sketch('Grapa (perfil)', XZ(), [rect(hs + t / 2, ws, R0 + (hs + t / 2) / 2, ws / 2 + 2), ax]);
+      b.f.push({ id: 'coil1', name: 'Grapa helicoidal', type: 'coil', profile: pr, axis: 'sax', pitch: f1(pitch), turns: String(Math.round(turns * 1000) / 1000), left: false, op: 'join' });
+    }
   }
   endJoints(b, s, t, L);
-  const d = doc(s, `Conducto ${sizeLabel(s)} L=${L} e=${t}`, `Conducto ${s.shape === 'rect' ? 'rectangular' : 'circular'} ${sizeLabel(s)} · L ${L} mm · chapa ${String(t).replace(".", ",")} mm${endsLabel(s)}`,
-    s.shape === 'rect' ? [['W', s.W, 'Anchura interior'], ['H', s.H, 'Altura interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']] : [['D', s.D, 'Diámetro interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']]);
+  const nm = spiral ? 'Conducto espiral' : 'Conducto';
+  const d = doc(s, `${nm} ${sizeLabel(s)} L=${L} e=${t}`, `${nm} ${SHAPE_NAME[sh]} ${sizeLabel(s)} · L ${L} mm · chapa ${String(t).replace(".", ",")} mm${spiral ? (sh === 'round' ? ` · grapa helicoidal paso ${pitch} mm (EN 12237)` : ' · oval plano conformado de tubo espiral') : ''}${endsLabel(s)}`,
+    sh === 'round' ? [['D', s.D, 'Diámetro interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']] : [['W', s.W, sh === 'oval' ? 'Eje mayor interior' : 'Anchura interior'], ['H', s.H, sh === 'oval' ? 'Eje menor interior' : 'Altura interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']]);
   d.features = b.f; return d;
 }
 
 // ---------- Codos ----------
 function makeElbow(s: HvacSpec): PartDoc {
   const t = autoT(s), ang = s.angle ?? 90, b = new B();
-  let kind = s.elbowType ?? (s.shape === 'rect' ? 'radius' : 'smooth');
+  let kind = s.elbowType ?? (s.shape === 'round' ? 'smooth' : 'radius');
   if (s.shape === 'round' && kind !== 'segmented') kind = 'smooth';
   if (s.shape === 'rect' && kind !== 'square') kind = 'radius';
-  const rw = s.rw ?? (s.shape === 'rect' ? 1 : 1.5);
+  if (s.shape === 'oval') kind = 'radius';
+  const rw = s.rw ?? (s.shape === 'round' ? 1.5 : 1);
   let name = '';
-  if (s.shape === 'rect' && kind === 'radius') {
+  if (s.shape === 'oval') {
+    const Rc = rw * s.W, ax = { id: 'ax', type: 'line' as const, a: [f1(Rc), '-10'] as [string, string], b: [f1(Rc), '10'] as [string, string], construction: true };
+    if (Rc <= s.W / 2 + t) throw new Error('Radio de eje demasiado pequeño para el oval');
+    b.rev('Codo', XY(), [oval(s.W + 2 * t, s.H + 2 * t), oval(s.W, s.H), ax], 'ax', ang);
+    name = `Codo oval ${ang}° R/W ${rw}`;
+  } else if (s.shape === 'rect' && kind === 'radius') {
     const Rc = rw * s.W, ax = { id: 'ax', type: 'line' as const, a: [f1(Rc), '-10'] as [string, string], b: [f1(Rc), '10'] as [string, string], construction: true };
     b.rev('Codo', XY(), [rect(s.W + 2 * t, s.H + 2 * t), rect(s.W, s.H), ax], 'ax', ang);
     name = `Codo rectangular ${ang}° con radio R/W ${rw}`;
@@ -172,13 +201,13 @@ function makeElbow(s: HvacSpec): PartDoc {
 function makeTransition(s: HvacSpec): PartDoc {
   const t = autoT(s), L = s.L, b = new B();
   const sh2 = s.shape2 ?? s.shape;
-  const a = b.sketch('Boca 1', XY(), [s.shape === 'rect' ? rect(s.W, s.H) : circ(s.D)]);
+  const a = b.sketch('Boca 1', XY(), [secE(s.shape, s.W, s.H, s.D)]);
   const ex = s.ex ?? 0, ey = s.ey ?? 0;
-  const c = b.sketch('Boca 2', XY(L), [sh2 === 'rect' ? rect(s.W2 ?? s.W, s.H2 ?? s.H, ex, ey) : circ(s.D2 ?? s.D, ex, ey)]);
+  const c = b.sketch('Boca 2', XY(L), [secE(sh2, s.W2 ?? s.W, s.H2 ?? s.H, s.D2 ?? s.D, 0, ex, ey)]);
   b.f.push({ id: 'lf', name: 'Pestaña solevada', type: 'sm_loft', a, b: c, side: 'out', segments: '48' });
-  const same = s.shape === sh2 && (s.shape === 'rect' ? s.W === s.W2 && s.H === s.H2 : s.D === s.D2);
+  const same = s.shape === sh2 && (s.shape === 'round' ? s.D === s.D2 : s.W === s.W2 && s.H === s.H2);
   const nm = same ? 'Desvío' : s.shape !== sh2 ? 'Transición' : 'Reducción';
-  const d = doc(s, `${nm} ${sizeLabel(s)}-${sizeLabel(s, true)} L=${L}`, `${nm} ${s.shape === 'rect' ? 'rectangular' : 'circular'}${s.shape !== sh2 ? `-${sh2 === 'rect' ? 'rectangular' : 'circular'}` : ''} ${sizeLabel(s)} → ${sizeLabel(s, true)} · L ${L}${ex || ey ? ` · desplazamiento ${ex}/${ey}` : ''} · chapa ${String(t).replace(".", ",")} mm`);
+  const d = doc(s, `${nm} ${sizeLabel(s)}-${sizeLabel(s, true)} L=${L}`, `${nm} ${SHAPE_NAME[s.shape]}${s.shape !== sh2 ? `-${SHAPE_NAME[sh2]}` : ''} ${sizeLabel(s)} → ${sizeLabel(s, true)} · L ${L}${ex || ey ? ` · desplazamiento ${ex}/${ey}` : ''} · chapa ${String(t).replace(".", ",")} mm`);
   d.sheet = { t: `${t} mm`, r: `${t} mm`, k: '0.4' };
   d.features = b.f; return d;
 }
@@ -234,11 +263,23 @@ function makeBranch(s: HvacSpec): PartDoc {
   d.features = b.f; return d;
 }
 
+// ---------- Manguito de unión (conducto espiral) ----------
+function makeCoupling(s: HvacSpec): PartDoc {
+  if (s.shape === 'rect') throw new Error('El manguito interior es para conducto circular u oval (espiral)');
+  const t = autoT(s), sh = s.shape, b = new B(), E = (g: number) => secE(sh, s.W, s.H, s.D, g);
+  const L = s.L > 0 && s.L < 600 ? s.L : (sh === 'round' ? s.D : s.W) <= 315 ? 100 : 150, bw = 10;
+  // macho que entra en los dos conductos (exterior = interior del conducto) con cordón de tope en el centro
+  b.ext('Manguito', XY(), [E(-0.4), E(-0.4 - 2 * t)], L);
+  b.ext('Cordón de tope', XY(L / 2 - bw / 2), [E(2 * t + 4), E(-0.4 - 2 * t)], bw);
+  const d = doc(s, `Manguito ${sizeLabel(s)} L=${L}`, `Manguito de unión interior (macho-macho) para conducto espiral ${sizeLabel(s)} · L ${L} mm con cordón de tope · chapa ${String(t).replace(".", ",")} mm`);
+  d.features = b.f; return d;
+}
+
 // ---------- Tapas y plenums ----------
 function makeCap(s: HvacSpec): PartDoc {
   const t = autoT(s), b = new B(), c = 40;
-  if (s.shape === 'rect') { b.ext('Tapa', XY(), [rect(s.W + 4 * t, s.H + 4 * t)], t); b.ext('Collar', XY(t), [rect(s.W + 4 * t, s.H + 4 * t), rect(s.W + 2 * t, s.H + 2 * t)], c); }
-  else { b.ext('Tapa', XY(), [circ(s.D + 4 * t)], t); b.ext('Collar', XY(t), [circ(s.D + 4 * t), circ(s.D + 2 * t)], c); }
+  const sh = s.shape, E = (g: number) => secE(sh, s.W, s.H, s.D, g);
+  b.ext('Tapa', XY(), [E(4 * t)], t); b.ext('Collar', XY(t), [E(4 * t), E(2 * t)], c);
   const d = doc(s, `Tapa ${sizeLabel(s)}`, `Tapa final ${sizeLabel(s)} · chapa ${String(t).replace(".", ",")} mm`);
   d.features = b.f; return d;
 }
@@ -365,44 +406,48 @@ function makeFlangeFrame(s: HvacSpec): PartDoc {
   const t = autoT(s), b = new B(), e = s.ends && s.ends !== 'none' ? s.ends : 'angle';
   endJoints(b, { ...s, ends: e }, t, e === 'tdc' ? Math.max(t, 0.8) * 1.5 : 30);
   b.f = b.f.slice(0, 2).concat(e === 'angle' ? b.f.slice(4, 6) : []);
-  const d = doc(s, `${e === 'tdc' ? 'Brida TDC' : 'Marco angular'} ${sizeLabel(s)}`, `${e === 'tdc' ? (s.shape === 'rect' ? 'Marco de brida TDC' : 'Brida de perfil') : s.shape === 'rect' ? 'Marco de angular L30×3' : 'Aro de angular L30×3'} para conducto ${sizeLabel(s)}`);
+  const d = doc(s, `${e === 'tdc' ? 'Brida TDC' : 'Marco angular'} ${sizeLabel(s)}`, `${e === 'tdc' ? (s.shape === 'rect' ? 'Marco de brida TDC' : 'Brida de perfil') : s.shape === 'rect' ? 'Marco de angular L30×3' : 'Aro de angular L30×3'}${s.shape === 'oval' ? ' oval' : ''} para conducto ${sizeLabel(s)}`);
   d.features = b.f; return d;
 }
 function makeSupport(s: HvacSpec): PartDoc {
   const t = autoT(s), b = new B();
-  const width = s.shape === 'rect' ? s.W + 2 * t : s.D + 2 * t, hgt = s.shape === 'rect' ? s.H + 2 * t : s.D + 2 * t;
+  const tr = s.shape !== 'round'; // rectangular y oval: trapecio
+  const width = tr ? s.W + 2 * t : s.D + 2 * t, hgt = tr ? s.H + 2 * t : s.D + 2 * t;
   const rod = s.rod ?? (width <= 1000 ? 'M8' : width <= 1500 ? 'M10' : 'M12'), rd = Number(rod.slice(1)), Lr = s.L || 500;
   const span = width + 100, x = span / 2 - 25;
-  if (s.shape === 'rect') {
+  if (tr) {
     b.ext('Perfil (carril 41×41)', XZ(), [rect(span, 41, 0, -hgt / 2 - 20.5)], 41, 'join', 'symmetric');
     b.ext('Hueco del carril', XZ(), [rect(span + 2, 37, 0, -hgt / 2 - 20.5 + 2)], 37, 'cut', 'symmetric');
   } else {
     b.ext('Abrazadera', XY(-20), [circ(s.D + 2 * t + 6), circ(s.D + 2 * t)], 30);
     b.ext('Oreja', XZ(), [rect(width + 50, 4, 0, s.D / 2 + t + 2)], 30, 'join', 'symmetric');
   }
-  const zTop = s.shape === 'rect' ? -hgt / 2 - 41 : 0;
-  const rods: SkEntity[] = (s.shape === 'rect' ? [-x, x] : [0]).map((sx) => circ(rd, sx, 0));
-  b.ext('Varillas roscadas', custom([0, s.shape === 'rect' ? zTop : s.D / 2 + t + 4, 0], [0, 1, 0], [1, 0, 0], 'Varillas'), rods, Lr + (s.shape === 'rect' ? hgt + 41 : 0));
-  const d = doc(s, `Soporte ${s.shape === 'rect' ? 'trapecio' : 'abrazadera'} ${sizeLabel(s)} ${rod}`, s.shape === 'rect'
+  const zTop = tr ? -hgt / 2 - 41 : 0;
+  const rods: SkEntity[] = (tr ? [-x, x] : [0]).map((sx) => circ(rd, sx, 0));
+  b.ext('Varillas roscadas', custom([0, tr ? zTop : s.D / 2 + t + 4, 0], [0, 1, 0], [1, 0, 0], 'Varillas'), rods, Lr + (tr ? hgt + 41 : 0));
+  const d = doc(s, `Soporte ${tr ? 'trapecio' : 'abrazadera'} ${sizeLabel(s)} ${rod}`, tr
     ? `Soporte en trapecio para conducto ${sizeLabel(s)}: carril 41×41 de ${span} mm y 2 varillas ${rod} (separación recomendada 2,5–3 m)`
     : `Soporte con abrazadera para conducto ${sizeLabel(s)} y varilla ${rod}`);
   d.features = b.f; return d;
 }
 function makeInsulation(s: HvacSpec): PartDoc {
   const t = autoT(s), e = s.ins ?? 25, L = s.L, b = new B();
-  if (s.shape === 'rect') b.ext('Aislamiento', XY(), [rect(s.W + 2 * t + 2 * e, s.H + 2 * t + 2 * e), rect(s.W + 2 * t, s.H + 2 * t)], L);
-  else b.ext('Aislamiento', XY(), [circ(s.D + 2 * t + 2 * e), circ(s.D + 2 * t)], L);
+  b.ext('Aislamiento', XY(), [secE(s.shape, s.W, s.H, s.D, 2 * t + 2 * e), secE(s.shape, s.W, s.H, s.D, 2 * t)], L);
   const d = doc(s, `Aislamiento ${sizeLabel(s)} e=${e} L=${L}`, `Aislamiento térmico de ${e} mm para conducto ${sizeLabel(s)} · L ${L} (RITE IT 1.2.4.2.1)`);
   d.features = b.f; return d;
 }
 
+/** Elementos que admiten sección oval plana */
+export const OVAL_KINDS: HvacKind[] = ['duct', 'elbow', 'transition', 'coupling', 'cap', 'flange', 'support', 'insulation'];
 export function makeHvacPart(s: HvacSpec): PartDoc {
   nid = 0;
+  if ((s.shape === 'oval' || (s.kind === 'transition' && s.shape2 === 'oval')) && !OVAL_KINDS.includes(s.kind)) throw new Error(`${HVAC_KINDS[s.kind]}: no disponible en sección oval`);
   switch (s.kind) {
     case 'duct': return makeDuct(s);
     case 'elbow': return makeElbow(s);
     case 'transition': return makeTransition(s);
     case 'branch': return makeBranch(s);
+    case 'coupling': return makeCoupling(s);
     case 'cap': return makeCap(s);
     case 'plenum': return makePlenum(s);
     case 'grille': return makeGrille(s);
@@ -420,13 +465,13 @@ export function makeHvacPart(s: HvacSpec): PartDoc {
 }
 
 export const HVAC_KINDS: Record<HvacKind, string> = {
-  duct: 'Conducto recto', elbow: 'Codo', transition: 'Transición / reducción / desvío', branch: 'Derivación', cap: 'Tapa final', plenum: 'Plenum',
+  duct: 'Conducto recto', elbow: 'Codo', transition: 'Transición / reducción / desvío', branch: 'Derivación', coupling: 'Manguito de unión (espiral)', cap: 'Tapa final', plenum: 'Plenum',
   grille: 'Rejilla', diffuser: 'Difusor', damper: 'Compuerta de regulación', firedamper: 'Compuerta cortafuegos', silencer: 'Silenciador', flex: 'Conducto flexible',
   ahu: 'UTA (climatizadora)', fancoil: 'Fancoil de conductos',
   flange: 'Brida / marco', support: 'Soporte', insulation: 'Aislamiento',
 };
 export const HVAC_GROUPS: [string, HvacKind[]][] = [
-  ['Conductos', ['duct', 'elbow', 'transition', 'branch', 'cap', 'plenum']],
+  ['Conductos', ['duct', 'elbow', 'transition', 'branch', 'coupling', 'cap', 'plenum']],
   ['Terminales y equipos', ['grille', 'diffuser', 'damper', 'firedamper', 'silencer', 'flex', 'ahu', 'fancoil']],
   ['Uniones, soportes y aislamiento', ['flange', 'support', 'insulation']],
 ];

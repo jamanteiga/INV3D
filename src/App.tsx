@@ -145,6 +145,7 @@ export default function App() {
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       const s = useStore.getState();
       const k = e.key.toLowerCase();
+      if (s.placing && (e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) asmActions.finishPlace();
       if (e.ctrlKey || e.metaKey) {
         if (k === 'z') { e.preventDefault(); s.undo(); }
         else if (k === 'y') { e.preventDefault(); s.redo(); }
@@ -157,6 +158,7 @@ export default function App() {
       if (e.key === 'Escape') {
         if (s.menuOpen) return s.set({ menuOpen: false });
         if (s.dialog) return s.closeDialog();
+        if (s.tool === 'place') return asmActions.finishPlace();
         if (s.tool) return s.setTool(null);
         if (s.mode === 'sketch' && (s.selEntity || s.selCon || s.selEntities.length)) return s.set({ selEntity: null, selCon: null, selEntities: [] });
         if (s.mode === 'sketch') return s.finishSketch();
@@ -203,6 +205,7 @@ export default function App() {
         else if (k === 'h' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('hole'); }
         else if (k === 'f' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('fillet'); }
       } else if (s.kind === 'assembly') {
+        if (s.tool === 'place' && (k === 'x' || k === 'y' || k === 'z')) { e.preventDefault(); return asmActions.rotatePlace(k === 'x' ? 0 : k === 'y' ? 1 : 2); }
         if (k === 'p') { e.preventDefault(); s.open({ kind: 'place' }); }
         else if (k === 'j') { e.preventDefault(); asmActions.openJoint(); }
       } else if (k === 'd') { e.preventDefault(); s.setTool('drwDim'); }

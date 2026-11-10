@@ -22,14 +22,14 @@ export const SM_RECT = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32,
 export const SM_ROUND = [3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 40, 42, 48, 54, 60];
 
 /** Espesor de chapa galvanizada (mm) según el lado mayor o el diámetro. */
-export function sheetThickness(std: 'EN' | 'SMACNA', shape: 'rect' | 'round', size: number): { t: number; label: string } {
+export function sheetThickness(std: 'EN' | 'SMACNA', shape: 'rect' | 'round' | 'oval', size: number): { t: number; label: string } {
   if (std === 'EN') {
     if (shape === 'rect') {
       const t = size <= 300 ? 0.6 : size <= 750 ? 0.8 : size <= 1200 ? 1.0 : size <= 2000 ? 1.2 : 1.5;
       return { t, label: `${String(t).replace('.', ',')} mm (lado mayor ${size} mm · UNE 100102 / EN 1507, orientativo)` };
     }
     const t = size <= 250 ? 0.5 : size <= 500 ? 0.6 : size <= 800 ? 0.8 : size <= 1250 ? 1.0 : 1.2;
-    return { t, label: `${String(t).replace('.', ',')} mm (Ø${size} · EN 12237 helicoidal, orientativo)` };
+    return { t, label: `${String(t).replace('.', ',')} mm (${shape === 'oval' ? `oval, eje mayor ${size}` : `Ø${size}`} · EN 12237 helicoidal, orientativo)` };
   }
   const inch = size / INCH;
   const g: [number, number, number][] = shape === 'rect'
