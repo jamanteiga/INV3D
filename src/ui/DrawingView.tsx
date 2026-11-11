@@ -12,7 +12,7 @@ import type { AsmDoc } from '../core/asm';
 import { fmt } from '../core/expr';
 import { bomRows } from './bom';
 import { modelDims, refreshModelDims, type ModelDim } from '../core/retrieve';
-import { buildSheet, geomOf, detectCircles, chainSegments, breakMap, TB_H, BREAK_GAP, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
+import { buildSheet, geomOf, detectCircles, chainSegments, breakMap, tbHeight, BREAK_GAP, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
 
 export type { ProjData };
 const projStore = new WeakMap<object, Map<string, Promise<ProjData>>>();
@@ -74,7 +74,7 @@ export function getProjection(s: State, v: DView): Promise<ProjData> | null {
       const vis = flip(r.visible.flatMap((d) => flattenPath(d)));
       const hid = flip(r.hidden.flatMap((d) => flattenPath(d)));
       const cut = chainSegments(r.cut ?? []);
-      const data: ProjData = { vis, hid, cut, bbox: bboxOf([...vis, ...hid]), circles: detectCircles(vis), center: r.center };
+      const data: ProjData = { vis, hid, cut, bbox: bboxOf([...vis, ...hid]), circles: detectCircles(vis), center: r.center, anchors: r.anchors };
       resolved.set(pr, data);
       return data;
     });
@@ -96,7 +96,7 @@ export function bomForDrawing(s: State, drw: DrawingDoc) {
   const rows = bomRows(s, d).filter((r) => (r.level ?? 0) === 0);
   const [W] = SHEETS[drw.sheet];
   const cols = [{ w: 10, k: 'item' }, { w: 12, k: 'qty' }, { w: 45, k: 'pn' }, { w: 63, k: 'desc' }, { w: 30, k: 'mat' }, { w: 20, k: 'mass' }] as const;
-  const x0 = W - 10 - 180, y0 = 10 + TB_H;
+  const x0 = W - 10 - 180, y0 = 10 + tbHeight(drw);
   const all = [{ item: 'Pos.', qty: 'Cant.', pn: 'Nº de pieza', desc: 'Descripción', mat: 'Material', mass: 'Masa kg' }, ...rows.slice(0, 30).map((r, i) => ({
     item: String(i + 1), qty: String(r.qty), pn: clip(r.pn, 26), desc: clip(r.desc, 38), mat: clip(r.material, 17), mass: r.mass ? fmt(r.mass, 2) : '',
   }))];

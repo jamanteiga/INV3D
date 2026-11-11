@@ -2,7 +2,7 @@ import { openRecent } from './session';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
-import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, importStep, newIpj } from '../core/files';
+import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS } from '../core/doc';
 import { asmActions, drwActions, partActions } from './actions';
 import { demoStair } from './demo';
@@ -483,6 +483,7 @@ export default function Ribbon() {
           <Group label="Hoja">
             <Big icon="sheets" label="Nueva hoja" onClick={D.addSheet} title="Añade una hoja al plano (cambia de hoja en el navegador)" />
             <Big icon="style" label={`Estilos ${s.drw.std ?? 'ISO'}`} onClick={() => s.open({ kind: 'drwstyle' })} title="Gestor de estilos: norma ISO/DIN/ANSI, cotas, flechas, líneas y proyección" />
+            <Big icon="revtable" label="Cajetín" onClick={() => s.open({ kind: 'tbtpl' })} title="Plantilla de cajetín: celdas, campos propios, biblioteca y plantilla por defecto" />
             <div className="rb-grid sheets">
               {(['A4', 'A3', 'A2', 'A1', 'A0'] as const).map((z) => <button key={z} className={`rb-txt ${s.drw.sheet === z ? 'on' : ''}`} onClick={() => s.commitDrw((d) => { d.sheet = z; })}>{z}</button>)}
             </div>
@@ -526,6 +527,7 @@ export default function Ribbon() {
           <Group label="Tabla">
             <Big icon="bom" label="Lista de piezas" active={!!s.drw.bom} onClick={D.toggleBom} title="Lista de piezas del ensamblaje sobre el cajetín" />
             <Big icon="balloon" label="Globo" active={tool === 'drwBalloon'} onClick={T('drwBalloon')} title="Referencia a la lista de piezas" />
+            <Big icon="balloon" label="Globos automáticos" onClick={() => D.autoBalloons()} title="Un globo por elemento de la lista de piezas en la vista seleccionada del ensamblaje (activa también la lista de piezas)" />
             <Col>
               <Small icon="holetable" label="Taladros" onClick={() => D.addTable('hole')} title="Tabla de taladros de la vista seleccionada" />
               <Small icon="revtable" label="Revisiones" onClick={() => D.addTable('rev')} title="Tabla de revisiones" />
@@ -618,6 +620,7 @@ function FileMenu() {
         {s.kind !== 'drawing' && <button onClick={act(() => exportMesh('3mf'))}><Icon name="stl" size={20} />Exportar 3MF (impresión 3D)</button>}
         {s.kind !== 'drawing' && <button onClick={act(() => exportMesh('obj'))}><Icon name="stl" size={20} />Exportar OBJ</button>}
         {s.kind !== 'drawing' && <button onClick={act(() => exportMesh('glb'))}><Icon name="stl" size={20} />Exportar glTF (.glb)</button>}
+        {s.kind !== 'drawing' && <button onClick={act(() => exportIFC())}><Icon name="stl" size={20} />Exportar IFC4 (BIM)</button>}
         {s.kind === 'drawing' && <button onClick={act(drwActions.exportDxf)}><Icon name="dxf" size={20} />Exportar DXF</button>}
         {s.kind === 'drawing' && <button onClick={act(drwActions.exportPdf)}><Icon name="pdf" size={20} />Exportar PDF</button>}
         <hr />

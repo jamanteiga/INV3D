@@ -1,6 +1,6 @@
 // Geometría de la hoja de plano: vistas (incluidas secciones y detalles), cotas, anotaciones, cajetín
 // y lista de piezas, como primitivas comunes para la pantalla (SVG) y las exportaciones (PDF, DXF, SVG).
-import { SHEETS, scaleLabel, drawStyle, DRAW_STD, type DrawingDoc, type DView, type DDim, type DAnn, type DBreak, type GdtSym, type DrawStyle } from './drawing';
+import { SHEETS, scaleLabel, drawStyle, DRAW_STD, tbTemplate, type DrawingDoc, type DView, type DDim, type DAnn, type DBreak, type GdtSym, type DrawStyle } from './drawing';
 
 /** Estilo activo (lo fija buildSheet con la norma del plano). */
 let ST: DrawStyle = DRAW_STD.ISO;
@@ -19,7 +19,7 @@ import { fmt } from './expr';
 
 export interface Circ { c: P2; r: number; full: boolean }
 export interface Bend { a: P2; b: P2; label: string }
-export interface ProjData { vis: P2[][]; hid: P2[][]; cut: P2[][]; bbox: [number, number, number, number]; circles: Circ[]; center: V3; bends?: Bend[]; flat?: { t: number; r: number; k: number } }
+export interface ProjData { vis: P2[][]; hid: P2[][]; cut: P2[][]; bbox: [number, number, number, number]; circles: Circ[]; center: V3; bends?: Bend[]; flat?: { t: number; r: number; k: number }; anchors?: { id: string; c: P2; r: [number, number, number, number]; z: number }[] }
 
 export type Prim =
   | { t: 'pl'; cls: string; pts: P2[]; id?: string }
@@ -417,33 +417,25 @@ function gdtGlyph(sym: GdtSym, c: P2, out: { thin: P2[][]; circles: { c: P2; r: 
 const dot = (c: P2, r: number): P2[] => { const o: P2[] = []; for (let i = 0; i < 10; i++) { const t = (i / 10) * Math.PI * 2; o.push([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t)]); } return o; };
 
 // ---------- Cajetín ----------
-const TB_W = 180;
-export const TB_H = 40;
+/** Altura del cajetín (para colocar encima la lista de piezas) */
+export const tbHeight = (drw: DrawingDoc) => tbTemplate(drw).h;
+export function tbValue(drw: DrawingDoc, field: string): string {
+  const t = drw.title as unknown as Record<string, string | undefined>;
+  if (field === '#sheet') return `${(drw.page ?? 0) + 1}/${Math.max(1, drw.pages?.length ?? 1)}`;
+  if (field === '#format') return `${drw.sheet} · mm`;
+  if (field === '#proj') return drawStyle(drw).projection === 'third' ? `americana (${drw.std ?? 'ANSI'})` : `europea (${drw.std ?? 'ISO'} E)`;
+  if (field.startsWith('=')) return field.slice(1);
+  if (field.startsWith('custom:')) return drw.title.custom?.[field.slice(7)] ?? '';
+  return t[field] ?? '';
+}
 export function titleBlockGeometry(drw: DrawingDoc) {
   const [W] = SHEETS[drw.sheet];
-  const x0 = W - 10 - TB_W, y0 = 10;
-  const t = drw.title;
-  const cells: { x: number; y: number; w: number; h: number; label: string; value: string; big?: boolean }[] = [
-    { x: 0, y: 16, w: 60, h: 16, label: 'Empresa', value: t.company },
-    { x: 60, y: 16, w: 80, h: 16, label: 'Título', value: t.title, big: true },
-    { x: 140, y: 16, w: 40, h: 16, label: 'Nº de plano', value: t.partNumber, big: true },
-    { x: 0, y: 8, w: 30, h: 8, label: 'Dibujado', value: t.designer },
-    { x: 30, y: 8, w: 30, h: 8, label: 'Revisado', value: t.checker },
-    { x: 60, y: 8, w: 50, h: 8, label: 'Material', value: t.material },
-    { x: 110, y: 8, w: 30, h: 8, label: 'Escala', value: t.scale },
-    { x: 140, y: 8, w: 20, h: 8, label: 'Rev.', value: t.revision },
-    { x: 160, y: 8, w: 20, h: 8, label: 'Hoja', value: `${(drw.page ?? 0) + 1}/${Math.max(1, drw.pages?.length ?? 1)}` },
-    { x: 0, y: 0, w: 30, h: 8, label: 'Fecha', value: t.date },
-    { x: 30, y: 0, w: 45, h: 8, label: 'Formato', value: `${drw.sheet} · mm` },
-    { x: 75, y: 0, w: 35, h: 8, label: 'Masa', value: t.mass ?? '' },
-    { x: 110, y: 0, w: 70, h: 8, label: 'Proyección', value: drawStyle(drw).projection === 'third' ? `americana (${drw.std ?? 'ANSI'})` : `europea (${drw.std ?? 'ISO'} E)` },
-    { x: 0, y: 32, w: 40, h: 8, label: 'Proyecto', value: t.project ?? '' },
-    { x: 40, y: 32, w: 40, h: 8, label: 'Tolerancias generales', value: t.generalTol ?? '' },
-    { x: 80, y: 32, w: 40, h: 8, label: 'Acabado', value: t.finish ?? '' },
-    { x: 120, y: 32, w: 30, h: 8, label: 'Aprobado', value: t.approved ?? '' },
-    { x: 150, y: 32, w: 30, h: 8, label: 'Fecha aprob.', value: t.approvedDate ?? '' },
-  ];
-  return { x0, y0, cells: cells.map((c) => ({ ...c, x: x0 + c.x, y: y0 + c.y })) };
+  const tpl = tbTemplate(drw);
+  const x0 = W - 10 - tpl.w, y0 = 10;
+  return {
+    x0, y0, w: tpl.w, h: tpl.h, proj: tpl.proj ? { x: x0 + tpl.proj.x, y: y0 + tpl.proj.y } : null,
+    cells: tpl.cells.map((c) => ({ x: x0 + c.x, y: y0 + c.y, w: c.w, h: c.h, label: c.label, value: tbValue(drw, c.field), big: c.big })),
+  };
 }
 
 // ---------- Hoja completa ----------
@@ -574,10 +566,12 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     if (c.value) P.push({ t: 'txt', cls: c.big ? 'tbb' : 'tbv', x: c.x + 1.2, y: c.y + (c.big ? 3 : 1.4), h: c.big ? 5 : 2.5, text: c.value, bold: c.big });
   }
   // Símbolo de proyección (europea: círculos a la izquierda del cono; americana: a la derecha)
-  const sx = tb.x0 + 168, sy = tb.y0 + 4, third = ST.projection === 'third';
+  if (tb.proj) {
+  const sx = tb.proj.x + 3, sy = tb.proj.y, third = ST.projection === 'third';
   const cx = third ? sx + 3 : sx - 6, kx = third ? sx - 7 : sx - 1;
   P.push({ t: 'circ', cls: 'tb', c: [cx, sy], r: 2.6 }, { t: 'circ', cls: 'tb', c: [cx, sy], r: 1.2 });
   P.push({ t: 'pl', cls: 'tb', pts: [[kx, sy + 2.6], [kx + 5, sy + 1.6], [kx + 5, sy - 1.6], [kx, sy - 2.6], [kx, sy + 2.6]] });
+  }
   if (bom) for (const [i, row] of bom.entries()) for (const c of row.cells) {
     P.push({ t: 'pl', cls: 'tb', pts: [[c.x, c.y], [c.x + c.w, c.y], [c.x + c.w, c.y + 6], [c.x, c.y + 6], [c.x, c.y]] });
     P.push({ t: 'txt', cls: i === bom.length - 1 ? 'tbb' : 'tbv', x: c.x + 1.2, y: c.y + 1.8, h: 2.5, text: c.text, bold: i === bom.length - 1 });

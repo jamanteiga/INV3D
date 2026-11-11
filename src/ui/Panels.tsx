@@ -1,4 +1,6 @@
 import FemPanel from './FemPanel';
+import TbTplDialog from './TbDialog';
+import { tbTemplate, TB_FIELDS } from '../core/drawing';
 import { GenDialog } from './MachineDialog';
 import { FrameCalcDialog, JointCalcDialog } from './CalcDialogs';
 import { PipeNetDialog, PressureDialog, VesselDialog } from './PipeDialogs';
@@ -1128,11 +1130,19 @@ function DrwPanel() {
     )}
     <div className="psec">
       <div className="psec-title">Cajetín</div>
-      {([['title', 'Título'], ['partNumber', 'Nº de plano'], ['material', 'Material'], ['company', 'Empresa'], ['project', 'Proyecto'], ['designer', 'Dibujado'], ['checker', 'Revisado'], ['approved', 'Aprobado'], ['approvedDate', 'Fecha aprob.'], ['date', 'Fecha'], ['revision', 'Revisión'], ['scale', 'Escala'], ['mass', 'Masa'], ['generalTol', 'Tol. generales'], ['finish', 'Acabado']] as const).map(([k, l]) => (
-        <Row key={k} label={l}><input value={t[k] ?? ''} onChange={(e) => s.commitDrw((dd) => { dd.title[k] = e.target.value; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
-      ))}
+      <Row label="Plantilla"><button className="btn" style={{ width: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title="Editar la plantilla de cajetín" onClick={() => s.open({ kind: 'tbtpl' })}>{tbTemplate(s.drw).name}</button></Row>
+      {tbFieldsOf(s.drw).map(([k, l]) => k.startsWith('custom:')
+        ? <Row key={k} label={l}><input value={t.custom?.[k.slice(7)] ?? ''} onChange={(e) => s.commitDrw((dd) => { (dd.title.custom ??= {})[k.slice(7)] = e.target.value; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        : <Row key={k} label={l}><input value={(t as unknown as Record<string, string | undefined>)[k] ?? ''} onChange={(e) => s.commitDrw((dd) => { (dd.title as unknown as Record<string, string>)[k] = e.target.value; })} onKeyDown={(e) => e.stopPropagation()} /></Row>)}
     </div>
   </>);
+}
+/** Campos editables del cajetín según la plantilla (más los habituales que no estén) */
+function tbFieldsOf(d: DrawingDoc): [string, string][] {
+  const tpl = tbTemplate(d), out: [string, string][] = [], seen = new Set<string>();
+  for (const c of tpl.cells) if (c.field && !c.field.startsWith('#') && !c.field.startsWith('=') && !seen.has(c.field)) { seen.add(c.field); out.push([c.field, c.label || c.field]); }
+  for (const [k, l] of TB_FIELDS) if (!k.startsWith('#') && !seen.has(k) && ['title', 'partNumber', 'material', 'designer', 'date', 'revision', 'scale'].includes(k)) out.push([k, l]);
+  return out;
 }
 const TOLS = ['', '±0.05', '±0.1', '±0.2', '±0.5', '+0.1/0', '0/-0.1', 'H7', 'h6', 'g6', 'js7'];
 
@@ -2528,6 +2538,7 @@ export function Modals() {
     case 'jointcalc': return <JointCalcDialog onClose={close} />;
     case 'gen': return <GenDialog onClose={close} />;
     case 'fem': return <FemPanel onClose={close} />;
+    case 'tbtpl': return <TbTplDialog onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;
     case 'bom': return <BomDialog onClose={close} />;

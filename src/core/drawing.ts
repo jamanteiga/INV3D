@@ -76,6 +76,8 @@ export interface DAnn {
   id: string; kind: AnnKind; pts: P2d[]; text?: string; r?: number; side?: 'arrow' | 'other' | 'both'; allAround?: boolean;
   /** Tolerancia geométrica: símbolo, Ø delante del valor y referencias («A», «A|B»…) */
   sym?: GdtSym; dia?: boolean; datums?: string;
+  /** Globo automático de esta vista (se sustituye al regenerar) */
+  view?: string;
 }
 export type TableKind = 'hole' | 'rev' | 'bend';
 /** Tablas colocadas en la hoja (x, y = esquina superior izquierda). */
@@ -86,7 +88,40 @@ export interface SheetPage { name: string; sheet: SheetSize; views: DView[]; dim
 export interface TitleBlock {
   title: string; partNumber: string; material: string; designer: string; checker: string; date: string; company: string; revision: string; scale: string;
   project?: string; description?: string; approved?: string; approvedDate?: string; generalTol?: string; finish?: string; mass?: string; stock?: string;
+  /** Campos propios de la plantilla de cajetín */
+  custom?: Record<string, string>;
 }
+
+/** Celda de cajetín: posición en mm desde la esquina inferior izquierda del cajetín.
+ *  field: clave del cajetín (title, partNumber…), «#sheet» (hoja n/N), «#format», «#proj» (método de proyección),
+ *  «custom:Nombre» (campo propio) o «=texto» (texto fijo). */
+export interface TbCell { x: number; y: number; w: number; h: number; label: string; field: string; big?: boolean }
+export interface TbTemplate { name: string; w: number; h: number; cells: TbCell[]; /** símbolo de proyección (centro, relativo al cajetín) */ proj?: { x: number; y: number } | null }
+export const TB_FIELDS: [string, string][] = [
+  ['title', 'Título'], ['partNumber', 'Nº de plano'], ['description', 'Descripción'], ['company', 'Empresa'], ['project', 'Proyecto'],
+  ['designer', 'Dibujado'], ['checker', 'Revisado'], ['approved', 'Aprobado'], ['approvedDate', 'Fecha aprob.'], ['date', 'Fecha'],
+  ['material', 'Material'], ['scale', 'Escala'], ['revision', 'Revisión'], ['mass', 'Masa'], ['generalTol', 'Tolerancias generales'], ['finish', 'Acabado'], ['stock', 'Bruto'],
+  ['#sheet', 'Hoja n/N'], ['#format', 'Formato'], ['#proj', 'Proyección'],
+];
+export const TB_PRESETS: TbTemplate[] = [
+  { name: 'INV3D (180 × 40)', w: 180, h: 40, proj: { x: 165, y: 4 }, cells: [
+    { x: 0, y: 16, w: 60, h: 16, label: 'Empresa', field: 'company' }, { x: 60, y: 16, w: 80, h: 16, label: 'Título', field: 'title', big: true }, { x: 140, y: 16, w: 40, h: 16, label: 'Nº de plano', field: 'partNumber', big: true },
+    { x: 0, y: 8, w: 30, h: 8, label: 'Dibujado', field: 'designer' }, { x: 30, y: 8, w: 30, h: 8, label: 'Revisado', field: 'checker' }, { x: 60, y: 8, w: 50, h: 8, label: 'Material', field: 'material' }, { x: 110, y: 8, w: 30, h: 8, label: 'Escala', field: 'scale' }, { x: 140, y: 8, w: 20, h: 8, label: 'Rev.', field: 'revision' }, { x: 160, y: 8, w: 20, h: 8, label: 'Hoja', field: '#sheet' },
+    { x: 0, y: 0, w: 30, h: 8, label: 'Fecha', field: 'date' }, { x: 30, y: 0, w: 45, h: 8, label: 'Formato', field: '#format' }, { x: 75, y: 0, w: 35, h: 8, label: 'Masa', field: 'mass' }, { x: 110, y: 0, w: 70, h: 8, label: 'Proyección', field: '#proj' },
+    { x: 0, y: 32, w: 40, h: 8, label: 'Proyecto', field: 'project' }, { x: 40, y: 32, w: 40, h: 8, label: 'Tolerancias generales', field: 'generalTol' }, { x: 80, y: 32, w: 40, h: 8, label: 'Acabado', field: 'finish' }, { x: 120, y: 32, w: 30, h: 8, label: 'Aprobado', field: 'approved' }, { x: 150, y: 32, w: 30, h: 8, label: 'Fecha aprob.', field: 'approvedDate' },
+  ] },
+  { name: 'ISO 7200 (180 × 36)', w: 180, h: 36, proj: { x: 102, y: 7 }, cells: [
+    { x: 0, y: 18, w: 50, h: 18, label: 'Propietario legal', field: 'company' }, { x: 50, y: 27, w: 30, h: 9, label: 'Responsable', field: 'designer' }, { x: 80, y: 27, w: 30, h: 9, label: 'Referencia técnica', field: 'checker' }, { x: 110, y: 27, w: 35, h: 9, label: 'Aprobado por', field: 'approved' }, { x: 145, y: 27, w: 35, h: 9, label: 'Tipo de documento', field: '=PLANO DE CONJUNTO' },
+    { x: 50, y: 18, w: 60, h: 9, label: 'Estado del documento', field: 'custom:Estado' }, { x: 110, y: 18, w: 70, h: 9, label: 'Departamento', field: 'custom:Departamento' },
+    { x: 0, y: 0, w: 92, h: 18, label: 'Título, título complementario', field: 'title', big: true }, { x: 92, y: 0, w: 18, h: 18, label: 'Proyección', field: '' }, { x: 110, y: 9, w: 70, h: 9, label: 'Nº de identificación', field: 'partNumber', big: true },
+    { x: 110, y: 0, w: 18, h: 9, label: 'Rev.', field: 'revision' }, { x: 128, y: 0, w: 26, h: 9, label: 'Fecha de edición', field: 'date' }, { x: 154, y: 0, w: 12, h: 9, label: 'Idioma', field: '=es' }, { x: 166, y: 0, w: 14, h: 9, label: 'Hoja', field: '#sheet' },
+  ] },
+  { name: 'Compacto (120 × 24)', w: 120, h: 24, proj: { x: 112, y: 4 }, cells: [
+    { x: 0, y: 8, w: 80, h: 16, label: 'Título', field: 'title', big: true }, { x: 80, y: 8, w: 40, h: 16, label: 'Nº de plano', field: 'partNumber', big: true },
+    { x: 0, y: 0, w: 30, h: 8, label: 'Dibujado', field: 'designer' }, { x: 30, y: 0, w: 22, h: 8, label: 'Fecha', field: 'date' }, { x: 52, y: 0, w: 18, h: 8, label: 'Escala', field: 'scale' }, { x: 70, y: 0, w: 14, h: 8, label: 'Hoja', field: '#sheet' }, { x: 84, y: 0, w: 20, h: 8, label: 'Rev.', field: 'revision' },
+  ] },
+];
+export const tbTemplate = (d: Pick<DrawingDoc, 'tbTpl'>): TbTemplate => d.tbTpl ?? TB_PRESETS[0];
 
 export interface DrawingDoc {
   format: 'inv3d.drawing';
@@ -97,6 +132,8 @@ export interface DrawingDoc {
   notes: DNote[];
   anns?: DAnn[];
   title: TitleBlock;
+  /** Plantilla de cajetín (por defecto, la de INV3D) */
+  tbTpl?: TbTemplate;
   bom?: { view: string; x: number; y: number } | null;
   tables?: DTable[];
   revisions?: DRev[];
@@ -142,11 +179,14 @@ export function loadPage(d: DrawingDoc, i: number) {
   d.sheet = p.sheet; d.views = p.views; d.dims = p.dims; d.notes = p.notes; d.anns = p.anns; d.tables = p.tables; d.bom = p.bom;
 }
 
+/** Plantilla de cajetín elegida como predeterminada (Plantilla de cajetín › Por defecto) */
+function defaultTb(): TbTemplate | null { try { const t = typeof localStorage !== 'undefined' ? localStorage.getItem('inv3d.tbtpl.default') : null; return t ? JSON.parse(t) : null; } catch { return null; } }
 export function newDrawing(): DrawingDoc {
   return {
     format: 'inv3d.drawing', version: 1, sheet: 'A3', views: [], dims: [], notes: [], anns: [],
     title: { title: '', partNumber: '', material: '', designer: '', checker: '', date: new Date().toLocaleDateString('es-ES'), company: '', revision: 'A', scale: '1:1', generalTol: 'ISO 2768-m' },
     bom: null, tables: [], revisions: [{ rev: 'A', desc: 'Primera edición', date: new Date().toLocaleDateString('es-ES'), by: '' }],
+    ...(defaultTb() ? { tbTpl: defaultTb()! } : {}),
   };
 }
 export function validateDrawing(x: unknown): DrawingDoc {

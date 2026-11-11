@@ -145,6 +145,45 @@ export async function exportSTL() {
   } catch (e) { s.notify((e as Error).message, 'error'); }
 }
 
+/** IFC4 para BIM: un elemento por componente (barras, conductos, tuberías, chapas, tornillería…) con material y propiedades. */
+export async function exportIFC() {
+  const s = useStore.getState();
+  try {
+    if (s.kind === 'drawing') throw new Error('Un plano no se exporta a IFC');
+    const { toIfc, ifcClassFor } = await import('./ifc');
+    const { HVAC_MATERIALS } = await import('./hvacdata');
+    const { PIPE_MATERIALS } = await import('./pipedata');
+    const hv = new Set<string>(HVAC_MATERIALS.map((m) => m.name)), pp = new Set(PIPE_MATERIALS.map((m) => m.name));
+    const items = await cad.meshItems(s.kind === 'assembly' ? 'asm' : 'part');
+    const view = s.kind === 'assembly' ? (s.asmResult?.view ?? s.asm) : null;
+    const partInfo = (doc: PartDoc | null, name: string) => {
+      const ip = doc?.iProperties;
+      const desc = ip?.description || '', mat = ip?.material || '';
+      return { name, desc, tag: ip?.partNumber || name, material: mat, cls: ifcClassFor(`${desc} ${ip?.partNumber ?? ''}`.trim(), mat, { hvac: hv.has(mat), pipe: pp.has(mat) }) };
+    };
+    const out = items.map((it) => {
+      if (s.kind === 'part') return { ...partInfo(s.doc as PartDoc, baseName(s.fileName)), vertices: it.vertices, triangles: it.triangles };
+      const occ = view?.occurrences.find((o) => o.id === it.id);
+      if (occ) return { ...partInfo(s.docData(occ.part) as PartDoc | null, occ.name), vertices: it.vertices, triangles: it.triangles };
+      const fr = view?.frames.find((m) => m.id === it.id);
+      if (fr) {
+        // barra: pilar si es casi vertical, viga si es casi horizontal
+        let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+        for (let i = 0; i < it.vertices.length; i += 3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], it.vertices[i + k]); mx[k] = Math.max(mx[k], it.vertices[i + k]); }
+        const d = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]];
+        const cls = d[2] > 3 * Math.max(d[0], d[1]) ? 'IfcColumn' : d[2] < 0.35 * Math.max(d[0], d[1]) ? 'IfcBeam' : 'IfcMember';
+        const f = fr;
+        return { cls, name: it.name, desc: `${f.family} ${f.size}`.trim(), tag: it.name, material: f.material || 'Acero S275JR', vertices: it.vertices, triangles: it.triangles };
+      }
+      const bolt = /torniller|tornillo/i.test(it.name);
+      return { cls: bolt ? 'IfcMechanicalFastener' : 'IfcBuildingElementProxy', name: it.name, desc: bolt ? 'Tornillería' : 'Cordón de soldadura', tag: it.name, material: '', vertices: it.vertices, triangles: it.triangles };
+    });
+    const name = baseName(s.fileName);
+    const txt = toIfc(out, { project: name, fileName: `${name}.ifc`, author: s.settings.userName, org: s.settings.company });
+    await saveAs(txt, `${name}.ifc`, 'IFC4 (BIM)', '.ifc', 'application/x-step');
+  } catch (e) { s.notify((e as Error).message, 'error'); }
+}
+
 /** 3MF (impresión 3D), OBJ o glTF binario a partir de la malla del sólido. */
 export async function exportMesh(fmt: '3mf' | 'obj' | 'glb') {
   const s = useStore.getState();

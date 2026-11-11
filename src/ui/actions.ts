@@ -11,7 +11,7 @@ import { projectedDir, drawStyle, SHEETS, SCALES, VIEW_NAMES, scaleLabel, allPag
 import { writeDxf, type DxfDoc } from '../core/dxf';
 import { saveText } from '../core/files';
 import { getProjection, viewGeom, sheetPrims } from './DrawingView';
-import { hatchLines, TB_H } from '../core/sheet';
+import { hatchLines } from '../core/sheet';
 
 import type { P2 } from '../core/svgpath';
 import type { CandLine } from './AsmViewport';
@@ -572,6 +572,63 @@ export const drwActions = {
       t.section = { ...sc, normal: n, x, n2 };
       if (pv) { t.x = pv.x + (t.x - pv.x) * -1; t.y = pv.y + (t.y - pv.y) * -1; }
     });
+  },
+  /** Globos automáticos: uno por elemento de la lista de piezas, en columnas a ambos lados de la vista */
+  autoBalloons: async () => {
+    const s = S();
+    const isAsm = (v: DView) => (s.docData(v.source) as { format?: string } | null)?.format === 'inv3d.assembly' && v.kind !== 'detail' && v.kind !== 'flat';
+    const sv = selView();
+    const v = sv && isAsm(sv) ? sv : s.drw.views.find((x) => x.id === s.drw.bom?.view && isAsm(x)) ?? s.drw.views.find(isAsm);
+    if (!v) return s.notify('Los globos automáticos necesitan una vista de un ensamblaje', 'error');
+    const pr = getProjection(s, v); if (!pr) return;
+    const pd = await pr;
+    const g = viewGeom(S(), v);
+    if (!g || !pd.anchors?.length) { return s.notify('No se han podido situar los componentes en la vista', 'error'); }
+    const asm = s.docData(v.source) as import('../core/asm').AsmDoc;
+    // número de elemento = orden de la lista de piezas (nivel superior): piezas en orden de aparición
+    const item = new Map<string, number>(), occPart = new Map<string, string>();
+    for (const o of asm.occurrences) if (!o.suppressed) { occPart.set(o.id, o.part); if (!item.has(o.part)) item.set(o.part, item.size + 1); }
+    // mejor anclaje por elemento: el componente más grande en la vista y más cercano al observador
+    const best = new Map<number, { a: P2; area: number }>();
+    for (const an of pd.anchors) {
+      const top = an.id.split('/')[0], part = occPart.get(top); if (!part) continue;
+      const n = item.get(part)!;
+      const area = (an.r[2] - an.r[0]) * (an.r[3] - an.r[1]);
+      const prev = best.get(n); if (prev && prev.area >= area) continue;
+      // se ajusta al punto de línea visible más cercano al centro dentro de su caja, evitando las cajas de componentes más pequeños delante
+      const box = (r: [number, number, number, number]) => { const A = g.T([r[0], r[1]]), B = g.T([r[2], r[3]]); return [Math.min(A[0], B[0]), Math.min(A[1], B[1]), Math.max(A[0], B[0]), Math.max(A[1], B[1])]; };
+      const C = g.T(an.c), [rx0, ry0, rx1, ry1] = box(an.r);
+      const others = pd.anchors.filter((o) => o !== an && (o.r[2] - o.r[0]) * (o.r[3] - o.r[1]) < area * 0.9).map((o) => box(o.r));
+      const inside = (q: P2, b: number[], m = 0) => q[0] > b[0] - m && q[0] < b[2] + m && q[1] > b[1] - m && q[1] < b[3] + m;
+      let bp: P2 = C, bd = Infinity;
+      for (const pl of g.vis) for (let i = 0; i + 1 < pl.length; i++) {
+        const A = pl[i], B = pl[i + 1], dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
+        const t = L2 > 0 ? Math.max(0, Math.min(1, ((C[0] - A[0]) * dx + (C[1] - A[1]) * dy) / L2)) : 0;
+        // varios candidatos por segmento: el más cercano y puntos intermedios (para salir de cajas ajenas)
+        for (const tt of [t, 0.25, 0.5, 0.75]) {
+          const q: P2 = [A[0] + dx * tt, A[1] + dy * tt];
+          if (!inside(q, [rx0, ry0, rx1, ry1], 0.01) || others.some((o) => inside(q, o, 0.5))) continue;
+          const d = Math.hypot(q[0] - C[0], q[1] - C[1]); if (d < bd) { bd = d; bp = q; }
+        }
+      }
+      best.set(n, { a: bp, area });
+    }
+    if (!best.size) return s.notify('No hay componentes visibles en la vista', 'error');
+    const [x0, y0, x1, y1] = g.rect, cx = (x0 + x1) / 2;
+    const left = [...best.entries()].filter(([, b]) => b.a[0] < cx), right = [...best.entries()].filter(([, b]) => b.a[0] >= cx);
+    const anns: import('../core/drawing').DAnn[] = [];
+    const column = (list: typeof left, X: number) => {
+      list.sort((a, b) => b[1].a[1] - a[1].a[1]);
+      const gap = 10, n = list.length, H = (n - 1) * gap;
+      let Y = Math.min(y1 + 4, Math.max(y0 - 4 + H, (y0 + y1) / 2 + H / 2));
+      for (const [num, b] of list) { anns.push({ id: uid('an'), kind: 'balloon', pts: [b.a, [X, Y]], text: String(num), view: v.id }); Y -= gap; }
+    };
+    column(left, x0 - 14); column(right, x1 + 14);
+    s.commitDrw((d) => {
+      d.anns = [...(d.anns ?? []).filter((a) => !(a.kind === 'balloon' && a.view === v.id)), ...anns];
+      if (!d.bom) d.bom = { view: v.id, x: 0, y: 0 };
+    });
+    s.notify(`${anns.length} globos colocados · la lista de piezas usa la misma numeración`);
   },
   toggleBom: () => {
     const s = S();
