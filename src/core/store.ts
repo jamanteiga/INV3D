@@ -16,11 +16,17 @@ export type AnyDoc = PartDoc | AsmDoc | DrawingDoc;
 export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean; /** ruta relativa en la carpeta de trabajo */ path?: string; /** pieza cargada solo como referencia de un ensamblaje (en memoria, sin pestaña), como en Inventor */ hidden?: boolean }
 
 export type Mode = 'model' | 'sketch' | 'present';
+export interface FemLoad { faces: number[]; kind: 'force' | 'pressure'; F: [number, number, number]; p: number }
+export interface FemState {
+  part: string; pick: 'fixed' | number; fixed: number[]; loads: FemLoad[]; h: number;
+  res?: { vm: Float32Array; disp: Float32Array; vmMax: number; dispMax: number; nVox: number; nDof: number; iters: number; ms: number; mesh: MeshData; disp3: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } };
+  show: 'vm' | 'disp'; running?: boolean;
+}
 export type Tool = null
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
-  | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge'
+  | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge' | 'femFace'
   | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember' | 'place'
   | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum' | 'drwSectionPath' | 'drwBreakout';
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
@@ -32,7 +38,7 @@ export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' }
   | { kind: 'sketch3d'; id?: string }
   | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN' }
   | { kind: 'hvac'; hk: string; shape?: 'rect' | 'round' | 'oval' }
@@ -84,6 +90,10 @@ export interface State {
   toolParam: string;
   /** Colocación interactiva: componente pendiente que sigue al cursor */
   /** Edición en contexto: pieza que se edita dentro de un ensamblaje y geometría del resto de componentes (en coordenadas de la pieza) */
+  /** Aprovechamiento de las barras tras el cálculo (para colorearlas) */
+  memberUtil: Record<string, number> | null;
+  /** Análisis FEM lineal de la pieza activa: caras elegidas y resultado (σ von Mises y desplazamiento por vértice) */
+  fem: FemState | null;
   /** Detección de colisiones al mover componentes */
   collide: boolean;
   ctxEdit: { asm: string; occ: string; part: string; asmName: string; mesh: MeshData | null } | null;
@@ -220,7 +230,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, ctxEdit: null, collide: false,
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, ctxEdit: null, collide: false, memberUtil: null, fem: null,
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',

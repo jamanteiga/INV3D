@@ -1,3 +1,6 @@
+import FemPanel from './FemPanel';
+import { GenDialog } from './MachineDialog';
+import { FrameCalcDialog, JointCalcDialog } from './CalcDialogs';
 import { PipeNetDialog, PressureDialog, VesselDialog } from './PipeDialogs';
 import { DuctNetDialog } from './DuctNetDialog';
 import { normalizeAsm } from '../core/subasm';
@@ -2521,6 +2524,10 @@ export function Modals() {
     case 'pipenet': return <PipeNetDialog onClose={close} />;
     case 'pressure': return <PressureDialog onClose={close} />;
     case 'vessel': return <VesselDialog onClose={close} />;
+    case 'framecalc': return <FrameCalcDialog onClose={close} />;
+    case 'jointcalc': return <JointCalcDialog onClose={close} />;
+    case 'gen': return <GenDialog onClose={close} />;
+    case 'fem': return <FemPanel onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;
     case 'bom': return <BomDialog onClose={close} />;

@@ -357,6 +357,10 @@ export default function Ribbon() {
             <Big icon="measure" label="Medir" active={tool === 'measure'} onClick={T('measure')} title="Distancia entre puntos, longitud de aristas, radios" />
             <Big icon="mass" label="Propiedades físicas" onClick={() => s.open({ kind: 'iprops' })} />
           </Group>
+          <Group label="Simulación">
+            <Big icon="fem" label="Análisis de tensiones" onClick={() => s.open({ kind: 'fem' })} title="Cálculo estático lineal por elementos finitos: elige caras fijas y caras cargadas" />
+            {s.fem?.res && s.fem.part === s.active && <Big icon="close" label="Quitar resultados" onClick={() => s.set({ fem: null })} />}
+          </Group>
         </>)}
         {/* ---------- ENSAMBLAJE ---------- */}
         {k === 'assembly' && cur === 'asm' && (<>
@@ -416,6 +420,13 @@ export default function Ribbon() {
           <Group label="Uniones">
             <Big icon="bolt" label="Conexión atornillada" onClick={() => A.openBolt()} title="Design Accelerator: tornillería ISO con cálculo EN 1993-1-8" />
           </Group>
+          <Group label="Cálculo">
+            <Big icon="hcalc" label="Calcular estructura" disabled={!s.asm.frames.length} onClick={() => s.open({ kind: 'framecalc' })} title="Pórtico espacial: esfuerzos, reacciones, flechas y comprobación EN 1993-1-1 de las barras" />
+            <Big icon="bolt" label="Uniones EC3" onClick={() => s.open({ kind: 'jointcalc' })} title="Tornillos y soldaduras en ángulo según EN 1993-1-8" />
+          </Group>
+          <Group label="Generadores">
+            <Big icon="gear" label="Generadores" onClick={() => s.open({ kind: 'gen' })} title="Ejes, engranajes, rodamientos, muelles y chavetas con su cálculo" />
+          </Group>
         </>)}
         {k === 'assembly' && cur === 'weld' && (<>
           <Group label="Soldadura">
@@ -424,6 +435,7 @@ export default function Ribbon() {
           <Group label="Informes">
             <Big icon="bom" label="Lista de soldaduras" onClick={() => s.open({ kind: 'bom' })} />
           </Group>
+          <Group label="Cálculo"><Big icon="hcalc" label="Comprobar soldadura" onClick={() => s.open({ kind: 'jointcalc' })} title="Soldadura en ángulo EN 1993-1-8 (simplificado y direccional)" /></Group>
         </>)}
         {k === 'assembly' && cur === 'present' && (<>
           <Group label="Escena">

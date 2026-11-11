@@ -226,6 +226,11 @@ export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
   dimord: (p) => <S {...p}><path d="M5 27V5M5 27h22" /><path d="M12 27v-6M19 27v-12M26 27v-18" stroke={A} /><text x="10" y="18" fontSize="5" fill="currentColor" stroke="none">0</text></S>,
   datum: (p) => <S {...p}><rect x="10" y="4" width="12" height="12" /><text x="16" y="13.5" fontSize="9" textAnchor="middle" fill="currentColor" stroke="none">A</text><path d="M16 16v6M11 28l5-6 5 6z" fill={A} stroke={A} /></S>,
   axisfill: (p) => <S {...p}><path d="M4 28L28 4" stroke={A} strokeDasharray="4 2" /></S>,
+  gear: (p) => <S {...p}><path d="M16 4l2 3 3.5-1 .5 3.5 3.5.5-1 3.5 3 2-3 2 1 3.5-3.5.5-.5 3.5-3.5-1-2 3-2-3-3.5 1-.5-3.5L6 21.5 7 18l-3-2 3-2-1-3.5 3.5-.5.5-3.5 3.5 1z" fill={B} /><circle cx="16" cy="16" r="4" stroke={A} /></S>,
+  fem: (p) => <S {...p}><path d="M4 26L14 6l14 20z" fill={B} /><path d="M9 26l5-10 5 10M14 16l9 10" stroke={A} /><path d="M4 26h24" /></S>,
+  spring: (p) => <S {...p}><path d="M8 4h16M8 28h16M10 4l12 4-12 4 12 4-12 4 12 4-12 4" stroke={A} /></S>,
+  bearing: (p) => <S {...p}><circle cx="16" cy="16" r="12" fill={B} /><circle cx="16" cy="16" r="5" /><circle cx="16" cy="7.5" r="2.3" stroke={A} /><circle cx="24.5" cy="16" r="2.3" stroke={A} /><circle cx="16" cy="24.5" r="2.3" stroke={A} /><circle cx="7.5" cy="16" r="2.3" stroke={A} /></S>,
+  shaft: (p) => <S {...p}><path d="M3 13h6v-3h10v-2h6v16h-6v-2H9v-3H3z" fill={B} /><path d="M12 13h5" stroke={A} /></S>,
 };
 
 export const Icon = ({ name, size }: { name: string; size?: number }) => (Icons[name] ?? Icons.part)({ size });

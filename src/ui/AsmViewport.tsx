@@ -240,7 +240,9 @@ export default function AsmViewport() {
         }
         for (const m of r.members) {
           const fm = s.asm.frames.find((f) => f.id === m.id);
-          const color = MATERIALS.find((x) => x.name === fm?.material)?.color ?? '#b9bec6';
+          const u = s.memberUtil?.[m.id];
+          // con resultados de cálculo: color por aprovechamiento (verde → amarillo → rojo)
+          const color = u !== undefined ? `hsl(${Math.round(Math.max(0, 120 - Math.min(u, 1.2) * 100))}, 75%, 48%)` : MATERIALS.find((x) => x.name === fm?.material)?.color ?? '#b9bec6';
           const e = explodeOf(s, m.id);
           add('member', m.id, m.mesh, color, e[0] || e[1] || e[2] ? new THREE.Matrix4().makeTranslation(...e) : null);
         }
@@ -567,7 +569,7 @@ export default function AsmViewport() {
     let first = !s0.asmResult;
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
-      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode) {
+      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode) {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }

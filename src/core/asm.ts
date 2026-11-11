@@ -131,6 +131,7 @@ export interface AsmDoc {
   modelStates?: ModelState[];
   ductNets?: import('./ductnet').DuctNet[];
   pipeNets?: import('./pipenet').PipeNet[];
+  frameLoads?: import('./frame3d').FrameLoads;
   activeState?: string;
   patterns?: CompPattern[];
   motions?: Motion[];
