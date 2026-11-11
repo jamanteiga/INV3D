@@ -35,6 +35,7 @@ export type Dialog =
   | { kind: 'sketch3d'; id?: string }
   | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN' }
   | { kind: 'hvac'; hk: string }
+  | { kind: 'spiro'; sk: string }
   | { kind: 'ductcalc' }
   | { kind: 'fileinfo'; title: string; info: FileInfo }
   | { kind: 'skop'; op: SkOp; params: Record<string, string>; step: number; base?: string };

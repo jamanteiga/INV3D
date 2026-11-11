@@ -205,7 +205,7 @@ export default function AsmViewport() {
           mesh.geometry.computeBoundingBox();
           box.union(mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld));
         };
-        ghost = null;
+        ghost = null; ghostXf = null;
         for (const o of s.asm.occurrences) {
           if (o.suppressed || o.hidden) continue;
           const doc = s.docData(o.part) as PartDoc | null;
@@ -419,7 +419,8 @@ export default function AsmViewport() {
       const s = useStore.getState();
       if (s.tool === 'place') {
         lastCursor = { x: ev.clientX, y: ev.clientY }; moveGhost(lastCursor);
-        if (ghostXf) asmActions.dropPlace(ghostXf);
+        if (ghost && ghostXf) asmActions.dropPlace(ghostXf);
+        else s.notify('Calculando la pieza… suéltala cuando aparezca bajo el cursor');
         return;
       }
       const dlg = s.dialog && 'draft' in s.dialog ? s.dialog : null;

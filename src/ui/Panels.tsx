@@ -22,6 +22,7 @@ import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
 import { viewModelDims, viewGeom } from './DrawingView';
+import { makeSpiroPart, SPIRO_KINDS, SPIRO_GROUPS, SPIRO_D, SPIRO_D2, SPIRO_T, SPIRO_ANGLES, SPIRO_L, tubeT, fitT, spigotL, goresFor, type SpiroKind, type SpiroSpec } from '../core/spiro';
 import { makeHvacPart, HVAC_KINDS, HVAC_GROUPS, OVAL_KINDS, spiralPitch, type HvacKind, type HvacSpec, type DuctShape } from '../core/hvac';
 import { EN_RECT, EN_ROUND, SM_RECT, SM_ROUND, INCH, sheetThickness, ductFriction, FITTING_LOSSES } from '../core/hvacdata';
 import { makePipePart, flangeDims, od, wallOf, PIPE_KINDS, ASME_SIZES, type PipeKind, type PipeSpec, type FlangeStd } from '../core/piping';
@@ -1927,6 +1928,66 @@ function HvacDialog({ hk, onClose }: { hk: string; onClose: () => void }) {
   );
 }
 
+/** Espirotubo comercial: tubo y accesorios con extremos macho, diámetros y espesores de catálogo. */
+function SpiroDialog({ sk, onClose }: { sk: string; onClose: () => void }) {
+  const s = useStore();
+  const [kind, setKind] = useState<SpiroKind>((sk in SPIRO_KINDS ? sk : 'tube') as SpiroKind);
+  const [D, setD] = useState(200), [D2, setD2] = useState(160);
+  const [angle, setAngle] = useState(90), [rd, setRd] = useState(1), [build, setBuild] = useState<'auto' | 'pressed' | 'segmented'>('auto');
+  const [L, setL] = useState(3000), [Lx, setLx] = useState(0);
+  const [gasket, setGasket] = useState(true), [tOv, setTOv] = useState(0), [mat, setMat] = useState(HVAC_DUCT_MATS[0]);
+  const need2 = SPIRO_D2.includes(kind);
+  const list2 = SPIRO_D.filter((d) => (kind === 'saddle' ? d <= D * 0.8 : kind.startsWith('reducer') ? d < D : d <= D));
+  const d2 = list2.includes(D2) ? D2 : list2[list2.length - 1] ?? D;
+  const spec: SpiroSpec = { kind, D, D2: need2 ? d2 : undefined, angle, rd, build, gasket, t: tOv || undefined, L: kind === 'tube' ? L : Lx || undefined, material: mat };
+  const tAuto = kind === 'tube' ? tubeT(D) : fitT(D);
+  let err = '', info = '';
+  try { info = makeSpiroPart(spec).iProperties.description; } catch (e) { err = (e as Error).message; }
+  const create = (place: boolean) => {
+    try {
+      const doc = makeSpiroPart(spec);
+      const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_') + '.i3p';
+      onClose();
+      if (place && s.kind === 'assembly') { const pid = s.docs.find((d) => d.fileName === fn)?.id ?? s.addDocument('part', doc, fn, false); asmActions.startPlace(pid); }
+      else { s.addDocument('part', doc, fn); s.notify(`${doc.iProperties.description} creado`); }
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
+  const fitting = kind !== 'tube' && kind !== 'clamp' && kind !== 'sleeve' && kind !== 'capF';
+  return (
+    <Modal title="Espirotubo · tubo y accesorios comerciales" onClose={onClose} wide>
+      <div className="cc">
+        <div className="cc-tree">
+          {SPIRO_GROUPS.map(([g, ks]) => (<div key={g}><div className="cc-cat">{g}</div>{ks.map((k) => <button key={k} className={`cc-item ${k === kind ? 'on' : ''}`} onClick={() => setKind(k)}><span>{SPIRO_KINDS[k]}</span></button>)}</div>))}
+        </div>
+        <div className="cc-form">
+          <div className="psec-title">{SPIRO_KINDS[kind]} · EN 1506 / EN 12237</div>
+          <Row label={need2 ? (kind === 'saddle' ? 'Ø tubo' : 'Ø principal') : 'Diámetro'}><select value={D} onChange={(e) => setD(Number(e.target.value))}>{SPIRO_D.map((d) => <option key={d} value={d}>Ø {d}</option>)}</select></Row>
+          {need2 && <Row label={kind.startsWith('reducer') ? 'Ø menor' : kind === 'saddle' ? 'Ø toma' : 'Ø derivación'}><select value={d2} onChange={(e) => setD2(Number(e.target.value))}>{list2.map((d) => <option key={d} value={d}>Ø {d}</option>)}</select></Row>}
+          {kind === 'tube' && <Row label="Longitud"><select value={L} onChange={(e) => setL(Number(e.target.value))}>{SPIRO_L.map((l) => <option key={l} value={l}>{l} mm{l === 3000 ? ' (estándar)' : ''}</option>)}</select></Row>}
+          {kind === 'elbow' && (<>
+            <Row label="Ángulo"><Seg value={String(angle)} onChange={(v) => setAngle(Number(v))} options={SPIRO_ANGLES.map((a) => [String(a), `${a}°`] as [string, string])} /></Row>
+            <Row label="Radio"><Seg value={String(rd)} onChange={(v) => setRd(Number(v))} options={[['1', 'R = 1·D'], ['1.5', 'R = 1,5·D']]} /></Row>
+            <Row label="Construcción"><select value={build} onChange={(e) => setBuild(e.target.value as 'auto')}><option value="auto">Automática (prensado hasta Ø315, gajos por encima)</option><option value="pressed">Prensado (liso)</option><option value="segmented">Por gajos ({goresFor(angle)} piezas)</option></select></Row>
+          </>)}
+          {['tee', 'tee45', 'cross', 'reducer', 'reducerEcc', 'damper'].includes(kind) && <Row label={kind.startsWith('reducer') ? 'Long. cono' : 'Longitud'}><input type="number" value={Lx} min={0} step={10} onChange={(e) => setLx(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm (0 = de catálogo)</span></Row>}
+          {fitting && <Row label="Unión"><Seg value={gasket ? 'g' : 'n'} onChange={(v) => setGasket(v === 'g')} options={[['g', 'Macho con junta EPDM'], ['n', 'Macho sin junta']]} /></Row>}
+          {kind !== 'clamp' && <Row label="Chapa"><select value={tOv} onChange={(e) => setTOv(Number(e.target.value))}>
+            <option value={0}>Comercial: {String(tAuto).replace('.', ',')} mm</option>
+            {SPIRO_T.map((t) => <option key={t} value={t}>{String(t).replace('.', ',')} mm</option>)}
+          </select></Row>}
+          <Row label="Material"><select value={mat} onChange={(e) => setMat(e.target.value)}>{HVAC_DUCT_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row>
+          {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
+          <p className="phelp">El tubo se designa por su Ø interior; los accesorios por el Ø exterior del macho (Ø − 1 mm), que entra en el tubo {`(inserción ${spigotL(D)} mm)`}. Espesores comerciales orientativos en acero galvanizado. En el ensamblaje, restringe con <b>Insertar</b> la cara cilíndrica del macho con la del tubo.</p>
+          <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
+            <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
+            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 interface CalcRow { name: string; q: number; len: number; shape: 'rect' | 'round'; auto: boolean; W: number; H: number; D: number; fits: string[]; extra: number }
 function DuctCalcDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
@@ -2387,6 +2448,7 @@ export function Modals() {
     case 'drive': return <DriveDialog onClose={close} />;
     case 'motion': return <MotionDialog onClose={close} />;
     case 'hvac': return <HvacDialog hk={(d as { hk: string }).hk} onClose={close} />;
+    case 'spiro': return <SpiroDialog sk={(d as { sk: string }).sk} onClose={close} />;
     case 'ductcalc': return <DuctCalcDialog onClose={close} />;
     case 'piping': return <PipingDialog pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} onClose={close} />;
     case 'ipart': return <IPartDialog onClose={close} />;

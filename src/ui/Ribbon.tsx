@@ -234,7 +234,15 @@ export default function Ribbon() {
               <Small icon="hins" label="Aislamiento" onClick={H('insulation')} />
             </Col>
           </Group>
-          <Group label="Cálculo"><Big icon="hcalc" label="Dimensionar" onClick={() => s.open({ kind: 'ductcalc' })} title="Dimensionado de conductos por pérdida de carga o velocidad (Darcy-Weisbach / Colebrook)" /></Group>
+          <Group label="Espirotubo comercial">
+            <Big icon="hduct" label="Espirotubo" onClick={() => s.open({ kind: 'spiro', sk: 'tube' })} title="Tubo espiral y accesorios comerciales con extremos macho: diámetros y espesores de catálogo" />
+            <Col>
+              <Small icon="helbow" label="Codo 15-90°" onClick={() => s.open({ kind: 'spiro', sk: 'elbow' })} title="Codos de espirotubo de 15, 30, 45, 60 y 90° prensados o por gajos" />
+              <Small icon="hbranch" label="Te / injerto" onClick={() => s.open({ kind: 'spiro', sk: 'tee' })} title="Te 90°, te 45°, cruz y toma de silla" />
+              <Small icon="htrans" label="Reducción" onClick={() => s.open({ kind: 'spiro', sk: 'reducer' })} title="Reducciones concéntricas y excéntricas" />
+            </Col>
+          </Group>
+                    <Group label="Cálculo"><Big icon="hcalc" label="Dimensionar" onClick={() => s.open({ kind: 'ductcalc' })} title="Dimensionado de conductos por pérdida de carga o velocidad (Darcy-Weisbach / Colebrook)" /></Group>
         </>); })()}
         {cur === 'pipe' && (<>
           {([['ASME', 'Tubería ASME (B36.10 · B16.5 · B16.47 · B16.9 · B16.11)'], ['EN', 'Tubería EN (EN 10220 · EN 1092-1 · EN 10253)']] as const).map(([norm, lbl]) => (

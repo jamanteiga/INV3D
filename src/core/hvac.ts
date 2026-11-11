@@ -33,16 +33,17 @@ export interface HvacSpec {
   ins?: number; rod?: string; material: string;
 }
 
-const f1 = (x: number) => String(Math.round(x * 1000) / 1000);
-const XY = (o = 0): PlaneRef => ({ kind: 'std', name: 'XY', offset: f1(o) });
-const XZ = (o = 0): PlaneRef => ({ kind: 'std', name: 'XZ', offset: f1(o) });
-const YZ = (o = 0): PlaneRef => ({ kind: 'std', name: 'YZ', offset: f1(o) });
-const custom = (origin: V3, normal: V3, xDir: V3, label: string): PlaneRef => ({ kind: 'custom', label, origin, normal, xDir });
+export const f1 = (x: number) => String(Math.round(x * 1000) / 1000);
+export const XY = (o = 0): PlaneRef => ({ kind: 'std', name: 'XY', offset: f1(o) });
+export const XZ = (o = 0): PlaneRef => ({ kind: 'std', name: 'XZ', offset: f1(o) });
+export const YZ = (o = 0): PlaneRef => ({ kind: 'std', name: 'YZ', offset: f1(o) });
+export const custom = (origin: V3, normal: V3, xDir: V3, label: string): PlaneRef => ({ kind: 'custom', label, origin, normal, xDir });
 let nid = 0;
-const id = (p: string) => `${p}${++nid}`;
-const rect = (w: number, h: number, cx = 0, cy = 0): SkEntity => ({ id: id('r'), type: 'rect', x: f1(cx - w / 2), y: f1(cy - h / 2), w: f1(w), h: f1(h) });
-const circ = (d: number, cx = 0, cy = 0): SkEntity => ({ id: id('c'), type: 'circle', cx: f1(cx), cy: f1(cy), d: f1(d) });
-const poly = (pts: [number, number][]): SkEntity => ({ id: id('p'), type: 'poly', pts: pts.map(([x, y]) => [f1(x), f1(y)]) });
+export const resetIds = () => { nid = 0; };
+export const id = (p: string) => `${p}${++nid}`;
+export const rect = (w: number, h: number, cx = 0, cy = 0): SkEntity => ({ id: id('r'), type: 'rect', x: f1(cx - w / 2), y: f1(cy - h / 2), w: f1(w), h: f1(h) });
+export const circ = (d: number, cx = 0, cy = 0): SkEntity => ({ id: id('c'), type: 'circle', cx: f1(cx), cy: f1(cy), d: f1(d) });
+export const poly = (pts: [number, number][]): SkEntity => ({ id: id('p'), type: 'poly', pts: pts.map(([x, y]) => [f1(x), f1(y)]) });
 const rpoly = (w: number, h: number, ang: number, cx = 0, cy = 0): SkEntity => {
   const a = (ang * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
   return poly(([[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]] as [number, number][]).map(([x, y]) => [cx + x * c - y * s, cy + x * s + y * c]));
@@ -60,7 +61,7 @@ const SHAPE_NAME: Record<DuctShape, string> = { rect: 'rectangular', round: 'cir
 /** Paso de la grapa helicoidal (banda de 137 mm habitual; 100 mm en diámetros pequeños) */
 export const spiralPitch = (D: number) => (D <= 200 ? 100 : 137);
 
-class B {
+export class B {
   f: Feature[] = [];
   private n = 0;
   /** Boceto + extrusión */
