@@ -22,6 +22,14 @@ export interface FemState {
   res?: { vm: Float32Array; disp: Float32Array; vmMax: number; dispMax: number; nVox: number; nDof: number; iters: number; ms: number; mesh: MeshData; disp3: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } };
   show: 'vm' | 'disp'; running?: boolean;
 }
+export interface HudState {
+  style: 'shaded' | 'hlr' | 'hlv';
+  clipOff: number; clipFlip: boolean;
+  origin: boolean; sketches: boolean; triad: boolean; cube: boolean;
+  scene: 'grad' | 'white' | 'studio' | 'dark' | 'blue';
+}
+const HUD0: HudState = { style: 'shaded', clipOff: 0, clipFlip: false, origin: true, sketches: true, triad: true, cube: true, scene: 'grad' };
+function loadHud(): HudState { try { return { ...HUD0, ...JSON.parse(localStorage.getItem('inv3d.hud') || '{}'), clipOff: 0, clipFlip: false }; } catch { return HUD0; } }
 export type Tool = null
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
@@ -117,6 +125,8 @@ export interface State {
   /** Nombre del ratón 3D conectado ('' si no hay) */
   spaceMouse: string;
   clip: '' | 'X' | 'Y' | 'Z';
+  /** Barra de vista (como la de SolidWorks): estilo, sección, visibilidad y escena */
+  hud: HudState;
   project: ProjectInfo | null;
   /** Configuración persistente */
   settings: AppSettings;
@@ -242,7 +252,7 @@ export const useStore = create<State>((set, get) => ({
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
   view: { name: 'home', n: 0 },
-  showEdges: true, wire: false, spaceMouse: '', clip: '',
+  showEdges: true, wire: false, spaceMouse: '', clip: '', hud: loadHud(),
   project: null,
   settings: { ...DEFAULT_SETTINGS },
   libs: { materials: [] },
@@ -715,6 +725,7 @@ async function runPreview() {
   } catch { /* la vista previa es opcional */ }
 }
 
+useStore.subscribe((s, p) => { if (s.hud !== p.hud) { try { localStorage.setItem('inv3d.hud', JSON.stringify(s.hud)); } catch { /* sin almacenamiento */ } } });
 let infoTimer: ReturnType<typeof setTimeout> | undefined;
 let dofTimer: ReturnType<typeof setTimeout> | undefined;
 useStore.subscribe((s, prev) => {

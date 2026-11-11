@@ -6,6 +6,7 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { V3 } from '../core/doc';
+import { useStore } from '../core/store';
 import type { MeshData } from '../core/cadClient';
 
 export const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#000';
@@ -25,7 +26,9 @@ export const vArr = (v: THREE.Vector3, d = 6): V3 => [Number(v.x.toFixed(d)), Nu
 const VIEWS: Record<string, [V3, V3]> = {
   home: [[-1, 1, -0.8], [0, 0, 1]], front: [[0, 1, 0], [0, 0, 1]], back: [[0, -1, 0], [0, 0, 1]],
   top: [[0, 0, -1], [0, 1, 0]], bottom: [[0, 0, 1], [0, -1, 0]], right: [[-1, 0, 0], [0, 0, 1]], left: [[1, 0, 0], [0, 0, 1]],
+  iso: [[-1, 1, -1], [0, 0, 1]], dimetric: [[-1, 1, -0.55], [0, 0, 1]], trimetric: [[-0.62, 1, -0.78], [0, 0, 1]],
 };
+
 
 export class View3D {
   el: HTMLElement;
@@ -78,6 +81,8 @@ export class View3D {
     try { this.ro.observe(el, { box: 'device-pixel-content-box' as ResizeObserverBoxOptions }); } catch { this.ro.observe(el); }
     this.resize();
     this.controls.addEventListener('change', () => { this.request(); this.onChange(); });
+    this.controls.addEventListener('start', () => this.pushHist());
+    this.renderer.domElement.addEventListener('wheel', () => { clearTimeout(this.wheelT); if (!this.wheeling) { this.pushHist(); this.wheeling = true; } this.wheelT = setTimeout(() => { this.wheeling = false; }, 400); }, { passive: true, capture: true });
     this.cube = this.makeCube(cubeHost);
     let lastT = performance.now();
     const loop = () => {
@@ -198,6 +203,7 @@ export class View3D {
       if (op < 1) { lm.transparent = true; lm.opacity = Math.max(op, 0.3); }
       const l = this.segs(Array.from(m.lines), lm);
       l.raycast = () => {};
+      l.userData.edge = true;
       grp.add(l);
     }
     return { grp, mesh };
@@ -242,7 +248,64 @@ export class View3D {
   }
 
   // ---- Vistas ----
+  // ---- Historial de vistas (Vista anterior) ----
+  private wheelT: ReturnType<typeof setTimeout> | undefined; private wheeling = false;
+  private hist: { pos: THREE.Vector3; target: THREE.Vector3; up: THREE.Vector3; zoom: number }[] = [];
+  private camState() { return { pos: this.camera.position.clone(), target: this.controls.target.clone(), up: this.camera.up.clone(), zoom: this.camera.zoom }; }
+  pushHist() {
+    const st = this.camState(), last = this.hist[this.hist.length - 1];
+    if (last && last.pos.distanceTo(st.pos) < 1e-6 && last.target.distanceTo(st.target) < 1e-6 && Math.abs(last.zoom - st.zoom) < 1e-9 && last.up.distanceTo(st.up) < 1e-9) return;
+    this.hist.push(st); if (this.hist.length > 30) this.hist.shift();
+  }
+  prevView() {
+    const s = this.hist.pop(); if (!s) return false;
+    this.camera.position.copy(s.pos); this.controls.target.copy(s.target); this.camera.up.copy(s.up);
+    this.camera.zoom = s.zoom; this.camera.updateProjectionMatrix(); this.camera.lookAt(this.controls.target); this.controls.update(); this.request(); this.onChange();
+    return true;
+  }
+  // ---- Zoom encuadre (rectángulo con el botón izquierdo) ----
+  private zoomBox: { start: [number, number] | null; div: HTMLDivElement; off: () => void } | null = null;
+  startZoomArea() {
+    if (this.zoomBox) return;
+    const cvs = this.renderer.domElement, div = document.createElement('div');
+    div.className = 'vp-zoombox'; div.style.display = 'none'; this.el.appendChild(div);
+    const prevEnabled = this.controls.enabled; this.controls.enabled = false;
+    cvs.style.cursor = 'zoom-in';
+    const loc = (e: PointerEvent): [number, number] => { const r = this.el.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    const down = (e: PointerEvent) => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); this.zoomBox!.start = loc(e); };
+    const move = (e: PointerEvent) => {
+      const z = this.zoomBox; if (!z?.start) return; e.stopPropagation();
+      const [x0, y0] = z.start, [x1, y1] = loc(e);
+      Object.assign(div.style, { display: 'block', left: `${Math.min(x0, x1)}px`, top: `${Math.min(y0, y1)}px`, width: `${Math.abs(x1 - x0)}px`, height: `${Math.abs(y1 - y0)}px` });
+    };
+    const up = (e: PointerEvent) => {
+      const z = this.zoomBox; if (!z?.start) return; e.stopPropagation();
+      const [x0, y0] = z.start, [x1, y1] = loc(e);
+      finish();
+      const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
+      if (w < 6 || h < 6) return;
+      this.pushHist();
+      const W = this.el.clientWidth, H = this.el.clientHeight, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      // desplazamiento en el plano de la vista hasta el centro del rectángulo
+      this.camera.updateMatrixWorld();
+      const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
+      const upv = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1).normalize();
+      const wpp = this.worldPerPx();
+      const d = right.multiplyScalar((cx - W / 2) * wpp).add(upv.multiplyScalar(-(cy - H / 2) * wpp));
+      this.camera.position.add(d); this.controls.target.add(d);
+      this.camera.zoom = Math.min(5000, this.camera.zoom * Math.min(W / w, H / h));
+      this.camera.updateProjectionMatrix(); this.controls.update(); this.request(); this.onChange();
+    };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') finish(); };
+    const finish = () => {
+      cvs.removeEventListener('pointerdown', down, true); window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('keydown', key, true);
+      div.remove(); this.controls.enabled = prevEnabled; cvs.style.cursor = ''; this.zoomBox = null;
+    };
+    cvs.addEventListener('pointerdown', down, true); window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', up, true); window.addEventListener('keydown', key, true);
+    this.zoomBox = { start: null, div, off: finish };
+  }
   fitTo(box: THREE.Box3, dir: THREE.Vector3, up: THREE.Vector3) {
+    this.pushHist();
     const c = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3()).length() || 200;
     this.controls.target.copy(c);
@@ -263,6 +326,8 @@ export class View3D {
       this.camera.zoom = s.zoom; this.camera.updateProjectionMatrix(); this.camera.lookAt(this.controls.target); this.controls.update(); this.request();
       return;
     }
+    if (name === 'prev') { this.prevView(); return; }
+    if (name === 'zoomarea') { this.startZoomArea(); return; }
     if (name === 'fit') return this.fitTo(this.viewBox(), this.camDir(), this.camera.up.clone());
     const v = VIEWS[name];
     if (v) this.fitTo(this.viewBox(), tv(v[0]), tv(v[1]));
@@ -272,12 +337,34 @@ export class View3D {
     const up = Math.abs(n.z) > 0.9 ? new THREE.Vector3(0, n.z > 0 ? 1 : -1, 0) : new THREE.Vector3(0, 0, 1);
     this.fitTo(this.viewBox(), n.clone().negate(), up);
   }
-  /** Vista de corte 3D (plano por el centro del modelo) y estilo alámbrico. */
+  /** Vista de sección (plano por el modelo con desfase e inversión), estilo alámbrico y líneas ocultas. */
   applyVisual(clip: '' | 'X' | 'Y' | 'Z', wire: boolean, meshes: THREE.Object3D[]) {
-    const c = this.bbox.getCenter(new THREE.Vector3());
+    const viewOpts = { style: useStore.getState().hud.style, clipOff: useStore.getState().hud.clipOff, clipFlip: useStore.getState().hud.clipFlip };
+    const c = this.bbox.getCenter(new THREE.Vector3()), size = this.bbox.getSize(new THREE.Vector3());
+    const ax = clip === 'X' ? 0 : clip === 'Y' ? 1 : 2;
     const n = clip === 'X' ? new THREE.Vector3(-1, 0, 0) : clip === 'Y' ? new THREE.Vector3(0, -1, 0) : new THREE.Vector3(0, 0, -1);
-    this.renderer.clippingPlanes = clip ? [new THREE.Plane(n, -n.dot(c))] : [];
-    for (const m of meshes) m.traverse((o: any) => { if (o.isMesh && o.material && !o.userData.keep) { o.material.visible = !wire; } });
+    const pt = c.clone(); pt.setComponent(ax, c.getComponent(ax) + viewOpts.clipOff * size.getComponent(ax));
+    if (viewOpts.clipFlip) n.negate();
+    this.renderer.clippingPlanes = clip ? [new THREE.Plane(n, -n.dot(pt))] : [];
+    const style = wire ? 'shaded' : viewOpts.style;
+    const adds: [THREE.Object3D, THREE.Object3D][] = [], dels: THREE.Object3D[] = [];
+    for (const m of meshes) m.traverse((o: any) => {
+      if (o.userData.hidCopy) { dels.push(o); return; }
+      if (o.isMesh && o.material && !o.userData.keep && !(o instanceof LineSegments2)) {
+        o.material.visible = !wire;
+        // sin líneas ocultas: las caras solo tapan (se ve el fondo), como «Sin líneas ocultas» de SolidWorks
+        if (o.material.transparent !== true || o.material.opacity >= 1) o.material.colorWrite = style === 'shaded' && o.userData.noColor !== true;
+      }
+      if (style === 'hlv' && o instanceof LineSegments2 && o.userData.edge) {
+        // se dibuja antes que todo (opaco, sin profundidad) y las aristas visibles quedan encima
+        const hm = this.lineMat('#8a93a0', 0.9, true, false); hm.transparent = false; hm.depthWrite = false;
+        const h = new LineSegments2(o.geometry, hm);
+        h.userData.hidCopy = true; h.raycast = () => {}; h.renderOrder = -10;
+        adds.push([o.parent!, h]);
+      }
+    });
+    for (const d of dels) d.parent?.remove(d);
+    for (const [p, h] of adds) p.add(h);
     this.request();
   }
   setMouse(drawing: boolean, panRight: boolean) {

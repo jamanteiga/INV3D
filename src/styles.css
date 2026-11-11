@@ -536,3 +536,37 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .occp-col .ptable td:first-child { width: 44%; }
 .occp-col .ptable select { width: 100%; }
 .occp-foot { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+/* Barra de vista (heads-up) */
+.hu { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 1px; padding: 3px 5px; border-radius: 8px; background: color-mix(in srgb, var(--panel) 72%, transparent); border: 1px solid color-mix(in srgb, var(--line-2) 70%, transparent); box-shadow: 0 2px 10px rgba(20, 30, 45, 0.12); backdrop-filter: blur(6px); }
+.hu-btn { position: relative; height: 30px; min-width: 30px; padding: 0 5px; border: 0; border-radius: 5px; background: none; color: var(--fg); display: inline-flex; align-items: center; gap: 1px; cursor: pointer; }
+.hu-btn:hover, .hu-btn.open { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.hu-btn.on { color: var(--accent); }
+.hu-caret { opacity: 0.7; margin-left: 1px; display: inline-grid; }
+.hu-sep { width: 1px; height: 20px; background: var(--line-2); margin: 0 4px; }
+.hu-dd { position: relative; }
+.hu-pop { position: absolute; top: 36px; left: 50%; transform: translateX(-50%); min-width: 200px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); padding: 8px; display: flex; flex-direction: column; gap: 6px; z-index: 20; font-size: 12.5px; }
+.hu-ttl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-2); }
+.hu-row { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.hu-row input[type=range] { flex: 1; min-width: 110px; }
+.hu-num { font: 11.5px var(--f-mono); min-width: 40px; text-align: right; }
+.hu-seg { display: flex; border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
+.hu-seg button { flex: 1; border: 0; background: none; padding: 5px 8px; font-size: 12px; cursor: pointer; color: var(--fg); }
+.hu-seg button + button { border-left: 1px solid var(--line-2); }
+.hu-seg button.on { background: var(--accent); color: #fff; }
+.hu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.hu-grid button, .hu-list button { border: 1px solid transparent; background: none; border-radius: 5px; padding: 5px 8px; text-align: left; cursor: pointer; color: var(--fg); font-size: 12.5px; }
+.hu-grid button { border-color: var(--line); }
+.hu-grid button:hover, .hu-list button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.hu-list { gap: 2px; min-width: 230px; }
+.hu-list button { display: flex; align-items: center; gap: 9px; }
+.hu-list button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
+.hu-sw { width: 26px; height: 18px; border-radius: 3px; border: 1px solid var(--line-2); flex: none; }
+.hu-link { align-self: flex-start; border: 0; background: none; color: var(--accent); padding: 2px 0; cursor: pointer; font-size: 12px; }
+.hu-link:disabled { color: var(--fg-3); cursor: default; }
+@media (max-width: 760px) { .hu { left: 8px; transform: none; } .hu-pop { left: 0; transform: none; } }
+.vp-zoombox { position: absolute; border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); pointer-events: none; z-index: 5; }
+.viewport.no-cube .viewcube { display: none; }
+.viewport.scene-white { background: #ffffff; }
+.viewport.scene-studio { background: radial-gradient(circle at 50% 35%, #f4f4f4, #a9adb3); }
+.viewport.scene-blue { background: linear-gradient(180deg, #a7c3e6, #ffffff); }
+.viewport.scene-dark { background: linear-gradient(180deg, #232a33, #39424e); }

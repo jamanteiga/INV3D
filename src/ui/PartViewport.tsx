@@ -1,4 +1,5 @@
 import { femColor } from './FemPanel';
+import HeadsUp from './HeadsUp';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useStore, activeSketch, type State } from '../core/store';
@@ -128,7 +129,9 @@ export default function PartViewport() {
 
     V.onFrame = () => {
       const s = useStore.getState();
-      V.triad.visible = s.mode !== 'sketch';
+      V.triad.visible = s.mode !== 'sketch' && s.hud.triad;
+      originGroup.visible = s.hud.origin || s.tool === 'pickPlane' || s.tool === 'pickWorkBase' || s.mode === 'sketch';
+      sketchGroup.visible = s.mode === 'sketch' || s.hud.sketches || !!(s.dialog && 'draft' in s.dialog);
       if (snapMarker.visible) { snapMarker.quaternion.copy(camera.quaternion); snapMarker.scale.setScalar(V.worldPerPx() * 6); }
     };
     let labelRaf = 0;
@@ -184,7 +187,7 @@ export default function PartViewport() {
         g.setIndex(new THREE.BufferAttribute(fr.disp3.triangles, 1));
         const cm = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0, roughness: 0.85, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
         cm.raycast = () => {};
-        { const om = mesh.material as THREE.Material; om.colorWrite = false; om.depthWrite = false; }
+        { const om = mesh.material as THREE.Material; om.colorWrite = false; om.depthWrite = false; mesh.userData.noColor = true; }
         grp.add(cm);
       }
       V.applyVisual(s.mode === 'sketch' ? '' : s.clip, s.wire && s.mode !== 'sketch', [grp]);
@@ -1378,7 +1381,7 @@ export default function PartViewport() {
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'part') return;
       if (s.pickBase !== p.pickBase) buildOverlay(s);
-      if (s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material || s.fem !== p.fem) {
+      if (s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material || s.fem !== p.fem || s.hud !== p.hud) {
         buildPart(s);
         if (firstMesh && s.result?.mesh) { firstMesh = false; setView('home'); }
       }
@@ -1408,6 +1411,7 @@ export default function PartViewport() {
   }, []);
 
   const mode = useStore((s) => s.mode);
+  const hud = useStore((s) => s.hud);
   const tool = useStore((s) => s.tool);
   const ctxEdit = useStore((s) => s.ctxEdit), active = useStore((s) => s.active);
   const conType = useStore((s) => s.conType);
@@ -1428,8 +1432,9 @@ export default function PartViewport() {
   };
 
   return (
-    <div className="viewport" ref={host}>
+    <div className={`viewport scene-${hud.scene} ${hud.cube ? '' : 'no-cube'}`} ref={host}>
       <div className="viewcube" ref={cubeHost} />
+      <HeadsUp kind="part" />
       {ctxEdit && ctxEdit.part === active && (
         <div className="ctx-bar">
           <span>Edición en contexto · <b>{ctxEdit.asmName}</b></span>

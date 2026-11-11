@@ -1,3 +1,4 @@
+import HeadsUp from './HeadsUp';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -81,6 +82,7 @@ export default function AsmViewport() {
 
   useEffect(() => {
     const V = new View3D(host.current!, cubeHost.current!);
+    V.onFrame = () => { V.triad.visible = useStore.getState().hud.triad; };
     (window as unknown as { __v3d: View3D }).__v3d = V; // ayuda de depuración / pruebas
     const { scene, camera } = V;
     const modelGroup = new THREE.Group(); scene.add(modelGroup);
@@ -569,7 +571,7 @@ export default function AsmViewport() {
     let first = !s0.asmResult;
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
-      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode) {
+      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud) {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }
@@ -584,6 +586,7 @@ export default function AsmViewport() {
   }, []);
 
   const tool = useStore((s) => s.tool);
+  const hud = useStore((s) => s.hud);
   const dialog = useStore((s) => s.dialog);
   const step = dialog && 'step' in dialog ? dialog.step ?? 0 : 0;
   const hints: Record<string, string> = {
@@ -598,8 +601,9 @@ export default function AsmViewport() {
   };
 
   return (
-    <div className="viewport" ref={host}>
+    <div className={`viewport scene-${hud.scene} ${hud.cube ? '' : 'no-cube'}`} ref={host}>
       <div className="viewcube" ref={cubeHost} />
+      <HeadsUp kind="asm" />
       <button className="vp-home" title="Vista de inicio (F6)" onClick={() => useStore.getState().setView('home')}>
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </button>
