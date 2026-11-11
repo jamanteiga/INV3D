@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
 import { ICON_THEMES, iconThemeOf } from '../core/persist';
+import { toggleClipTool } from './ClipBar';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS } from '../core/doc';
 import { asmActions, drwActions, partActions } from './actions';
@@ -577,6 +578,7 @@ export default function Ribbon() {
             <Big icon="iso" label="Alámbrico" active={s.wire} onClick={() => s.set({ wire: !s.wire, showEdges: true })} />
           </Group>
           <Group label="Vista de corte">
+            <Big icon="section" label="Modo de recorte" active={!!s.clipTool} onClick={() => toggleClipTool()} title="Barra de recorte: plano, franja o manual (punto y sentido ±X/±Y/±Z), con la cara cortada rellena" />
             <Col>
               {(['X', 'Y', 'Z'] as const).map((a) => <Small key={a} icon="section" label={`Corte plano ${a === 'X' ? 'YZ' : a === 'Y' ? 'XZ' : 'XY'}`} active={s.clip === a} onClick={() => s.set({ clip: s.clip === a ? '' : a })} />)}
             </Col>

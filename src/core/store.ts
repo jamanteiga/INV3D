@@ -22,6 +22,27 @@ export interface FemState {
   res?: { vm: Float32Array; disp: Float32Array; vmMax: number; dispMax: number; nVox: number; nDof: number; iters: number; ms: number; mesh: MeshData; disp3: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } };
   show: 'vm' | 'disp'; running?: boolean;
 }
+export type ClipPlaneName = 'XYc' | 'XZc' | 'YZc' | 'XY' | 'XZ' | 'YZ' | '*';
+export type ClipDir = '-x' | '+x' | '-y' | '+y' | '-z' | '+z';
+export interface ClipTool {
+  /** plano: oculta un lado · franja: solo se ve la rodaja entre dos planos · manual (M): punto + sentido */
+  mode: 'plane' | 'slab' | 'manual';
+  plane: ClipPlaneName;
+  /** posición del plano (0–1 del tamaño del modelo) en los modos plano y franja */
+  pos: number;
+  dir: ClipDir;
+  /** punto del modo M (y del plano libre «*») y normal del plano libre */
+  pt: [number, number, number]; normal: [number, number, number];
+  /** paso de las flechas y espesor de la franja (mm) */
+  step: number;
+  /** modo M: 0 = en el punto, 1 = al final del modelo por el lado visible */
+  mpos: number;
+  /** R: invierte el lado que se oculta */
+  flip: boolean;
+  /** mostrar el plano en el 3D */
+  show: boolean;
+}
+export const CLIP0: ClipTool = { mode: 'plane', plane: 'XYc', pos: 0.5, dir: '-x', pt: [0, 0, 0], normal: [0, 0, 1], step: 100, mpos: 0, flip: false, show: true };
 export interface HudState {
   style: 'shaded' | 'hlr' | 'hlv';
   clipOff: number; clipFlip: boolean;
@@ -130,6 +151,8 @@ export interface State {
   clip: '' | 'X' | 'Y' | 'Z';
   /** Barra de vista: estilo, sección, visibilidad y escena */
   hud: HudState;
+  /** Modo de recorte (barra de recorte): plano, franja o manual */
+  clipTool: ClipTool | null;
   project: ProjectInfo | null;
   /** Configuración persistente */
   settings: AppSettings;
@@ -255,7 +278,7 @@ export const useStore = create<State>((set, get) => ({
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
   view: { name: 'home', n: 0 },
-  showEdges: true, wire: false, spaceMouse: '', clip: '', hud: loadHud(),
+  showEdges: true, wire: false, spaceMouse: '', clip: '', hud: loadHud(), clipTool: null,
   project: null,
   settings: { ...DEFAULT_SETTINGS },
   libs: { materials: [] },

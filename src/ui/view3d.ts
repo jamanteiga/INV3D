@@ -51,7 +51,7 @@ export class View3D {
 
   constructor(el: HTMLElement, cubeHost: HTMLElement) {
     this.el = el;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'high-performance', stencil: true });
     this.renderer.setPixelRatio(1);
     activeView = this;
     this.renderer.domElement.className = 'vp-canvas';
@@ -73,6 +73,8 @@ export class View3D {
     this.triad.add(axis([1, 0, 0], 0xd0443e), axis([0, 1, 0], 0x3fa34d), axis([0, 0, 1], 0x3d6fd6));
     this.triad.renderOrder = 5;
     this.scene.add(this.triad);
+    this.scene.add(this.capGroup);
+    this.unsubClip = useStore.subscribe((st, pv) => { if (st.clipTool !== pv.clipTool) this.refreshClip(); });
     this.ro = new ResizeObserver((ents) => {
       const e = ents[0] as ResizeObserverEntry & { devicePixelContentBoxSize?: ReadonlyArray<ResizeObserverSize> };
       const d = e?.devicePixelContentBoxSize?.[0];
@@ -101,6 +103,7 @@ export class View3D {
 
   dispose() {
     if (activeView === this) activeView = null;
+    this.unsubClip?.(); this.pickOff?.();
     cancelAnimationFrame(this.raf); this.ro.disconnect(); this.controls.dispose(); this.renderer.dispose(); this.cube?.dispose();
     this.el.removeChild(this.renderer.domElement);
   }
@@ -337,15 +340,131 @@ export class View3D {
     const up = Math.abs(n.z) > 0.9 ? new THREE.Vector3(0, n.z > 0 ? 1 : -1, 0) : new THREE.Vector3(0, 0, 1);
     this.fitTo(this.viewBox(), n.clone().negate(), up);
   }
+  // ---------- Modo de recorte (barra de recorte) y vista de sección ----------
+  clipTargets: THREE.Object3D[] = [];
+  private hudClip: '' | 'X' | 'Y' | 'Z' = '';
+  private capGroup = new THREE.Group();
+  private unsubClip?: () => void;
+  private pickOff?: () => void;
+  /** Planos de recorte vigentes (THREE: se oculta lo que queda en el lado negativo de cada plano) */
+  clipPlanes(): { planes: THREE.Plane[]; cap: boolean } {
+    const st = useStore.getState(), ct = st.clipTool, bb = this.bbox;
+    const mn = bb.min, mx = bb.max, size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+    if (!ct) {
+      const clip = this.hudClip; if (!clip) return { planes: [], cap: false };
+      const ax = clip === 'X' ? 0 : clip === 'Y' ? 1 : 2;
+      const n = clip === 'X' ? new THREE.Vector3(-1, 0, 0) : clip === 'Y' ? new THREE.Vector3(0, -1, 0) : new THREE.Vector3(0, 0, -1);
+      const pt = c.clone(); pt.setComponent(ax, c.getComponent(ax) + st.hud.clipOff * size.getComponent(ax));
+      if (st.hud.clipFlip) n.negate();
+      return { planes: [new THREE.Plane(n, -n.dot(pt))], cap: false };
+    }
+    const axOf = (p: string) => (p.startsWith('XY') ? 2 : p.startsWith('XZ') ? 1 : 0);
+    const cap = ct.mode === 'manual' ? ct.plane.endsWith('c') || ct.plane === '*' : ct.plane.endsWith('c') || ct.plane === '*';
+    if (ct.mode === 'manual') {
+      const ax = 'xyz'.indexOf(ct.dir[1]), hideNeg = ct.dir[0] === '-' ? !ct.flip : ct.flip;
+      const p0 = ct.pt[ax], end = hideNeg ? mx.getComponent(ax) : mn.getComponent(ax);
+      const X = p0 + ct.mpos * (end - p0);
+      const n = new THREE.Vector3(); n.setComponent(ax, hideNeg ? 1 : -1);
+      const pt = new THREE.Vector3(); pt.setComponent(ax, X);
+      return { planes: [new THREE.Plane(n, -n.dot(pt))], cap };
+    }
+    let n: THREE.Vector3, lo: number, hi: number, base: THREE.Vector3;
+    if (ct.plane === '*') {
+      n = new THREE.Vector3(...ct.normal).normalize(); base = new THREE.Vector3(...ct.pt);
+      // extensión del modelo a lo largo de la normal
+      lo = Infinity; hi = -Infinity;
+      for (const x of [mn.x, mx.x]) for (const y of [mn.y, mx.y]) for (const z of [mn.z, mx.z]) { const d = n.dot(new THREE.Vector3(x, y, z).sub(base)); lo = Math.min(lo, d); hi = Math.max(hi, d); }
+    } else {
+      const ax = axOf(ct.plane); n = new THREE.Vector3(); n.setComponent(ax, 1); base = new THREE.Vector3();
+      lo = mn.getComponent(ax); hi = mx.getComponent(ax);
+    }
+    const at = lo + ct.pos * (hi - lo);
+    const P = (d: number) => base.clone().addScaledVector(n, d);
+    if (ct.mode === 'slab') {
+      const w = Math.max(1e-3, ct.step) / 2;
+      const a = n.clone(), b = n.clone().negate();
+      return { planes: [new THREE.Plane(a, -a.dot(P(at - w))), new THREE.Plane(b, -b.dot(P(at + w)))], cap };
+    }
+    const k = ct.flip ? n.clone() : n.clone().negate(); // por defecto se oculta el lado + (se ve el interior desde arriba)
+    return { planes: [new THREE.Plane(k, -k.dot(P(at)))], cap };
+  }
+  /** Aplica los planos y dibuja las tapas de la sección (técnica de stencil) y el contorno del plano */
+  refreshClip() {
+    const { planes, cap } = this.clipPlanes();
+    this.renderer.clippingPlanes = planes;
+    for (const o of [...this.capGroup.children]) { this.capGroup.remove(o); o.traverse((x: any) => { if (x.material) x.material.dispose?.(); if (x.userData.ownGeo) x.geometry?.dispose?.(); }); }
+    const ct = useStore.getState().clipTool;
+    if (planes.length) {
+      const size = Math.max(1, this.bbox.getSize(new THREE.Vector3()).length());
+      const eps = size * 2e-5;
+      const meshes: THREE.Mesh[] = [];
+      for (const t of this.clipTargets) t.traverse((o: any) => { if (o.isMesh && !(o instanceof LineSegments2) && !o.userData.keep && o.material?.visible !== false && o.geometry?.index !== undefined) meshes.push(o); });
+      planes.forEach((pl, i) => {
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), pl.normal);
+        const at = pl.coplanarPoint(new THREE.Vector3());
+        // proyección del centro del modelo sobre el plano
+        const c = this.bbox.getCenter(new THREE.Vector3()); const cp = c.clone().addScaledVector(pl.normal, -pl.distanceToPoint(c));
+        if (cap && meshes.length) {
+          const base = new THREE.MeshBasicMaterial({ depthWrite: false, depthTest: false, colorWrite: false, stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc });
+          for (const m of meshes) {
+            m.updateWorldMatrix(true, false);
+            for (const [side, op] of [[THREE.BackSide, THREE.IncrementWrapStencilOp], [THREE.FrontSide, THREE.DecrementWrapStencilOp]] as const) {
+              const mt = base.clone(); mt.side = side; mt.stencilFail = op; mt.stencilZFail = op; mt.stencilZPass = op;
+              const sm = new THREE.Mesh(m.geometry, mt); sm.matrixAutoUpdate = false; sm.matrix.copy(m.matrixWorld); sm.renderOrder = 10 + i; sm.raycast = () => {};
+              this.capGroup.add(sm);
+            }
+          }
+          base.dispose();
+          const capMat = new THREE.MeshStandardMaterial({ color: 0xc8564a, metalness: 0.1, roughness: 0.75, side: THREE.DoubleSide, stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp, stencilZPass: THREE.ReplaceStencilOp, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+          const capM = new THREE.Mesh(new THREE.PlaneGeometry(size * 3, size * 3), capMat);
+          capM.userData.ownGeo = true; capM.quaternion.copy(q); capM.position.copy(cp).addScaledVector(pl.normal, eps); capM.renderOrder = 10.5 + i; capM.raycast = () => {};
+          capM.onAfterRender = (r) => r.clearStencil();
+          this.capGroup.add(capM);
+        }
+        if (ct?.show) {
+          // contorno del plano de corte (rectángulo del tamaño del modelo)
+          const s2 = size * 0.42, g = new THREE.BufferGeometry().setFromPoints([[-1, -1], [1, -1], [1, 1], [-1, 1], [-1, -1]].map(([x, y]) => new THREE.Vector3(x * s2, y * s2, 0)));
+          const ln = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x1673d0, depthTest: false, transparent: true, opacity: 0.9 }));
+          const fill = new THREE.Mesh(new THREE.PlaneGeometry(s2 * 2, s2 * 2), new THREE.MeshBasicMaterial({ color: 0x1673d0, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false }));
+          for (const o of [ln, fill]) { o.userData.ownGeo = true; o.quaternion.copy(q); o.position.copy(cp).addScaledVector(pl.normal, eps * 2); o.renderOrder = 20; o.raycast = () => {}; this.capGroup.add(o); }
+          void at;
+        }
+      });
+    }
+    this.request();
+  }
+  /** Elige un punto del modelo con un clic (con la normal de la cara); `snap`: ajusta al vértice más cercano */
+  pickPoint(snap: boolean, cb: (p: [number, number, number], n: [number, number, number]) => void) {
+    this.pickOff?.();
+    const cvs = this.renderer.domElement, ray = new THREE.Raycaster();
+    cvs.style.cursor = 'crosshair';
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const r = cvs.getBoundingClientRect();
+      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
+      const hits = ray.intersectObjects(this.clipTargets, true).filter((h: any) => h.object.isMesh && !(h.object instanceof LineSegments2) && h.face);
+      const h = hits.find((x) => this.renderer.clippingPlanes.every((pl) => pl.distanceToPoint(x.point) >= -1e-6));
+      if (!h) return;
+      e.stopPropagation(); e.preventDefault();
+      let p = h.point.clone();
+      if (snap) {
+        const g = (h.object as THREE.Mesh).geometry, pos = g.getAttribute('position'), mw = h.object.matrixWorld;
+        let best = Infinity;
+        for (const i of [h.face!.a, h.face!.b, h.face!.c]) { const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mw); const d = v.distanceTo(h.point); if (d < best) { best = d; p = v; } }
+      }
+      const n = h.face!.normal.clone().transformDirection(h.object.matrixWorld).normalize();
+      off(); cb([p.x, p.y, p.z].map((x) => Math.round(x * 1000) / 1000) as [number, number, number], [n.x, n.y, n.z]);
+    };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') off(); };
+    const off = () => { cvs.removeEventListener('pointerdown', down, true); window.removeEventListener('keydown', key, true); cvs.style.cursor = ''; this.pickOff = undefined; };
+    cvs.addEventListener('pointerdown', down, true); window.addEventListener('keydown', key, true);
+    this.pickOff = off;
+  }
   /** Vista de sección (plano por el modelo con desfase e inversión), estilo alámbrico y líneas ocultas. */
   applyVisual(clip: '' | 'X' | 'Y' | 'Z', wire: boolean, meshes: THREE.Object3D[]) {
-    const viewOpts = { style: useStore.getState().hud.style, clipOff: useStore.getState().hud.clipOff, clipFlip: useStore.getState().hud.clipFlip };
-    const c = this.bbox.getCenter(new THREE.Vector3()), size = this.bbox.getSize(new THREE.Vector3());
-    const ax = clip === 'X' ? 0 : clip === 'Y' ? 1 : 2;
-    const n = clip === 'X' ? new THREE.Vector3(-1, 0, 0) : clip === 'Y' ? new THREE.Vector3(0, -1, 0) : new THREE.Vector3(0, 0, -1);
-    const pt = c.clone(); pt.setComponent(ax, c.getComponent(ax) + viewOpts.clipOff * size.getComponent(ax));
-    if (viewOpts.clipFlip) n.negate();
-    this.renderer.clippingPlanes = clip ? [new THREE.Plane(n, -n.dot(pt))] : [];
+    const viewOpts = { style: useStore.getState().hud.style };
+    this.clipTargets = meshes; this.hudClip = clip;
+    this.refreshClip();
     const style = wire ? 'shaded' : viewOpts.style;
     const adds: [THREE.Object3D, THREE.Object3D][] = [], dels: THREE.Object3D[] = [];
     for (const m of meshes) m.traverse((o: any) => {

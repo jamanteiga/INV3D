@@ -2,6 +2,7 @@
 // zoom ajustar / encuadre, vista anterior, vista de sección, orientación, estilo de visualización, ocultar/mostrar y escena.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useStore, type HudState } from '../core/store';
+import { toggleClipTool } from './ClipBar';
 
 const sv = (children: ReactNode) => (
   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{children}</svg>
@@ -21,6 +22,7 @@ const ICONS: Record<string, ReactNode> = {
   wire: sv(<><path d={CUBE} /><path d="M4 7.5l8 4.5 8-4.5M12 12v9M4 16.5l8-4.5 8 4.5M12 3v9" opacity=".75" /></>),
   eye: sv(<><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>),
   scene: sv(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 15l5-5 4 4 3-3 6 6" /><circle cx="16" cy="8.5" r="1.6" /></>),
+  clipmode: sv(<><path d="M4 7l8-4 8 4v10l-8 4-8-4z" opacity=".45" /><path d="M2 13h20" strokeWidth="2" /><path d="M4 13l8 4 8-4v4l-8 4-8-4z" fill="currentColor" fillOpacity=".3" /></>),
   caret: <svg viewBox="0 0 10 10" width="8" height="8" aria-hidden><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.4" /></svg>,
 };
 
@@ -64,6 +66,7 @@ export default function HeadsUp({ kind }: { kind: 'part' | 'asm' }) {
       <B icon="zoomarea" title="Zoom encuadre: arrastra un rectángulo (Esc cancela)" onClick={() => s.setView('zoomarea')} />
       <B icon="prev" title="Vista anterior" onClick={() => s.setView('prev')} />
       <span className="hu-sep" />
+      <B icon="clipmode" title="Modo de recorte: corta la pieza o el ensamblaje por planos para ver el interior" onClick={() => toggleClipTool()} active={!!s.clipTool} />
       <div className="hu-dd">
         <B id="sec" icon="section" title="Vista de sección" drop active={!!s.clip} />
         {open === 'sec' && (

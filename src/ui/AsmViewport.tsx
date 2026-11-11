@@ -1,4 +1,5 @@
 import HeadsUp from './HeadsUp';
+import ClipBar from './ClipBar';
 import { insertPoint } from '../core/epoints';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -608,6 +609,7 @@ export default function AsmViewport() {
     <div className={`viewport scene-${hud.scene} ${hud.cube ? '' : 'no-cube'}`} ref={host}>
       <div className="viewcube" ref={cubeHost} />
       <HeadsUp kind="asm" />
+      <ClipBar />
       <button className="vp-home" title="Vista de inicio (F6)" onClick={() => useStore.getState().setView('home')}>
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </button>

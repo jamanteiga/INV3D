@@ -1,6 +1,7 @@
 import { femColor } from './FemPanel';
 import { partEPoints } from '../core/epoints';
 import HeadsUp from './HeadsUp';
+import ClipBar from './ClipBar';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useStore, activeSketch, type State } from '../core/store';
@@ -1478,6 +1479,7 @@ export default function PartViewport() {
     <div className={`viewport scene-${hud.scene} ${hud.cube ? '' : 'no-cube'}`} ref={host}>
       <div className="viewcube" ref={cubeHost} />
       <HeadsUp kind="part" />
+      <ClipBar />
       {ctxEdit && ctxEdit.part === active && (
         <div className="ctx-bar">
           <span>Edición en contexto · <b>{ctxEdit.asmName}</b></span>

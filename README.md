@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.21
+## Versión 0.22
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,8 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Modo de recorte** (Vista › Vista de corte › Modo de recorte, o el botón de la barra de vista): barra flotante para cortar pieza o ensamblaje y ver el interior. Modos **plano** (oculta un lado), **franja** (deja solo la rebanada entre dos planos) y **M** (manual): plano por un **punto 3D** (sobre cara, vértice o coordenadas XYZ) en la dirección **−X/+X/−Y/+Y/−Z/+Z**, avance con las flechas según el **paso** y deslizador de posición hasta el extremo del modelo. Planos **XYc/XZc/YZc** con **tapa** rellena en la cara cortada, **XY/XZ/YZ** solo recorte y **\*** plano libre por cara. **R** invierte el lado oculto, el ojo muestra u oculta el plano y **×** quita el recorte.
 
 **Estilos de iconos** (Vista › Estilo de iconos, o Archivo › Opciones › General con vista previa): **Estilo 1** (línea, el original), **Estilo 2** (plano, gris azulado con la operación en azul y acentos naranja), **Estilo 3** (sombreado gris con degradados, operación en amarillo, bocetos en azul y sombra) y **Estilo 4** (brillante: protusiones amarillas, vaciados rojos, superficies verdes, bocetos azules, contorno negro y reflejos). Unos 70 iconos principales dibujados en perspectiva isométrica; el resto se adapta en color. Iconos un 20 % mayores.
 
