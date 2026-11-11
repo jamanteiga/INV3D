@@ -1,18 +1,13 @@
-import { makeEval } from '../core/expr';
-import { hasSubs, expandAsm, normalizeAsm } from '../core/subasm';
-import { docGetter } from '../core/store';
-import { solveAssembly } from '../core/asm';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, type State } from '../core/store';
 import { cad, type ProjSource } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
-import { SHEETS, VIEW_CAMERAS, VIEW_NAMES, nextLabel, drawStyle, type DrawingDoc, type DView, type DAnn, type DDim } from '../core/drawing';
+import { SHEETS, VIEW_CAMERAS, VIEW_NAMES, nextLabel, type DrawingDoc, type DView, type DAnn } from '../core/drawing';
 import { v3, uid, type PartDoc, type V3 } from '../core/doc';
 import type { AsmDoc } from '../core/asm';
 import { fmt } from '../core/expr';
 import { bomRows } from './bom';
-import { modelDims, refreshModelDims, type ModelDim } from '../core/retrieve';
-import { buildSheet, dimGeometry, geomOf, detectCircles, chainSegments, breakMap, tbHeight, BREAK_GAP, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
+import { buildSheet, geomOf, detectCircles, chainSegments, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
 
 export type { ProjData };
 const projStore = new WeakMap<object, Map<string, Promise<ProjData>>>();
@@ -24,9 +19,7 @@ export function sourceFor(s: State, id: string): ProjSource | null {
   if (!d) return null;
   if ((d as PartDoc).format === 'inv3d.part') return { kind: 'part', doc: d as PartDoc };
   if ((d as AsmDoc).format === 'inv3d.assembly') {
-    let a = d as AsmDoc;
-    const get = docGetter(s), ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
-    if (hasSubs(a, get)) a = expandAsm(a, solveAssembly(normalizeAsm(a, get, ev), ev).xf, get, ev);
+    const a = d as AsmDoc;
     return { kind: 'asm', asm: a, parts: s.partsMap([...new Set(a.occurrences.map((o) => o.part))]) };
   }
   return null;
@@ -34,10 +27,6 @@ export function sourceFor(s: State, id: string): ProjSource | null {
 
 /** Cámara de una vista: dirección hacia el observador y eje X de la hoja. */
 export function viewCamera(v: DView): { toward: V3; x: V3; up: V3 } {
-  if (v.kind === 'aux' && v.aux) {
-    const toward = v3.norm(v.aux.toward), x = v3.norm(v.aux.x);
-    return { toward, x, up: v3.cross(toward, x) };
-  }
   if (v.kind === 'section' && v.section) {
     const toward = v3.mul(v3.norm(v.section.normal), -1), x = v3.norm(v.section.x);
     return { toward, x, up: v3.cross(toward, x) };
@@ -54,27 +43,16 @@ export function getProjection(s: State, v: DView): Promise<ProjData> | null {
   const key = src.kind === 'part' ? src.doc : src.asm;
   let m = projStore.get(key);
   if (!m) { m = new Map(); projStore.set(key, m); }
-  const k = v.breakout ? `${v.dir}|bo|${JSON.stringify(v.breakout)}` : v.kind === 'section' ? JSON.stringify(v.section && [v.section.origin, v.section.normal, v.section.x, v.section.path ?? null]) : v.kind === 'aux' ? JSON.stringify(v.aux && [v.aux.toward, v.aux.x]) : v.kind === 'flat' ? 'flat' : v.dir;
-  if (!m.has(k) && v.kind === 'flat') {
-    if (src.kind !== 'part') return null;
-    const pr = cad.flat(src.doc).then((r) => {
-      const vis = r.paths.flatMap((d) => flattenPath(d)).map((pl) => pl.map(([x, y]) => [x, -y] as P2));
-      const data: ProjData = { vis, hid: [], cut: [], bbox: bboxOf(vis), circles: detectCircles(vis), center: [0, 0, 0], bends: r.bends.map((b) => ({ a: b.a as P2, b: b.b as P2, label: b.label })), flat: { t: r.t, r: r.r, k: r.k } };
-      resolved.set(pr, data);
-      return data;
-    });
-    m.set(k, pr);
-  }
+  const k = v.kind === 'section' ? JSON.stringify(v.section && [v.section.origin, v.section.normal, v.section.x]) : v.dir;
   if (!m.has(k)) {
     const cam = viewCamera(v);
-    const sec = v.kind === 'section' && v.section ? { origin: v.section.origin, normal: v.section.normal, ...(v.section.path ? { path: v.section.path, toward: v.section.toward } : {}) } : undefined;
-    const pr = cad.project(src, cam.toward, cam.x, sec, v.breakout).then((r) => {
+    const pr = cad.project(src, cam.toward, cam.x, v.kind === 'section' && v.section ? { origin: v.section.origin, normal: v.section.normal } : undefined).then((r) => {
       // replicad devuelve Y hacia abajo: se invierte para tener Y hacia arriba (coincide con (p - c)·arriba)
       const flip = (polys: P2[][]) => polys.map((pp) => pp.map(([x, y]) => [x, -y] as P2));
       const vis = flip(r.visible.flatMap((d) => flattenPath(d)));
       const hid = flip(r.hidden.flatMap((d) => flattenPath(d)));
       const cut = chainSegments(r.cut ?? []);
-      const data: ProjData = { vis, hid, cut, bbox: bboxOf([...vis, ...hid]), circles: detectCircles(vis), center: r.center, anchors: r.anchors };
+      const data: ProjData = { vis, hid, cut, bbox: bboxOf([...vis, ...hid]), circles: detectCircles(vis), center: r.center };
       resolved.set(pr, data);
       return data;
     });
@@ -85,20 +63,18 @@ export function getProjection(s: State, v: DView): Promise<ProjData> | null {
 const projNow = (s: State) => (v: DView): ProjData | null => { const p = getProjection(s, v); return p ? resolved.get(p) ?? null : null; };
 
 /** Tabla de lista de piezas para el plano (encima del cajetín). */
-/** Recorta un texto para que quepa en la celda (con puntos suspensivos) */
-const clip = (t: string, n: number) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
 export function bomForDrawing(s: State, drw: DrawingDoc) {
   if (!drw.bom) return null;
   const v = drw.views.find((x) => x.id === drw.bom!.view) ?? drw.views[0];
   if (!v) return null;
   const d = s.docData(v.source) as AsmDoc | null;
   if (!d || d.format !== 'inv3d.assembly') return null;
-  const rows = bomRows(s, d).filter((r) => (r.level ?? 0) === 0);
+  const rows = bomRows(s, d);
   const [W] = SHEETS[drw.sheet];
   const cols = [{ w: 10, k: 'item' }, { w: 12, k: 'qty' }, { w: 45, k: 'pn' }, { w: 63, k: 'desc' }, { w: 30, k: 'mat' }, { w: 20, k: 'mass' }] as const;
-  const x0 = W - 10 - 180, y0 = 10 + tbHeight(drw);
+  const x0 = W - 10 - 180, y0 = 10 + 32;
   const all = [{ item: 'Pos.', qty: 'Cant.', pn: 'Nº de pieza', desc: 'Descripción', mat: 'Material', mass: 'Masa kg' }, ...rows.slice(0, 30).map((r, i) => ({
-    item: String(i + 1), qty: String(r.qty), pn: clip(r.pn, 26), desc: clip(r.desc, 38), mat: clip(r.material, 17), mass: r.mass ? fmt(r.mass, 2) : '',
+    item: String(i + 1), qty: String(r.qty), pn: r.pn, desc: r.desc, mat: r.material, mass: r.mass ? fmt(r.mass, 2) : '',
   }))];
   return all.reverse().map((r, i) => {
     let x = x0;
@@ -111,26 +87,10 @@ export async function sheetPrims(s: State): Promise<{ W: number; H: number; prim
   const drw = s.drw;
   await Promise.all(drw.views.map((v) => getProjection(s, v)).filter(Boolean));
   const [W, H] = SHEETS[drw.sheet];
-  return { W, H, prims: buildSheet({ drw: withModelDims(s, drw), proj: projNow(s), bom: bomForDrawing(s, drw) }) };
+  return { W, H, prims: buildSheet({ drw, proj: projNow(s), bom: bomForDrawing(s, drw) }) };
 }
 
 export function viewGeom(s: State, v: DView): ViewGeom | null { return geomOf(s.drw, projNow(s), v); }
-
-/** Cotas del modelo visibles en una vista (para recuperarlas o actualizarlas). */
-export function viewModelDims(s: State, drw: DrawingDoc, v: DView): ModelDim[] {
-  const src = s.docData(v.source) as PartDoc | null;
-  if (!src || src.format !== 'inv3d.part' || v.kind === 'flat' || v.kind === 'detail') return [];
-  const pd = projNow(s)(v), g = pd && geomOf(drw, projNow(s), v);
-  if (!pd || !g) return [];
-  try { return modelDims(src, v, viewCamera(v), pd, g); } catch { return []; }
-}
-/** Plano con las cotas asociativas recalculadas a partir del modelo actual. */
-export function withModelDims(s: State, drw: DrawingDoc): DrawingDoc {
-  if (!drw.dims.some((d) => d.ref)) return drw;
-  let dims = drw.dims;
-  for (const v of drw.views) if (dims.some((d) => d.ref && d.view === v.id)) dims = refreshModelDims(dims, v, viewModelDims(s, drw, v));
-  return { ...drw, dims };
-}
 
 const TOOL_HINT: Record<string, string[]> = {
   drwDim: ['Cota: primer punto (extremo o centro)', 'Segundo punto de la misma vista', 'Posición de la línea de cota'],
@@ -147,15 +107,6 @@ const TOOL_HINT: Record<string, string[]> = {
   drwSection: ['Sección: primer punto de la línea de corte', 'Segundo punto de la línea de corte'],
   drwDetail: ['Detalle: centro de la zona', 'Radio de la zona'],
   drwNote: ['Nota: clic para colocar'],
-  drwAux: ['Vista auxiliar: elige una arista de una vista (la vista se mira perpendicular a ella)', 'Posición de la vista auxiliar'],
-  drwBreak: ['Vista partida: primer punto de rotura sobre una vista', 'Segundo punto (la rotura es horizontal o vertical según el arrastre)'],
-  drwCrop: ['Recortar vista: primera esquina del rectángulo sobre una vista', 'Esquina opuesta'],
-  drwOrd: ['Cota por coordenadas: origen (punto 0)', 'Punto a acotar', 'Posición del texto (arriba/abajo = X, lado = Y) · clic derecho para terminar'],
-  drwBaseline: ['Cotas desde línea base: punto base', 'Puntos a acotar · Intro o clic derecho para crear las cotas'],
-  drwFcf: ['Tolerancia geométrica: punta de la directriz sobre la arista', 'Posición del marco'],
-  drwDatum: ['Referencia (datum): punto sobre la superficie', 'Posición del recuadro'],
-  drwSectionPath: ['Sección escalonada: primer punto de la línea de corte', 'Siguientes puntos · Intro o clic derecho para terminar'],
-  drwBreakout: ['Corte parcial: primera esquina sobre la vista', 'Esquina opuesta'],
 };
 
 export default function DrawingView() {
@@ -171,7 +122,7 @@ export default function DrawingView() {
   useEffect(() => setVb([-10, -10, W + 20, H + 20]), [W, H]);
   const [clicks, setClicks] = useState<{ view?: string; pts: P2[]; refs: any[] }>({ pts: [], refs: [] });
   const [cursor, setCursor] = useState<P2 | null>(null);
-  const drag = useRef<{ id: string; kind: 'view' | 'block' | 'note' | 'ann' | 'dim' | 'table'; start: P2; orig: any; pushed?: boolean } | null>(null);
+  const drag = useRef<{ id: string; kind: 'view' | 'note' | 'ann' | 'dim'; start: P2; orig: any; pushed?: boolean } | null>(null);
   const pan = useRef<{ start: [number, number]; vb: [number, number, number, number] } | null>(null);
 
   // Cargar proyecciones
@@ -196,7 +147,7 @@ export default function DrawingView() {
   const pxPerMm = () => { const r = svgRef.current?.getBoundingClientRect(); return r ? Math.min(r.width / vb[2], r.height / vb[3]) : 1; };
 
   const s0 = useStore.getState();
-  const prims = useMemo(() => { const st = useStore.getState(); return buildSheet({ drw: withModelDims(st, drw), proj: projNow(st), bom: bomForDrawing(st, drw) }); }, [drw, docsVersion, loading, s0.asm]);
+  const prims = useMemo(() => buildSheet({ drw, proj: projNow(useStore.getState()), bom: bomForDrawing(useStore.getState(), drw) }), [drw, docsVersion, loading, s0.asm]);
   const geoms = useMemo(() => { const out: Record<string, ViewGeom> = {}; for (const v of drw.views) { const g = viewGeom(useStore.getState(), v); if (g) out[v.id] = g; } return out; }, [drw, docsVersion, loading]);
 
   // ---------- Forzado ----------
@@ -229,14 +180,6 @@ export default function DrawingView() {
   };
   const viewAt = (p: P2) => drw.views.find((v) => { const g = geoms[v.id]; return g && p[0] >= g.rect[0] - 3 && p[0] <= g.rect[2] + 3 && p[1] >= g.rect[1] - 3 && p[1] <= g.rect[3] + 3; });
   const rel = (v: DView, p: P2): [number, number] => [p[0] - v.x, p[1] - v.y];
-  /** Cota lineal provisional: tipo y desfase según la posición del cursor (la cota sigue al ratón) */
-  const linearDimAt = (A: P2, B: P2, p: P2): { kind: 'h' | 'v'; offset: number } => {
-    const mid: P2 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
-    const dx = Math.abs(p[0] - mid[0]), dy = Math.abs(p[1] - mid[1]);
-    const kind: 'h' | 'v' = Math.abs(B[0] - A[0]) < 1e-6 ? 'v' : Math.abs(B[1] - A[1]) < 1e-6 ? 'h' : dy >= dx ? 'h' : 'v';
-    const offset = kind === 'h' ? p[1] - Math.max(A[1], B[1]) : p[0] - Math.max(A[0], B[0]);
-    return { kind, offset };
-  };
 
   const addAnn = (a: Omit<DAnn, 'id'>) => { const id = uid('an'); useStore.getState().commitDrw((d) => { (d.anns ??= []).push({ ...a, id }); }); useStore.setState({ selItem: id }); };
   const reset = () => setClicks({ pts: [], refs: [] });
@@ -257,7 +200,10 @@ export default function DrawingView() {
         }
         const v = drw.views.find((x) => x.id === clicks.view)!;
         const [A, B] = P;
-        const { kind, offset } = linearDimAt(A, B, p);
+        const mid: P2 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+        const dx = Math.abs(p[0] - mid[0]), dy = Math.abs(p[1] - mid[1]);
+        const kind: 'h' | 'v' = Math.abs(B[0] - A[0]) < 1e-6 ? 'v' : Math.abs(B[1] - A[1]) < 1e-6 ? 'h' : dy >= dx ? 'h' : 'v';
+        const offset = kind === 'h' ? p[1] - Math.max(A[1], B[1]) : p[0] - Math.max(A[0], B[0]);
         s.commitDrw((d) => { d.dims.push({ id: uid('dm'), view: v.id, a: rel(v, A), b: rel(v, B), offset, kind }); });
         reset(); return;
       }
@@ -308,27 +254,6 @@ export default function DrawingView() {
         reset(); return;
       }
       if (tool === 'drwSurface') { addAnn({ kind: 'surface', pts: [snapPoint(p)?.pt ?? p], text: 'Ra 3,2' }); return; }
-      if (tool === 'drwSectionPath') {
-        const q = snapPoint(p)?.pt ?? p;
-        if (!P.length) { const v = viewAt(p); if (!v || v.kind === 'detail' || v.dir === 'iso') { s.notify('Haz clic sobre una vista ortogonal', 'error'); return; } setClicks({ view: v.id, pts: [q], refs: [] }); return; }
-        // tramos horizontales/verticales si casi lo son
-        const L = P[P.length - 1];
-        let B = q;
-        if (Math.abs(B[1] - L[1]) < Math.abs(B[0] - L[0]) * 0.08) B = [B[0], L[1]];
-        else if (Math.abs(B[0] - L[0]) < Math.abs(B[1] - L[1]) * 0.08) B = [L[0], B[1]];
-        setClicks({ ...clicks, pts: [...P, B] }); return;
-      }
-      if (tool === 'drwBreakout') {
-        if (!P.length) { const v = viewAt(p); if (!v || v.kind !== 'base' && v.kind !== 'proj' && v.kind !== undefined) { s.notify('Haz clic sobre una vista base o proyectada', 'error'); return; } setClicks({ view: v.id, pts: [p], refs: [] }); return; }
-        const v = drw.views.find((x) => x.id === clicks.view)!;
-        const A = P[0];
-        if (Math.abs(p[0] - A[0]) < 2 || Math.abs(p[1] - A[1]) < 2) { s.notify('Contorno demasiado pequeño', 'error'); return; }
-        const dep = prompt('Profundidad del corte parcial (mm) desde la cara más cercana:', '10');
-        reset(); s.setTool(null);
-        if (!dep) return;
-        createBreakout(v, [A, [p[0], A[1]], p, [A[0], p[1]]], Number(dep.replace(',', '.')) || 10);
-        return;
-      }
       if (tool === 'drwSection') {
         if (!P.length) { const v = viewAt(p); if (!v || v.kind === 'detail' || v.dir === 'iso') { s.notify('Haz clic sobre una vista ortogonal', 'error'); return; } setClicks({ view: v.id, pts: [snapPoint(p)?.pt ?? p], refs: [] }); return; }
         let B = snapPoint(p)?.pt ?? p;
@@ -344,58 +269,6 @@ export default function DrawingView() {
         createDetail(drw.views.find((x) => x.id === clicks.view)!, P[0], Math.hypot(p[0] - P[0][0], p[1] - P[0][1]));
         reset(); s.setTool(null); return;
       }
-      if (tool === 'drwAux') {
-        if (!clicks.refs.length) {
-          const sg = segAt(p); const v = sg && drw.views.find((x) => x.id === sg.view);
-          if (!sg || !v || v.kind === 'detail' || v.kind === 'flat' || v.dir === 'iso' && v.kind !== 'aux') { s.notify('Elige una arista recta de una vista ortogonal', 'error'); return; }
-          setClicks({ view: sg.view, pts: [[(sg.a[0] + sg.b[0]) / 2, (sg.a[1] + sg.b[1]) / 2]], refs: [sg] }); return;
-        }
-        createAux(drw.views.find((x) => x.id === clicks.view)!, clicks.refs[0], p);
-        reset(); s.setTool(null); return;
-      }
-      if (tool === 'drwBreak' || tool === 'drwCrop') {
-        if (!P.length) { const v = viewAt(p); if (!v || v.kind === 'detail') { s.notify('Haz clic dentro de una vista (no de detalle)', 'error'); return; } setClicks({ view: v.id, pts: [p], refs: [] }); return; }
-        const v = drw.views.find((x) => x.id === clicks.view)!, A = P[0];
-        if (tool === 'drwCrop') {
-          if (Math.abs(p[0] - A[0]) < 2 || Math.abs(p[1] - A[1]) < 2) { s.notify('Rectángulo demasiado pequeño', 'error'); return; }
-          s.commitDrw((d) => { d.views.find((x) => x.id === v.id)!.crop = [A[0] - v.x, A[1] - v.y, p[0] - v.x, p[1] - v.y]; });
-        } else {
-          const bm = breakMap(v), axis: 'x' | 'y' = Math.abs(p[0] - A[0]) >= Math.abs(p[1] - A[1]) ? 'x' : 'y', i = axis === 'x' ? 0 : 1;
-          const m1 = bm.inv(axis, A[i] - (i ? v.y : v.x)), m2 = bm.inv(axis, p[i] - (i ? v.y : v.x));
-          if (Math.abs(m2 - m1) * v.scale < BREAK_MIN) { s.notify('Tramo de rotura demasiado corto', 'error'); return; }
-          s.commitDrw((d) => { const t = d.views.find((x) => x.id === v.id)!; (t.breaks ??= []).push({ axis, a: Math.min(m1, m2), b: Math.max(m1, m2) }); });
-        }
-        reset(); s.setTool(null); return;
-      }
-      if (tool === 'drwOrd') {
-        if (P.length < 2) {
-          const sp = snapPoint(p); if (!sp) return;
-          if (!P.length) setClicks({ view: sp.view, pts: [sp.pt], refs: [] });
-          else if (sp.view === clicks.view) setClicks({ ...clicks, pts: [...P, sp.pt] });
-          return;
-        }
-        const v = drw.views.find((x) => x.id === clicks.view)!;
-        const [O, B] = P, axis: 'x' | 'y' = Math.abs(p[1] - B[1]) >= Math.abs(p[0] - B[0]) ? 'x' : 'y';
-        const C: P2 = axis === 'x' ? [B[0], p[1]] : [p[0], B[1]];
-        s.commitDrw((d) => { d.dims.push({ id: uid('dm'), view: v.id, kind: 'ord', axis, a: rel(v, O), b: rel(v, B), c: rel(v, C), offset: 0 }); });
-        setClicks({ view: v.id, pts: [O], refs: [] }); return;
-      }
-      if (tool === 'drwBaseline') {
-        const sp = snapPoint(p); if (!sp) return;
-        if (P.length && sp.view !== clicks.view) return;
-        setClicks({ view: sp.view, pts: [...P, sp.pt], refs: [] }); return;
-      }
-      if (tool === 'drwFcf' || tool === 'drwDatum') {
-        const q = snapPoint(p)?.pt ?? p;
-        if (!P.length) { setClicks({ pts: [q], refs: [] }); return; }
-        if (tool === 'drwFcf') addAnn({ kind: 'fcf', pts: [P[0], p], sym: 'flat', text: '0,05' });
-        else {
-          const used = (drw.anns ?? []).filter((a) => a.kind === 'datum').map((a) => a.text);
-          const letter = [...'ABCDEFGHJKLMNPRSTUVWXYZ'].find((c) => !used.includes(c)) ?? 'A';
-          addAnn({ kind: 'datum', pts: [P[0], p], text: letter });
-        }
-        reset(); return;
-      }
       if (tool === 'drwNote') {
         s.commitDrw((d) => { d.notes.push({ id: uid('nt'), x: p[0], y: p[1], text: 'Nota', size: 3.5 }); });
         s.setTool(null); return;
@@ -408,27 +281,11 @@ export default function DrawingView() {
     if (note) { useStore.setState({ selItem: note.id }); drag.current = { id: note.id, kind: 'note', start: p, orig: [note.x, note.y] }; return; }
     const ann = (drw.anns ?? []).find((a) => a.id === hitId);
     if (ann) { useStore.setState({ selItem: ann.id }); drag.current = { id: ann.id, kind: 'ann', start: p, orig: ann.pts.map((q) => [...q]) }; return; }
-    const tab = (drw.tables ?? []).find((t) => t.id === hitId);
-    if (tab) { useStore.setState({ selItem: tab.id }); drag.current = { id: tab.id, kind: 'table', start: p, orig: [tab.x, tab.y] }; return; }
     const dim = drw.dims.find((d) => d.id === hitId);
-    if (dim) { useStore.setState({ selItem: dim.id }); drag.current = { id: dim.id, kind: 'dim', start: p, orig: { offset: dim.offset, b: [...dim.b], c: [...(dim.c ?? dim.b)] } }; return; }
+    if (dim) { useStore.setState({ selItem: dim.id }); drag.current = { id: dim.id, kind: 'dim', start: p, orig: { offset: dim.offset, b: [...dim.b] } }; return; }
     const v = (hitId && drw.views.find((x) => x.id === hitId)) || viewAt(p);
     useStore.setState({ selItem: v?.id ?? null });
-    if (v && (e.ctrlKey || e.metaKey)) {
-      // Ctrl + arrastrar: la vista base y todas las que dependen de ella se mueven en bloque
-      let root = v; while (root.parent) { const pr = drw.views.find((x) => x.id === root.parent); if (!pr) break; root = pr; }
-      const fam = new Set([root.id]); let grew = true;
-      while (grew) { grew = false; for (const x of drw.views) if (x.parent && fam.has(x.parent) && !fam.has(x.id)) { fam.add(x.id); grew = true; } }
-      useStore.setState({ selItem: root.id });
-      drag.current = { id: root.id, kind: 'block', start: p, orig: Object.fromEntries(drw.views.filter((x) => fam.has(x.id)).map((x) => [x.id, [x.x, x.y]])) };
-    } else if (v) drag.current = { id: v.id, kind: 'view', start: p, orig: [v.x, v.y] };
-  };
-  const onDbl = (e: React.MouseEvent) => {
-    if (tool) return;
-    const hitId = (e.target as Element).closest?.('[data-id]')?.getAttribute('data-id');
-    const p = toSheet(e as unknown as React.PointerEvent);
-    const v = (hitId && drw.views.find((x) => x.id === hitId)) || viewAt(p);
-    if (v) useStore.getState().open({ kind: 'drwviewprops', view: v.id });
+    if (v) drag.current = { id: v.id, kind: 'view', start: p, orig: [v.x, v.y] };
   };
   const onMove = (e: React.PointerEvent) => {
     if (pan.current) {
@@ -445,21 +302,7 @@ export default function DrawingView() {
       if (!dr.pushed) { dr.pushed = true; const st = useStore.getState(); useStore.setState({ past: [...st.past.slice(-99), st.drw], future: [], dirty: true }); }
       useStore.setState((s) => {
         const d = s.drw;
-        if (dr.kind === 'block') return { drw: { ...d, views: d.views.map((q) => (dr.orig[q.id] ? { ...q, x: dr.orig[q.id][0] + dx, y: dr.orig[q.id][1] + dy } : q)) } };
-        if (dr.kind === 'view') {
-          // proyectadas y auxiliares: solo se desplazan alineadas con su vista padre; base, sección, detalle e isométrica, libres
-          const q = d.views.find((x) => x.id === dr.id)!, pv = q.parent ? d.views.find((x) => x.id === q.parent) : null;
-          let mx = dx, my = dy;
-          if (pv && (q.kind === 'proj' || !q.kind) && q.dir !== 'iso') {
-            const horiz = Math.abs(dr.orig[1] - pv.y) < 1e-6, vert = Math.abs(dr.orig[0] - pv.x) < 1e-6;
-            if (horiz) my = 0; else if (vert) mx = 0;
-          } else if (pv && q.kind === 'aux' && q.aux) {
-            const n = q.aux.n2, L = Math.hypot(n[0], n[1]) || 1, t = (dx * n[0] + dy * n[1]) / L;
-            mx = (n[0] / L) * t; my = (n[1] / L) * t;
-          }
-          return { drw: { ...d, views: moveView(d.views, dr.id, dr.orig[0] + mx, dr.orig[1] + my) } };
-        }
-        if (dr.kind === 'table') return { drw: { ...d, tables: (d.tables ?? []).map((t) => (t.id === dr.id ? { ...t, x: dr.orig[0] + dx, y: dr.orig[1] + dy } : t)) } };
+        if (dr.kind === 'view') return { drw: { ...d, views: moveView(d.views, dr.id, dr.orig[0] + dx, dr.orig[1] + dy) } };
         if (dr.kind === 'note') return { drw: { ...d, notes: d.notes.map((n) => (n.id === dr.id ? { ...n, x: dr.orig[0] + dx, y: dr.orig[1] + dy } : n)) } };
         if (dr.kind === 'ann') return { drw: { ...d, anns: (d.anns ?? []).map((a) => (a.id === dr.id ? { ...a, pts: (dr.orig as P2[]).map((q, i) => (i === 0 && a.kind !== 'surface' && a.kind !== 'centermark' && a.kind !== 'centerline' ? q : [q[0] + dx, q[1] + dy] as P2)) } : a)) } };
         return { drw: { ...d, dims: d.dims.map((m) => {
@@ -467,7 +310,6 @@ export default function DrawingView() {
           if (m.kind === 'h') return { ...m, offset: dr.orig.offset + dy };
           if (m.kind === 'v') return { ...m, offset: dr.orig.offset + dx };
           if (m.kind === 'a') { const L = Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1]) || 1; return { ...m, offset: dr.orig.offset + (-(m.b[1] - m.a[1]) * dx + (m.b[0] - m.a[0]) * dy) / L }; }
-          if (m.kind === 'ord') { const c = m.c ?? m.b; return { ...m, c: (m.axis === 'y' ? [dr.orig.c[0] + dx, c[1]] : [c[0], dr.orig.c[1] + dy]) as P2 }; }
           if (m.kind === 'ang') return { ...m, offset: Math.max(4, dr.orig.offset + Math.hypot(dx, dy) * Math.sign(dx + dy)) };
           return { ...m, b: [dr.orig.b[0] + dx, dr.orig.b[1] + dy] as P2 };
         }) } };
@@ -481,37 +323,11 @@ export default function DrawingView() {
     setVb([p[0] - (p[0] - vb[0]) * k, yTop - (yTop - vb[1]) * k, vb[2] * k, vb[3] * k]);
   };
   useEffect(() => { reset(); }, [tool]);
-  const finishPath = () => {
-    const P = clicks.pts, v = drw.views.find((x) => x.id === clicks.view);
-    if (!v || P.length < 3) { if (P.length === 2 && v) createSection(v, P[0], P[1]); reset(); return; }
-    createSection(v, P[0], P[P.length - 1], P.slice(1, -1));
-    reset(); useStore.getState().setTool(null);
-  };
-  const finishBaseline = () => {
-    const P = clicks.pts, v = drw.views.find((x) => x.id === clicks.view), g = v && geoms[v.id];
-    if (!v || !g || P.length < 2) { reset(); return; }
-    const [B0, ...rest] = P;
-    const sx = Math.max(...P.map((q) => q[0])) - Math.min(...P.map((q) => q[0])), sy = Math.max(...P.map((q) => q[1])) - Math.min(...P.map((q) => q[1]));
-    const kind: 'h' | 'v' = sx >= sy ? 'h' : 'v';
-    const pts = rest.sort((a, b) => (kind === 'h' ? Math.abs(a[0] - B0[0]) - Math.abs(b[0] - B0[0]) : Math.abs(a[1] - B0[1]) - Math.abs(b[1] - B0[1])));
-    useStore.getState().commitDrw((d) => {
-      pts.forEach((q, i) => {
-        const line = kind === 'h' ? g.rect[3] + 8 + i * 7 : g.rect[2] + 8 + i * 7;
-        const offset = kind === 'h' ? line - Math.max(B0[1], q[1]) : line - Math.max(B0[0], q[0]);
-        d.dims.push({ id: uid('dm'), view: v.id, kind, a: rel(v, B0), b: rel(v, q), offset });
-      });
-    });
-    reset();
-  };
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === 'Enter' && tool === 'drwBaseline') finishBaseline(); if (e.key === 'Enter' && tool === 'drwSectionPath') finishPath(); };
-    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
-  });
 
   const Y = (y: number) => H - y;
   const pl = (pts: P2[]) => pts.map((q) => `${q[0].toFixed(3)},${Y(q[1]).toFixed(3)}`).join(' ');
   const loopsPath = (loops: P2[][]) => loops.map((l) => 'M' + l.map((q) => `${q[0].toFixed(3)} ${Y(q[1]).toFixed(3)}`).join('L') + 'Z').join('');
-  const CLS: Record<string, string> = { vis: 'ln-vis', hid: 'ln-hid', frame: 'sh-frame', dim: 'ln-dim', center: 'ln-center', thin: 'ln-thin', thick: 'ln-thick', ann: 'ln-ann', cutline: 'ln-cut', cutend: 'ln-thick', detailc: 'ln-detail', tb: 'tb-cell' };
+  const CLS: Record<string, string> = { vis: 'ln-vis', hid: 'ln-hid', frame: 'sh-frame', dim: 'ln-dim', center: 'ln-center', thin: 'ln-thin', thick: 'ln-thick', ann: 'ln-ann', cutline: 'ln-cut', cutend: 'ln-thick', tb: 'tb-cell' };
   const TCLS: Record<string, string> = { vlabel: 'view-label', 'vlabel big': 'view-label big', dimt: 'dim-text', annt: 'ann-text', note: 'note-text', tbl: 'tb-label', tbv: 'tb-val', tbb: 'tb-big' };
   const viewClip = (id?: string) => { const v = id ? drw.views.find((x) => x.id === id) : null; return v?.kind === 'detail' ? `url(#clip-${v.id})` : undefined; };
   void viewClip;
@@ -520,7 +336,7 @@ export default function DrawingView() {
   return (
     <div className="drawing-host">
       <svg ref={svgRef} className="sheet-svg" viewBox={vb.join(' ')} preserveAspectRatio="xMidYMid meet"
-        onPointerDown={onDown} onDoubleClick={onDbl} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={(e) => { e.preventDefault(); if (tool === 'drwBaseline') finishBaseline(); else if (tool === 'drwSectionPath') finishPath(); else reset(); }}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={(e) => { e.preventDefault(); reset(); }}
         style={{ cursor: tool ? 'crosshair' : 'default' }}>
         <defs>
           <pattern id="hatch45" patternUnits="userSpaceOnUse" width="2.5" height="2.5" patternTransform="rotate(45)">
@@ -549,31 +365,10 @@ export default function DrawingView() {
         })}
         {clicks.pts.map((q, i) => <circle key={i} cx={q[0]} cy={Y(q[1])} r={1.2} className="snap-pt" />)}
         {tool === 'drwDetail' && clicks.pts.length === 1 && cursor && <circle cx={clicks.pts[0][0]} cy={Y(clicks.pts[0][1])} r={Math.hypot(cursor[0] - clicks.pts[0][0], cursor[1] - clicks.pts[0][1])} className="ln-preview" />}
-        {tool === 'drwSectionPath' && clicks.pts.length >= 1 && cursor && <polyline points={pl([...clicks.pts, cursor])} className="ln-preview" />}
-        {tool === 'drwBreakout' && clicks.pts.length === 1 && cursor && <rect x={Math.min(clicks.pts[0][0], cursor[0])} y={Y(Math.max(clicks.pts[0][1], cursor[1]))} width={Math.abs(cursor[0] - clicks.pts[0][0])} height={Math.abs(cursor[1] - clicks.pts[0][1])} className="ln-preview" />}
-        {(tool === 'drwBreak' || tool === 'drwCrop') && clicks.pts.length === 1 && cursor && (tool === 'drwCrop'
-          ? <rect x={Math.min(clicks.pts[0][0], cursor[0])} y={Y(Math.max(clicks.pts[0][1], cursor[1]))} width={Math.abs(cursor[0] - clicks.pts[0][0])} height={Math.abs(cursor[1] - clicks.pts[0][1])} className="ln-preview" />
-          : <polyline points={pl([clicks.pts[0], Math.abs(cursor[0] - clicks.pts[0][0]) >= Math.abs(cursor[1] - clicks.pts[0][1]) ? [cursor[0], clicks.pts[0][1]] : [clicks.pts[0][0], cursor[1]]])} className="ln-preview" />)}
-        {(tool === 'drwAux' || tool === 'drwOrd' || tool === 'drwFcf' || tool === 'drwDatum') && clicks.pts.length >= 1 && cursor && <polyline points={pl([clicks.pts[clicks.pts.length - 1], cursor])} className="ln-preview" />}
         {(tool === 'drwSection' || tool === 'drwCenterline' || tool === 'drwLeader' || tool === 'drwWeld' || tool === 'drwBalloon') && clicks.pts.length === 1 && cursor && <polyline points={pl([clicks.pts[0], cursor])} className="ln-preview" />}
-        {(tool === 'drwDim' || tool === 'drwOrd' || tool === 'drwBaseline' || tool === 'drwFcf' || tool === 'drwDatum' || tool === 'drwLeader' || tool === 'drwCenterline' || tool === 'drwSection' || tool === 'drwSurface') && cursor && (() => { const sp = snapPoint(cursor); return sp ? <circle cx={sp.pt[0]} cy={Y(sp.pt[1])} r={1.6} className="snap-hover" /> : null; })()}
-        {(() => {
-          // Cota provisional que sigue al cursor hasta el clic que la suelta
-          if (!cursor) return null;
-          const v = drw.views.find((x) => x.id === clicks.view); if (!v) return null;
-          let tmp: DDim | null = null;
-          if (tool === 'drwDim' && clicks.pts.length === 2) { const [A, B] = clicks.pts; tmp = { id: '_prev', view: v.id, a: rel(v, A), b: rel(v, B), ...linearDimAt(A, B, cursor) }; }
-          else if ((tool === 'drwDimD' || tool === 'drwDimR') && clicks.pts.length === 1) tmp = { id: '_prev', view: v.id, kind: tool === 'drwDimD' ? 'd' : 'r', a: rel(v, clicks.pts[0]), b: rel(v, cursor), r: clicks.refs[0] as number, offset: 0 };
-          if (!tmp) return null;
-          const g = dimGeometry(tmp, v);
-          return <g className="dim-preview">
-            {g.lines.map((l, i) => <polyline key={i} points={pl(l)} className="ln-dim" />)}
-            {g.arrows.map((a, i) => <polygon key={'a' + i} points={pl(a)} className="arrow" />)}
-            <text x={g.mid[0]} y={Y(g.mid[1])} fontSize={drawStyle(drw).dimTextH} textAnchor="middle" className="dim-text" transform={g.ang ? `rotate(${-g.ang} ${g.mid[0]} ${Y(g.mid[1])})` : undefined}>{g.text}</text>
-          </g>;
-        })()}
+        {(tool === 'drwDim' || tool === 'drwLeader' || tool === 'drwCenterline' || tool === 'drwSection' || tool === 'drwSurface') && cursor && (() => { const sp = snapPoint(cursor); return sp ? <circle cx={sp.pt[0]} cy={Y(sp.pt[1])} r={1.6} className="snap-hover" /> : null; })()}
         {(tool === 'drwDimD' || tool === 'drwDimR' || tool === 'drwHole' || tool === 'drwCenterMark') && cursor && !clicks.pts.length && (() => { const c = circleAt(cursor); return c ? <circle cx={c.c[0]} cy={Y(c.c[1])} r={c.r} className="snap-circle" /> : null; })()}
-        {(tool === 'drwDimA' || (tool === 'drwAux' && !clicks.refs.length)) && cursor && (() => { const sg = segAt(cursor); return sg ? <polyline points={pl([sg.a, sg.b])} className="snap-seg" /> : null; })()}
+        {tool === 'drwDimA' && cursor && (() => { const sg = segAt(cursor); return sg ? <polyline points={pl([sg.a, sg.b])} className="snap-seg" /> : null; })()}
       </svg>
       {hints && <div className="vp-hint">{hints[Math.min(tool === 'drwDimA' ? clicks.refs.length + (clicks.refs.length === 2 ? 0 : 0) : clicks.pts.length, hints.length - 1)]}</div>}
       {!drw.views.length && <div className="drw-empty">Hoja vacía. Usa <b>Vista base</b> en la cinta para colocar una pieza o un ensamblaje abierto.</div>}
@@ -594,7 +389,7 @@ function holeText(s: State, v: DView, dia: number) {
 }
 
 /** Crea una vista de sección a partir de una línea de corte dibujada sobre una vista. */
-function createSection(pv: DView, A: P2, B: P2, mids: P2[] = [], aligned = false) {
+function createSection(pv: DView, A: P2, B: P2) {
   const s = useStore.getState();
   const g = viewGeom(s, pv), p = getProjection(s, pv), pd = p ? resolved.get(p) : null;
   if (!g || !pd) { s.notify('La vista aún no está calculada', 'error'); return; }
@@ -602,7 +397,6 @@ function createSection(pv: DView, A: P2, B: P2, mids: P2[] = [], aligned = false
   const cam = viewCamera(pv);
   const to3 = (q: P2): V3 => { const m = g.inv(q); return v3.add(pd.center, v3.add(v3.mul(cam.x, m[0]), v3.mul(cam.up, m[1]))); };
   const A3 = to3(A), B3 = to3(B);
-  const ptsAll = [A, ...mids, B];
   let n = v3.norm(v3.cross(v3.sub(B3, A3), cam.toward));
   // mirada hacia el lado de la vista padre en que no queda el cursor no se conoce: se toma la normal que apunta «hacia abajo/derecha» en la hoja
   const n2raw: P2 = [v3.dot(n, cam.x), v3.dot(n, cam.up)];
@@ -628,40 +422,9 @@ function createSection(pv: DView, A: P2, B: P2, mids: P2[] = [], aligned = false
   const nv: DView = {
     id, name: `Sección ${label}-${label}`, source: pv.source, dir: pv.dir, scale: pv.scale, hidden: false, parent: pv.id, kind: 'section', label,
     x: px, y: py,
-    section: { origin: A3, normal: n, x, a: [A[0] - pv.x, A[1] - pv.y], b: [B[0] - pv.x, B[1] - pv.y], n2,
-      ...(mids.length ? { pts: ptsAll.map((q) => [q[0] - pv.x, q[1] - pv.y] as P2), path: ptsAll.map(to3), toward: cam.toward, aligned } : {}) },
+    section: { origin: A3, normal: n, x, a: [A[0] - pv.x, A[1] - pv.y], b: [B[0] - pv.x, B[1] - pv.y], n2 },
   };
   s.commitDrw((d) => { d.views.push(nv); });
-  useStore.setState({ selItem: id });
-}
-
-const BREAK_MIN = 4;
-/** Corte parcial: el contorno se guarda en 3D para que no dependa del encuadre de la vista. */
-function createBreakout(v: DView, loop: P2[], depth: number) {
-  const s = useStore.getState();
-  const g = viewGeom(s, v), p = getProjection(s, v), pd = p ? resolved.get(p) : null;
-  if (!g || !pd) { s.notify('La vista aún no está calculada', 'error'); return; }
-  const cam = viewCamera(v);
-  const to3 = (q: P2): V3 => { const m = g.inv(q); return v3.add(pd.center, v3.add(v3.mul(cam.x, m[0]), v3.mul(cam.up, m[1]))); };
-  s.commitDrw((d) => { const t = d.views.find((x) => x.id === v.id)!; t.breakout = { loop: loop.map(to3), depth }; });
-}
-/** Vista auxiliar: mira perpendicular a una arista de la vista padre (verdadera magnitud de caras inclinadas). */
-function createAux(pv: DView, sg: { a: P2; b: P2 }, place: P2) {
-  const s = useStore.getState();
-  const L = Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]); if (L < 1e-6) return;
-  const d: P2 = [(sg.b[0] - sg.a[0]) / L, (sg.b[1] - sg.a[1]) / L];
-  const mid: P2 = [(sg.a[0] + sg.b[0]) / 2, (sg.a[1] + sg.b[1]) / 2];
-  let n2: P2 = [-d[1], d[0]];
-  if ((place[0] - mid[0]) * n2[0] + (place[1] - mid[1]) * n2[1] < 0) n2 = [-n2[0], -n2[1]];
-  const p2: P2 = [-n2[1], n2[0]];
-  const cam = viewCamera(pv);
-  const e = v3.norm(v3.add(v3.mul(cam.x, p2[0]), v3.mul(cam.up, p2[1]))), tp = cam.toward;
-  const X = v3.norm(v3.add(v3.mul(e, p2[0]), v3.mul(tp, n2[0]))), Yv = v3.norm(v3.add(v3.mul(e, p2[1]), v3.mul(tp, n2[1])));
-  const toward = v3.norm(v3.cross(X, Yv));
-  const label = nextLabel(s.drw.views);
-  const id = uid('v');
-  const nv: DView = { id, name: `Vista auxiliar ${label}`, source: pv.source, dir: pv.dir, scale: pv.scale, hidden: false, parent: pv.id, kind: 'aux', label, x: place[0], y: place[1], aux: { toward, x: X, a: [mid[0] - pv.x, mid[1] - pv.y], n2 } };
-  s.commitDrw((dd) => { dd.views.push(nv); });
   useStore.setState({ selItem: id });
 }
 

@@ -10,6 +10,3 @@ import { useStore } from './core/store';
 
 import { initSpaceMouse } from './ui/spacemouse';
 initSpaceMouse();
-
-import { initSession } from './ui/session';
-initSession();

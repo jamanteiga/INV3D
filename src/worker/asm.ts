@@ -169,13 +169,13 @@ export function boltHardware(g: BoltGroup, ev: Ev): { shape: Shape3D; holes: Sha
 }
 
 export function xfShape(s: Shape3D, x: Xform): Shape3D {
-  // q y -q son el mismo giro: se usa w ≥ 0 para que el ángulo quede en [0, π] y el eje esté bien definido
-  const l = Math.hypot(...x.quat) || 1, sg = x.quat[3] < 0 ? -1 : 1;
-  const [qx, qy, qz, qw] = x.quat.map((v) => (v * sg) / l);
+  const [qx, qy, qz, qw] = x.quat;
   const ang = 2 * Math.acos(Math.max(-1, Math.min(1, qw)));
-  const al = Math.hypot(qx, qy, qz);
   let out = s.clone();
-  if (ang > 1e-9 && al > 1e-12) out = out.rotate((ang * 180) / Math.PI, [0, 0, 0], [qx / al, qy / al, qz / al]);
+  if (ang > 1e-9) {
+    const sn = Math.sin(ang / 2);
+    out = out.rotate((ang * 180) / Math.PI, [0, 0, 0], [qx / sn, qy / sn, qz / sn]);
+  }
   if (v3.len(x.pos) > 0) out = out.translate(x.pos);
   return out;
 }

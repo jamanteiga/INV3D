@@ -10,8 +10,6 @@ export interface MeshData {
 export interface MassProps { volume: number; area: number; cog: V3; bbox: [V3, V3] }
 export interface RegenResult {
   mesh: MeshData | null;
-  /** Cuerpos de superficie (se muestran translúcidos) */
-  surfMesh?: MeshData | null;
   status: Record<string, { ok: boolean; error?: string }>;
   props: MassProps | null;
   ms: number;
@@ -25,11 +23,9 @@ export interface AsmResult {
   bolts: { id: string; mesh: MeshData; length: number; count: number }[];
   errors: Record<string, string>;
   ms: number;
-  /** Ensamblaje aplanado (con subensamblajes): ocurrencias virtuales «padre/hijo» */
-  view?: AsmDoc;
 }
 export interface FlatResult { paths: string[]; bends: { a: V2; b: V2; label: string }[]; t: number; r: number; k: number }
-export interface Projection { visible: string[]; hidden: string[]; center: V3; cut: number[]; anchors?: { id: string; c: [number, number]; r: [number, number, number, number]; z: number }[] }
+export interface Projection { visible: string[]; hidden: string[]; center: V3; cut: number[] }
 export type ProjSource = { kind: 'part'; doc: PartDoc } | { kind: 'asm'; asm: AsmDoc; parts: Record<string, PartDoc> };
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
@@ -71,8 +67,7 @@ class CadClient {
   exportSTL(target: 'part' | 'asm' = 'part') { return this.call<ArrayBuffer>('exportSTL', { target }); }
   checkSTEP(text: string) { return this.call<{ bbox: [V3, V3]; solids: number }>('checkSTEP', { text }); }
   splitSTEP(text: string) { return this.call<string[]>('splitSTEP', { text }); }
-  project(source: ProjSource, dir: V3, x: V3, section?: { origin: V3; normal: V3; path?: V3[]; toward?: V3 }, breakout?: { loop: V3[]; depth: number }) { return this.call<Projection>('project', { source, dir, x, section, breakout }); }
-  meshItems(target: 'part' | 'asm') { return this.call<{ name: string; id?: string; vertices: Float32Array; triangles: Uint32Array }[]>('meshItems', { target }); }
+  project(source: ProjSource, dir: V3, x: V3, section?: { origin: V3; normal: V3 }) { return this.call<Projection>('project', { source, dir, x, section }); }
   flat(doc: PartDoc) { return this.call<FlatResult>('flat', { doc }); }
   interference(asm: AsmDoc, parts: Record<string, PartDoc>) { return this.call<{ a: string; b: string; volume: number; mesh: MeshData }[]>('interf', { asm, parts }); }
 }

@@ -1,5 +1,5 @@
-// Regla (VB.NET) para exportar todo el proyecto activo a STEP (piezas y ensamblajes) y DWG (planos).
-export const ILOGIC_RULE = `' INV3D — Exportación masiva del proyecto activo
+// Regla iLogic (VB.NET) para exportar todo el proyecto activo de Inventor a STEP (piezas y ensamblajes) y DWG (planos).
+export const ILOGIC_RULE = `' INV3D — Exportación masiva del proyecto activo de Inventor
 ' Piezas (.ipt) y ensamblajes (.iam) -> STEP AP214 · Planos (.idw) -> DWG
 ' Salida: <espacio de trabajo>\\_EXPORT_INV3D
 Imports System.IO

@@ -1,5 +1,3 @@
-import { PIPE_MATERIALS } from './pipedata';
-import { HVAC_MATERIALS } from './hvacdata';
 // Modelo de datos del formato de pieza INV3D (.i3p)
 import type { Param } from './expr';
 
@@ -78,62 +76,24 @@ export interface MirrorF extends FBase { type: 'mirror'; features: string[]; pla
 export interface ShellF extends FBase { type: 'shell'; thickness: string; faces: V3[] }
 export interface WorkPlaneF extends FBase { type: 'workplane'; base: PlaneRef; offset: string; angle: string }
 export interface LoftF extends FBase { type: 'loft'; sections: string[]; ruled: boolean; op: BoolOp }
-export interface SweepF extends FBase { type: 'sweep'; profile: string; path: string; op: BoolOp; /** unión entre tramos rectos de la trayectoria: redondeada o a inglete */ transition?: 'round' | 'right' }
+export interface SweepF extends FBase { type: 'sweep'; profile: string; path: string; op: BoolOp }
 export interface SmFaceF extends FBase { type: 'sm_face'; profile: string }
 export type E3 = [string, string, string];
 export interface RibF extends FBase { type: 'rib'; profile: string; thickness: string; depth: string; flip: boolean; op: BoolOp }
 export interface CoilF extends FBase { type: 'coil'; profile: string; axis: string; pitch: string; turns: string; left: boolean; op: BoolOp }
 export interface SplitF extends FBase { type: 'split'; plane: PlaneRef; keep: 'pos' | 'neg' }
 export interface DraftF extends FBase { type: 'draft'; faces: V3[]; angle: string; plane: PlaneRef }
-export interface ThickenF extends FBase { type: 'thicken'; faces: V3[]; distance: string; op: BoolOp; /** engrosar una superficie en lugar de caras del sólido */ surface?: string }
+export interface ThickenF extends FBase { type: 'thicken'; faces: V3[]; distance: string; op: BoolOp }
 export interface ThreadF extends FBase { type: 'thread'; faces: V3[]; designation: string; length: string; full: boolean }
-/** Combinar cuerpos (cuerpos múltiples): faces[0] = cuerpo base, resto = herramientas */
-export interface CombineF extends FBase { type: 'combine'; faces: V3[]; op: 'join' | 'cut' | 'intersect'; keep: boolean }
-/** Mover o copiar cuerpo: traslación + giro (eje por el origen). Sin caras = todos los cuerpos */
-export interface MoveBodyF extends FBase { type: 'movebody'; faces: V3[]; dx: string; dy: string; dz: string; axis: AxisName; angle: string; copy: boolean }
-/** Pieza derivada: copia de otra pieza (instantánea), con escala y simetría */
-export interface DeriveF extends FBase { type: 'derive'; source: string; sourceName: string; doc: PartDoc | null; scale: string; mirror: '' | 'XY' | 'XZ' | 'YZ'; op: BoolOp }
-/** Patrón a lo largo de una trayectoria de boceto */
-export interface PathPatternF extends FBase { type: 'pathpattern'; features: string[]; path: string; count: string; align: boolean }
-/** Chapa: pestaña de contorno, dobladillo y punzonado */
-export interface SmContourF extends FBase { type: 'sm_contour'; profile: string; width: string; dir: 'normal' | 'reverse' | 'symmetric'; side: 'in' | 'out' }
-export interface SmPunchF extends FBase { type: 'sm_punch'; sketch: string; shape: 'round' | 'rect' | 'slot' | 'square'; d: string; w: string; h: string; rot: string }
 export interface WorkAxisF extends FBase { type: 'workaxis'; origin: E3; dir: E3 }
 export interface WorkPointF extends FBase { type: 'workpoint'; origin: E3 }
 export interface EdgeRef { p0: V3; p1: V3; n: V3; w: V3 }
-// ---------- Superficies, boceto 3D y chapa avanzada ----------
-export type S3Entity =
-  | { id: string; type: 'line3'; a: E3; b: E3 }
-  | { id: string; type: 'spline3'; pts: E3[] }
-  | { id: string; type: 'helix3'; origin: E3; axis: 'X' | 'Y' | 'Z'; radius: string; pitch: string; height: string; left?: boolean };
-/** Boceto 3D: líneas, splines y hélices en el espacio (trayectorias de barrido, contornos de parches). */
-export interface Sketch3dF extends FBase { type: 'sketch3d'; entities: S3Entity[] }
-export interface SurfExtrudeF extends FBase { type: 'surf_extrude'; profile: string; distance: string; dir: 'normal' | 'reverse' | 'symmetric' }
-export interface SurfRevolveF extends FBase { type: 'surf_revolve'; profile: string; axis: string; angle: string }
-export interface SurfLoftF extends FBase { type: 'surf_loft'; sections: string[]; ruled: boolean }
-/** Parche: superficie limitada por un contorno cerrado (plano o 3D) */
-export interface SurfPatchF extends FBase { type: 'surf_patch'; sketch: string }
-/** Coser superficies: si cierran un volumen se convierten en sólido */
-export interface StitchF extends FBase { type: 'stitch'; surfaces: string[]; op: BoolOp; keep?: boolean }
-/** Pestaña solevada de chapa (transiciones: rectángulo a círculo, etc.) */
-export interface SmLoftF extends FBase { type: 'sm_loft'; a: string; b: string; side: 'in' | 'out'; segments: string }
-export const SURFACE_FEATURES = ['surf_extrude', 'surf_revolve', 'surf_loft', 'surf_patch'] as const;
-
 export interface SmFlangeF extends FBase { type: 'sm_flange'; edge: EdgeRef | null; length: string; angle: string; dir: 'up' | 'down' }
 export type Feature = SketchF | ExtrudeF | RevolveF | FilletF | ChamferF | ImportF | HoleF | PatternF | MirrorF | ShellF
-  | WorkPlaneF | LoftF | SweepF | SmFaceF | SmFlangeF | RibF | CoilF | SplitF | DraftF | ThickenF | ThreadF | WorkAxisF | WorkPointF
-  | CombineF | MoveBodyF | DeriveF | PathPatternF | SmContourF | SmPunchF
-  | Sketch3dF | SurfExtrudeF | SurfRevolveF | SurfLoftF | SurfPatchF | StitchF | SmLoftF;
+  | WorkPlaneF | LoftF | SweepF | SmFaceF | SmFlangeF | RibF | CoilF | SplitF | DraftF | ThickenF | ThreadF | WorkAxisF | WorkPointF;
 export type FeatureType = Feature['type'];
 
-export interface IProps {
-  partNumber: string; description: string; designer: string; material: string; revision: string;
-  /** iProperties ampliadas (Resumen, Proyecto, Estado, Personalizadas) */
-  title?: string; subject?: string; author?: string; manager?: string; company?: string; keywords?: string; comments?: string;
-  project?: string; stockNumber?: string; vendor?: string; costCenter?: string; webLink?: string; finish?: string;
-  status?: 'En curso' | 'Revisión' | 'Aprobado' | 'Obsoleto'; checkedBy?: string; checkedDate?: string; approvedBy?: string; approvedDate?: string;
-  custom?: { name: string; value: string }[];
-}
+export interface IProps { partNumber: string; description: string; designer: string; material: string; revision: string }
 
 export interface PartDoc {
   format: 'inv3d.part';
@@ -141,13 +101,9 @@ export interface PartDoc {
   units: 'mm';
   iProperties: IProps;
   parameters: Param[];
-  /** Tabla iPart (familia de piezas) */
-  ipart?: { cols: string[]; rows: { name: string; values: string[] }[]; active: number };
   features: Feature[];
   /** Pieza de chapa: espesor, radio de plegado interior y factor K */
   sheet?: { t: string; r: string; k: string };
-  /** ePoints: puntos de conexión para ensamblar (coincidencia, inserción, compuesto) */
-  epoints?: import('./epoints').EPoint[];
 }
 
 /** Parámetros del documento: de usuario + parámetros del modelo (cotas de boceto d0, d1…). */
@@ -174,8 +130,6 @@ export const MATERIALS: { name: string; density: number; color: string }[] = [
   { name: 'Polietileno PE-HD', density: 950, color: '#e9e9e4' },
   { name: 'Madera de pino', density: 500, color: '#caa472' },
   { name: 'Genérico', density: 1000, color: '#c3c8cf' },
-  ...PIPE_MATERIALS.map(({ name, density, color }) => ({ name, density, color })),
-  ...HVAC_MATERIALS,
 ];
 
 export const PLANE_STD: Record<StdPlane, { xDir: V3; normal: V3 }> = {
@@ -351,8 +305,6 @@ export const FEATURE_NAMES: Record<FeatureType, string> = {
   hole: 'Agujero', pattern: 'Patrón', mirror: 'Simetría', shell: 'Vaciado', workplane: 'Plano de trabajo', loft: 'Solevación',
   sweep: 'Barrido', sm_face: 'Cara', sm_flange: 'Pestaña', rib: 'Nervio', coil: 'Bobina', split: 'División', draft: 'Inclinación',
   thicken: 'Engrosar', thread: 'Rosca', workaxis: 'Eje de trabajo', workpoint: 'Punto de trabajo',
-  combine: 'Combinar', movebody: 'Mover cuerpo', derive: 'Pieza derivada', pathpattern: 'Patrón por trayectoria', sm_contour: 'Pestaña de contorno', sm_punch: 'Punzonado',
-  sketch3d: 'Boceto 3D', surf_extrude: 'Superficie extruida', surf_revolve: 'Superficie de revolución', surf_loft: 'Superficie solevada', surf_patch: 'Parche', stitch: 'Coser', sm_loft: 'Pestaña solevada',
 };
 
 export const OP_NAMES: Record<BoolOp, string> = { join: 'Unir', cut: 'Cortar', intersect: 'Intersección', new: 'Nuevo sólido' };
@@ -377,28 +329,20 @@ export function nextName(doc: PartDoc, type: FeatureType): string {
   return `${base}${n}`;
 }
 
-/** Bocetos ya consumidos por alguna operación (se ocultan). */
+/** Bocetos ya consumidos por alguna operación (se ocultan, como en Inventor). */
 export function consumedSketches(doc: PartDoc): Set<string> {
   const s = new Set<string>();
   for (const f of doc.features) {
-    if (f.type === 'extrude' || f.type === 'revolve' || f.type === 'sm_face' || f.type === 'rib' || f.type === 'coil' || f.type === 'sm_contour') s.add(f.profile);
-    if (f.type === 'pathpattern') s.add(f.path);
-    if (f.type === 'sm_punch') s.add(f.sketch);
+    if (f.type === 'extrude' || f.type === 'revolve' || f.type === 'sm_face' || f.type === 'rib' || f.type === 'coil') s.add(f.profile);
     if (f.type === 'sweep') { s.add(f.profile); s.add(f.path); }
     if (f.type === 'loft') f.sections.forEach((x) => s.add(x));
     if (f.type === 'hole') s.add(f.sketch);
-    if (f.type === 'surf_extrude' || f.type === 'surf_revolve') s.add(f.profile);
-    if (f.type === 'surf_loft') f.sections.forEach((x) => s.add(x));
-    if (f.type === 'surf_patch') s.add(f.sketch);
-    if (f.type === 'sm_loft') { s.add(f.a); s.add(f.b); }
-    if (f.type === 'stitch' && !f.keep) f.surfaces.forEach((x) => s.add(x));
-    if (f.type === 'thicken' && f.surface) s.add(f.surface);
   }
   return s;
 }
 
 /** Operaciones que generan o quitan material (las que se pueden repetir en patrones y simetrías). */
-export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil', 'derive', 'sm_punch', 'stitch'];
+export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil'];
 
 export function newSheetDoc(): PartDoc {
   const d = newDoc();
