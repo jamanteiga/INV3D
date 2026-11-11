@@ -519,8 +519,8 @@ export default function AsmViewport() {
       const hit = hitAt(ev);
       if (hit?.object.userData.kind === 'occ') {
         const o = findOcc(s, hit.object.userData.id);
-        // como en Inventor: doble clic edita la pieza en contexto
-        if (o && s.docs.find((d) => d.id === o.part)?.kind === 'part') asmActions.editInPlace(o.id);
+        // doble clic: propiedades físicas y cotas editables de la pieza (editar en contexto: menú contextual o Ensamblar › Editar)
+        if (o && s.docs.find((d) => d.id === o.part)?.kind === 'part') s.open({ kind: 'occprops', occ: o.id });
         else if (o) s.activate(o.part);
       }
     });
@@ -649,6 +649,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}
       {occ && (<><hr />
         <button onClick={() => { close(); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.grounded = !t.grounded; }); }}>{occ.grounded ? 'Liberar' : 'Fijar'}</button>
+        {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); s.open({ kind: 'occprops', occ: vo?.id ?? occ.id }); }}>Propiedades y cotas…</button>}
         {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); asmActions.editInPlace(vo?.id ?? occ.id); }}>Editar en contexto</button>}
         <button onClick={() => { close(); s.activate(openPart!); }}>{vo?.sub ? 'Abrir pieza del subensamblaje' : s.docs.find((d) => d.id === occ.part)?.kind === 'assembly' ? 'Abrir subensamblaje' : 'Abrir pieza'}</button></>)}
     </div>

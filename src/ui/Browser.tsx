@@ -207,9 +207,9 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
       const bad = s.asmResult?.parts[o.part]?.ok === false;
       return (
         <Fragment key={o.id}><div className={rowCls(o.id, o.suppressed ? 'supp' : '')} style={{ paddingLeft: 10 }} onClick={() => sel(o.id)}
-          onDoubleClick={() => (e?.kind === 'part' ? asmActions.editInPlace(o.id) : s.activate(o.part))}
+          onDoubleClick={() => (e?.kind === 'part' ? s.open({ kind: 'occprops', occ: o.id }) : s.activate(o.part))}
           onContextMenu={(ev) => { ev.preventDefault(); sel(o.id); setMenu({ x: ev.clientX, y: ev.clientY, items: [
-            ...(e?.kind === 'part' ? [{ label: 'Editar en contexto', run: () => asmActions.editInPlace(o.id) }] : []),
+            ...(e?.kind === 'part' ? [{ label: 'Propiedades y cotas…', run: () => s.open({ kind: 'occprops', occ: o.id }) }, { label: 'Editar en contexto', run: () => asmActions.editInPlace(o.id) }] : []),
             { label: 'Abrir', run: () => s.activate(o.part) },
             { label: o.grounded ? 'Liberar' : 'Fijar', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.grounded = !t.grounded; }) },
             { label: o.hidden ? 'Mostrar' : 'Ocultar', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.hidden = !t.hidden; }) },

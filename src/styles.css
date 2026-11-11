@@ -522,3 +522,16 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .fem-sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .fem-bar { height: 12px; border-radius: 3px; background: linear-gradient(90deg, #2140d9, #1abfe6, #33cc40, #f2d926, #e6261a); }
 .fem-scale { display: flex; justify-content: space-between; font-size: 11.5px; font-family: var(--f-mono); color: var(--fg-2); }
+.occp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 18px; }
+@media (max-width: 720px) { .occp { grid-template-columns: 1fr; } }
+.occp-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.occp-col .ptable td:first-child { color: var(--fg-2); white-space: nowrap; }
+.occp-col select { max-width: 100%; height: 26px; }
+.occp-filter { height: 26px; border: 1px solid var(--line-2); border-radius: 4px; padding: 0 7px; background: var(--panel); color: var(--fg); }
+.occp-dims { max-height: 46vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+.occp-gname { font-size: 11.5px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--line); padding-bottom: 2px; margin-bottom: 4px; }
+.occp-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px; align-items: center; gap: 8px; font-size: 12.5px; margin-bottom: 4px; }
+.occp-col .ptable { table-layout: fixed; }
+.occp-col .ptable td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.occp-col .ptable td:first-child { width: 44%; }
+.occp-col .ptable select { width: 100%; }

@@ -1,5 +1,6 @@
 import FemPanel from './FemPanel';
 import TbTplDialog from './TbDialog';
+import OccPropsDialog from './OccPropsDialog';
 import { tbTemplate, TB_FIELDS } from '../core/drawing';
 import { GenDialog } from './MachineDialog';
 import { FrameCalcDialog, JointCalcDialog } from './CalcDialogs';
@@ -941,6 +942,7 @@ function SelectionPanel() {
         <div className="prow3"><span className="plabel">Posición</span>{[0, 1, 2].map((i) => <NumIn key={i} value={xf.pos[i]} onCommit={(v) => setPos(i, v)} disabled={o.grounded} />)}</div>
         <Row label="Girar 90°"><span className="pair">{(['X', 'Y', 'Z'] as const).map((k, i) => <button key={k} className="btn" disabled={o.grounded} onClick={() => rot([i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0], 90)}>{k}</button>)}</span></Row>
         <label className="check"><input type="checkbox" checked={!!o.grounded} onChange={() => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === id)!; t.grounded = !t.grounded; })} />Fijo</label>
+        <button className="btn wide" onClick={() => s.open({ kind: 'occprops', occ: o.id })}>Propiedades y cotas…</button>
         <button className="btn wide" onClick={() => s.activate(o.part)}>Abrir pieza</button>
       </div>
     );
@@ -2539,6 +2541,7 @@ export function Modals() {
     case 'gen': return <GenDialog onClose={close} />;
     case 'fem': return <FemPanel onClose={close} />;
     case 'tbtpl': return <TbTplDialog onClose={close} />;
+    case 'occprops': return <OccPropsDialog key={(d as { occ: string }).occ} occ={(d as { occ: string }).occ} onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;
     case 'bom': return <BomDialog onClose={close} />;

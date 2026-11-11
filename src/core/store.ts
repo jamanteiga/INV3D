@@ -44,6 +44,7 @@ export type Dialog =
   | { kind: 'hvac'; hk: string; shape?: 'rect' | 'round' | 'oval' }
   | { kind: 'spiro'; sk: string }
   | { kind: 'ductcalc' }
+  | { kind: 'occprops'; occ: string }
   | { kind: 'fileinfo'; title: string; info: FileInfo }
   | { kind: 'skop'; op: SkOp; params: Record<string, string>; step: number; base?: string };
 export type SkOp = 'offset' | 'mirror' | 'rpattern' | 'cpattern' | 'move' | 'copy' | 'rotate' | 'scale' | 'fillet' | 'chamfer' | 'text';
@@ -140,6 +141,8 @@ export interface State {
 
   commit: (fn: (d: PartDoc) => void) => void;
   commitAsm: (fn: (d: AsmDoc) => void) => void;
+  /** Cambia una pieza abierta en memoria (no activa) y recalcula el ensamblaje activo */
+  editPartDoc: (id: string, next: PartDoc) => void;
   commitDrw: (fn: (d: DrawingDoc) => void) => void;
   undo: () => void;
   redo: () => void;
@@ -393,6 +396,11 @@ export const useStore = create<State>((set, get) => ({
     }
     if (next.patterns?.length || next.occurrences.some((o) => o.mirrorOf)) applyAssociative(next, (x) => { try { return makeEval([])(x); } catch { return NaN; } }, uid);
     set({ asm: next, past: [...past.slice(-99), asm], future: [], dirty: true });
+  },
+  editPartDoc: (id, next) => {
+    const s = get();
+    set({ docs: s.docs.map((d) => (d.id === id ? { ...d, data: next, past: [...d.past.slice(-99), d.data], future: [], dirty: true } : d)) });
+    if (s.kind === 'assembly') set({ asm: { ...get().asm } });
   },
   commitDrw: (fn) => {
     const { drw, past } = get();
