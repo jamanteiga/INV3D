@@ -44,9 +44,11 @@ export interface DView {
   /** Corte parcial (Break Out): contorno en 3D y profundidad desde la cara más cercana (mm) */
   breakout?: { loop: V3[]; depth: number };
   /** Detalle: centro y radio en coordenadas de la vista padre (relativas a su centro, mm de hoja) */
-  detail?: { c: P2d; r: number };
+  detail?: { c: P2d; r: number; /** contorno continuo (por defecto, discontinuo) */ solid?: boolean };
   /** Marcas de centro automáticas en círculos */
   centers?: boolean;
+  /** Escala propia (no sigue a la de la vista padre) */
+  ownScale?: boolean;
 }
 export interface DBreak { axis: 'x' | 'y'; a: number; b: number }
 export type DimKind2 = 'h' | 'v' | 'a' | 'r' | 'd' | 'ang' | 'ord';

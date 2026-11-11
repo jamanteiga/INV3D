@@ -641,9 +641,9 @@ export const drwActions = {
   exportDxf: async () => {
     const s = S();
     const e = await sheetEntities();
-    const layerOf: Record<string, string> = { frame: 'MARCO', tb: 'MARCO', vis: 'VISIBLES', hid: 'OCULTAS', dim: 'COTAS', center: 'EJES', cutline: 'EJES', hatch: 'RAYADO', thin: 'ANOTACIONES', thick: 'ANOTACIONES', ann: 'ANOTACIONES', cutend: 'ANOTACIONES' };
+    const layerOf: Record<string, string> = { frame: 'MARCO', tb: 'MARCO', vis: 'VISIBLES', hid: 'OCULTAS', dim: 'COTAS', center: 'EJES', cutline: 'EJES', hatch: 'RAYADO', thin: 'ANOTACIONES', thick: 'ANOTACIONES', ann: 'ANOTACIONES', cutend: 'ANOTACIONES', detailc: 'DETALLES' };
     const doc: DxfDoc = {
-      layers: [{ name: 'MARCO', color: 7 }, { name: 'VISIBLES', color: 7 }, { name: 'OCULTAS', color: 8, ltype: 'DASHED' }, { name: 'COTAS', color: 3 }, { name: 'EJES', color: 1, ltype: 'CENTER' }, { name: 'RAYADO', color: 9 }, { name: 'ANOTACIONES', color: 4 }, { name: 'TEXTO', color: 7 }],
+      layers: [{ name: 'MARCO', color: 7 }, { name: 'VISIBLES', color: 7 }, { name: 'OCULTAS', color: 8, ltype: 'DASHED' }, { name: 'COTAS', color: 3 }, { name: 'EJES', color: 1, ltype: 'CENTER' }, { name: 'RAYADO', color: 9 }, { name: 'ANOTACIONES', color: 4 }, { name: 'DETALLES', color: 4, ltype: 'DASHED' }, { name: 'TEXTO', color: 7 }],
       lines: [...e.lines.map((l) => ({ layer: layerOf[l.cls] ?? 'ANOTACIONES', pts: l.pts })), ...e.fills.map((f) => ({ layer: 'COTAS', pts: [...f, f[0]] }))],
       texts: e.texts.map((t) => ({ layer: 'TEXTO', x: t.anchor === 'middle' ? t.x - t.text.length * t.h * 0.3 : t.anchor === 'end' ? t.x - t.text.length * t.h * 0.6 : t.x, y: t.y, h: t.h, text: t.text, rot: t.rot })),
     };
@@ -661,8 +661,8 @@ export const drwActions = {
     else pdf.addPage([e.W, e.H], e.W > e.H ? 'landscape' : 'portrait');
     const Y = (y: number) => e.H - y;
     const ds = drawStyle(drw), tk = ds.thick, tn = ds.thin;
-    const W: Record<string, number> = { frame: tk, tb: tk * 0.7, vis: tk, hid: tn, dim: tn * 0.72, center: tn * 0.72, cutline: tn * 0.72, hatch: tn * 0.5, thin: tn * 0.72, thick: tk * 1.2, ann: tk * 0.7, cutend: tk * 1.4 };
-    const DASH: Record<string, number[]> = { hid: [2, 1], center: [6, 1, 1, 1], cutline: [6, 1, 1, 1] };
+    const W: Record<string, number> = { frame: tk, tb: tk * 0.7, vis: tk, hid: tn, dim: tn * 0.72, center: tn * 0.72, cutline: tn * 0.72, hatch: tn * 0.5, thin: tn * 0.72, thick: tk * 1.2, ann: tk * 0.7, cutend: tk * 1.4, detailc: tk * 0.8 };
+    const DASH: Record<string, number[]> = { detailc: [3, 1.5], hid: [2, 1], center: [6, 1, 1, 1], cutline: [6, 1, 1, 1] };
     for (const l of e.lines) {
       pdf.setLineWidth(W[l.cls] ?? 0.25); pdf.setLineDashPattern(DASH[l.cls] ?? [], 0);
       for (let i = 0; i + 1 < l.pts.length; i++) pdf.line(l.pts[i][0], Y(l.pts[i][1]), l.pts[i + 1][0], Y(l.pts[i + 1][1]));

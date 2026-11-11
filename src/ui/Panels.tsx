@@ -1,6 +1,7 @@
 import FemPanel from './FemPanel';
 import TbTplDialog from './TbDialog';
 import OccPropsDialog from './OccPropsDialog';
+import DrwViewPropsDialog from './DrwViewDialog';
 import { tbTemplate, TB_FIELDS } from '../core/drawing';
 import { GenDialog } from './MachineDialog';
 import { FrameCalcDialog, JointCalcDialog } from './CalcDialogs';
@@ -1045,7 +1046,7 @@ function DrwPanel() {
   const ann = (d.anns ?? []).find((x) => x.id === s.selItem);
   const upV = (p: Record<string, unknown>) => s.commitDrw((dd) => {
     const t = dd.views.find((x) => x.id === v!.id)!; Object.assign(t, p);
-    if ('scale' in p) for (const c of dd.views) if (c.parent === t.id && c.kind !== 'detail') c.scale = t.scale;
+    if ('scale' in p) for (const c of dd.views) if (c.parent === t.id && c.kind !== 'detail' && !c.ownScale) c.scale = t.scale;
     if ('scale' in p && !t.parent) dd.title.scale = scaleLabel(t.scale);
   });
   const upA = (p: Record<string, unknown>) => s.commitDrw((dd) => { Object.assign((dd.anns ?? []).find((x) => x.id === ann!.id)!, p); });
@@ -1058,7 +1059,7 @@ function DrwPanel() {
         <div className="psec-title">{v.kind === 'section' ? `Sección ${v.label}-${v.label}` : v.kind === 'detail' ? `Detalle ${v.label}` : v.name}</div>
         <Row label="Origen"><span className="ro">{s.docs.find((x) => x.id === v.source)?.fileName ?? 'no abierto'}</span></Row>
         {(!v.kind || v.kind === 'base' || v.kind === 'proj' || v.kind === 'iso') && <Row label="Orientación"><select value={v.dir} onChange={(e) => upV({ dir: e.target.value, name: VIEW_NAMES[e.target.value as ViewDir] })}>{Object.entries(VIEW_NAMES).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></Row>}
-        <Row label="Escala"><select value={v.scale} onChange={(e) => upV({ scale: Number(e.target.value) })} disabled={!!v.parent && v.kind !== 'detail'}>{SCALES.map((x) => <option key={x} value={x}>{scaleLabel(x)}</option>)}</select></Row>
+        <Row label="Escala"><select value={v.scale} onChange={(e) => upV({ scale: Number(e.target.value) })} disabled={!!v.parent && v.kind !== 'detail' && !v.ownScale} title="Doble clic sobre la vista para más opciones">{SCALES.map((x) => <option key={x} value={x}>{scaleLabel(x)}</option>)}</select></Row>
         {v.kind === 'detail' && v.detail && <Row label="Radio zona"><input type="number" value={v.detail.r} onChange={(e) => upV({ detail: { ...v.detail!, r: Math.max(2, Number(e.target.value)) } })} /></Row>}
         <label className="check"><input type="checkbox" checked={v.hidden} onChange={(e) => upV({ hidden: e.target.checked })} />Aristas ocultas</label>
         <label className="check"><input type="checkbox" checked={!!v.centers} onChange={(e) => upV({ centers: e.target.checked })} />Marcas de centro automáticas</label>
@@ -2541,6 +2542,7 @@ export function Modals() {
     case 'gen': return <GenDialog onClose={close} />;
     case 'fem': return <FemPanel onClose={close} />;
     case 'tbtpl': return <TbTplDialog onClose={close} />;
+    case 'drwviewprops': return <DrwViewPropsDialog key={(d as { view: string }).view} id={(d as { view: string }).view} onClose={close} />;
     case 'occprops': return <OccPropsDialog key={(d as { occ: string }).occ} occ={(d as { occ: string }).occ} onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;

@@ -53,6 +53,7 @@ export type Dialog =
   | { kind: 'spiro'; sk: string }
   | { kind: 'ductcalc' }
   | { kind: 'occprops'; occ: string }
+  | { kind: 'drwviewprops'; view: string }
   | { kind: 'fileinfo'; title: string; info: FileInfo }
   | { kind: 'skop'; op: SkOp; params: Record<string, string>; step: number; base?: string };
 export type SkOp = 'offset' | 'mirror' | 'rpattern' | 'cpattern' | 'move' | 'copy' | 'rotate' | 'scale' | 'fillet' | 'chamfer' | 'text';

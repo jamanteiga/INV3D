@@ -570,3 +570,12 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .viewport.scene-studio { background: radial-gradient(circle at 50% 35%, #f4f4f4, #a9adb3); }
 .viewport.scene-blue { background: linear-gradient(180deg, #a7c3e6, #ffffff); }
 .viewport.scene-dark { background: linear-gradient(180deg, #232a33, #39424e); }
+.ln-detail { fill: none; stroke: var(--ink); stroke-width: 1.5px; stroke-dasharray: 7 4; vector-effect: non-scaling-stroke; }
+.vprops td:first-child { color: var(--fg-2); width: 34%; white-space: nowrap; vertical-align: top; padding-top: 7px; }
+.vprops td { padding: 5px 4px; }
+.vprops .check { margin: 2px 0; }
+.vprops select, .vprops input:not([type=checkbox]):not([type=radio]) { height: 26px; border: 1px solid var(--line-2); border-radius: 4px; background: var(--panel); color: var(--fg); padding: 0 6px; }
+.vprops input.bad { border-color: var(--danger); }
+.vprops-scale { display: flex; gap: 6px; align-items: center; }
+.vprops td input[type=checkbox], .vprops td input[type=radio] { width: auto; height: auto; flex: none; margin: 0; }
+.vprops .check { justify-content: flex-start; text-align: left; }

@@ -171,7 +171,7 @@ export default function DrawingView() {
   useEffect(() => setVb([-10, -10, W + 20, H + 20]), [W, H]);
   const [clicks, setClicks] = useState<{ view?: string; pts: P2[]; refs: any[] }>({ pts: [], refs: [] });
   const [cursor, setCursor] = useState<P2 | null>(null);
-  const drag = useRef<{ id: string; kind: 'view' | 'note' | 'ann' | 'dim' | 'table'; start: P2; orig: any; pushed?: boolean } | null>(null);
+  const drag = useRef<{ id: string; kind: 'view' | 'block' | 'note' | 'ann' | 'dim' | 'table'; start: P2; orig: any; pushed?: boolean } | null>(null);
   const pan = useRef<{ start: [number, number]; vb: [number, number, number, number] } | null>(null);
 
   // Cargar proyecciones
@@ -409,7 +409,21 @@ export default function DrawingView() {
     if (dim) { useStore.setState({ selItem: dim.id }); drag.current = { id: dim.id, kind: 'dim', start: p, orig: { offset: dim.offset, b: [...dim.b], c: [...(dim.c ?? dim.b)] } }; return; }
     const v = (hitId && drw.views.find((x) => x.id === hitId)) || viewAt(p);
     useStore.setState({ selItem: v?.id ?? null });
-    if (v) drag.current = { id: v.id, kind: 'view', start: p, orig: [v.x, v.y] };
+    if (v && (e.ctrlKey || e.metaKey)) {
+      // Ctrl + arrastrar: la vista base y todas las que dependen de ella se mueven en bloque
+      let root = v; while (root.parent) { const pr = drw.views.find((x) => x.id === root.parent); if (!pr) break; root = pr; }
+      const fam = new Set([root.id]); let grew = true;
+      while (grew) { grew = false; for (const x of drw.views) if (x.parent && fam.has(x.parent) && !fam.has(x.id)) { fam.add(x.id); grew = true; } }
+      useStore.setState({ selItem: root.id });
+      drag.current = { id: root.id, kind: 'block', start: p, orig: Object.fromEntries(drw.views.filter((x) => fam.has(x.id)).map((x) => [x.id, [x.x, x.y]])) };
+    } else if (v) drag.current = { id: v.id, kind: 'view', start: p, orig: [v.x, v.y] };
+  };
+  const onDbl = (e: React.MouseEvent) => {
+    if (tool) return;
+    const hitId = (e.target as Element).closest?.('[data-id]')?.getAttribute('data-id');
+    const p = toSheet(e as unknown as React.PointerEvent);
+    const v = (hitId && drw.views.find((x) => x.id === hitId)) || viewAt(p);
+    if (v) useStore.getState().open({ kind: 'drwviewprops', view: v.id });
   };
   const onMove = (e: React.PointerEvent) => {
     if (pan.current) {
@@ -426,7 +440,20 @@ export default function DrawingView() {
       if (!dr.pushed) { dr.pushed = true; const st = useStore.getState(); useStore.setState({ past: [...st.past.slice(-99), st.drw], future: [], dirty: true }); }
       useStore.setState((s) => {
         const d = s.drw;
-        if (dr.kind === 'view') return { drw: { ...d, views: moveView(d.views, dr.id, dr.orig[0] + dx, dr.orig[1] + dy) } };
+        if (dr.kind === 'block') return { drw: { ...d, views: d.views.map((q) => (dr.orig[q.id] ? { ...q, x: dr.orig[q.id][0] + dx, y: dr.orig[q.id][1] + dy } : q)) } };
+        if (dr.kind === 'view') {
+          // proyectadas y auxiliares: solo se desplazan alineadas con su vista padre; base, sección, detalle e isométrica, libres
+          const q = d.views.find((x) => x.id === dr.id)!, pv = q.parent ? d.views.find((x) => x.id === q.parent) : null;
+          let mx = dx, my = dy;
+          if (pv && (q.kind === 'proj' || !q.kind) && q.dir !== 'iso') {
+            const horiz = Math.abs(dr.orig[1] - pv.y) < 1e-6, vert = Math.abs(dr.orig[0] - pv.x) < 1e-6;
+            if (horiz) my = 0; else if (vert) mx = 0;
+          } else if (pv && q.kind === 'aux' && q.aux) {
+            const n = q.aux.n2, L = Math.hypot(n[0], n[1]) || 1, t = (dx * n[0] + dy * n[1]) / L;
+            mx = (n[0] / L) * t; my = (n[1] / L) * t;
+          }
+          return { drw: { ...d, views: moveView(d.views, dr.id, dr.orig[0] + mx, dr.orig[1] + my) } };
+        }
         if (dr.kind === 'table') return { drw: { ...d, tables: (d.tables ?? []).map((t) => (t.id === dr.id ? { ...t, x: dr.orig[0] + dx, y: dr.orig[1] + dy } : t)) } };
         if (dr.kind === 'note') return { drw: { ...d, notes: d.notes.map((n) => (n.id === dr.id ? { ...n, x: dr.orig[0] + dx, y: dr.orig[1] + dy } : n)) } };
         if (dr.kind === 'ann') return { drw: { ...d, anns: (d.anns ?? []).map((a) => (a.id === dr.id ? { ...a, pts: (dr.orig as P2[]).map((q, i) => (i === 0 && a.kind !== 'surface' && a.kind !== 'centermark' && a.kind !== 'centerline' ? q : [q[0] + dx, q[1] + dy] as P2)) } : a)) } };
@@ -479,7 +506,7 @@ export default function DrawingView() {
   const Y = (y: number) => H - y;
   const pl = (pts: P2[]) => pts.map((q) => `${q[0].toFixed(3)},${Y(q[1]).toFixed(3)}`).join(' ');
   const loopsPath = (loops: P2[][]) => loops.map((l) => 'M' + l.map((q) => `${q[0].toFixed(3)} ${Y(q[1]).toFixed(3)}`).join('L') + 'Z').join('');
-  const CLS: Record<string, string> = { vis: 'ln-vis', hid: 'ln-hid', frame: 'sh-frame', dim: 'ln-dim', center: 'ln-center', thin: 'ln-thin', thick: 'ln-thick', ann: 'ln-ann', cutline: 'ln-cut', cutend: 'ln-thick', tb: 'tb-cell' };
+  const CLS: Record<string, string> = { vis: 'ln-vis', hid: 'ln-hid', frame: 'sh-frame', dim: 'ln-dim', center: 'ln-center', thin: 'ln-thin', thick: 'ln-thick', ann: 'ln-ann', cutline: 'ln-cut', cutend: 'ln-thick', detailc: 'ln-detail', tb: 'tb-cell' };
   const TCLS: Record<string, string> = { vlabel: 'view-label', 'vlabel big': 'view-label big', dimt: 'dim-text', annt: 'ann-text', note: 'note-text', tbl: 'tb-label', tbv: 'tb-val', tbb: 'tb-big' };
   const viewClip = (id?: string) => { const v = id ? drw.views.find((x) => x.id === id) : null; return v?.kind === 'detail' ? `url(#clip-${v.id})` : undefined; };
   void viewClip;
@@ -488,7 +515,7 @@ export default function DrawingView() {
   return (
     <div className="drawing-host">
       <svg ref={svgRef} className="sheet-svg" viewBox={vb.join(' ')} preserveAspectRatio="xMidYMid meet"
-        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={(e) => { e.preventDefault(); if (tool === 'drwBaseline') finishBaseline(); else if (tool === 'drwSectionPath') finishPath(); else reset(); }}
+        onPointerDown={onDown} onDoubleClick={onDbl} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={(e) => { e.preventDefault(); if (tool === 'drwBaseline') finishBaseline(); else if (tool === 'drwSectionPath') finishPath(); else reset(); }}
         style={{ cursor: tool ? 'crosshair' : 'default' }}>
         <defs>
           <pattern id="hatch45" patternUnits="userSpaceOnUse" width="2.5" height="2.5" patternTransform="rotate(45)">

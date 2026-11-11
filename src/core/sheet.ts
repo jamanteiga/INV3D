@@ -514,7 +514,7 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     }
     if (v.kind === 'detail' && v.detail) {
       const c = add([pv.x, pv.y], v.detail.c);
-      P.push({ t: 'circ', cls: 'thick', c, r: v.detail.r, id: v.id });
+      P.push({ t: 'circ', cls: v.detail.solid ? 'thick' : 'detailc', c, r: v.detail.r, id: v.id });
       P.push({ t: 'txt', cls: 'vlabel big', x: c[0] + v.detail.r * 0.75 + 2, y: c[1] + v.detail.r * 0.75 + 2, h: 5, text: v.label ?? 'B', anchor: 'start', id: v.id, bold: true });
     }
   }
