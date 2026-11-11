@@ -18,6 +18,8 @@ export interface Occurrence {
   mirrorOf?: { occ: string; plane: 'YZ' | 'XZ' | 'XY' };
   /** Elemento de un patrón de componentes asociativo */
   patternOf?: string;
+  /** Generado automáticamente (id de la red de conductos o tuberías) */
+  gen?: string;
 }
 /** Patrón de componentes asociativo: los elementos se recolocan al mover el padre o cambiar los parámetros. */
 export interface CompPattern { id: string; name: string; parent: string; p: Record<string, string>; members: string[]; suppressed?: boolean }
@@ -127,6 +129,7 @@ export interface AsmDoc {
   format: 'inv3d.assembly';
   viewReps?: ViewRep[];
   modelStates?: ModelState[];
+  ductNets?: import('./ductnet').DuctNet[];
   activeState?: string;
   patterns?: CompPattern[];
   motions?: Motion[];

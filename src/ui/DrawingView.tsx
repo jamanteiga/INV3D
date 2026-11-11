@@ -85,6 +85,8 @@ export function getProjection(s: State, v: DView): Promise<ProjData> | null {
 const projNow = (s: State) => (v: DView): ProjData | null => { const p = getProjection(s, v); return p ? resolved.get(p) ?? null : null; };
 
 /** Tabla de lista de piezas para el plano (encima del cajetín). */
+/** Recorta un texto para que quepa en la celda (con puntos suspensivos) */
+const clip = (t: string, n: number) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
 export function bomForDrawing(s: State, drw: DrawingDoc) {
   if (!drw.bom) return null;
   const v = drw.views.find((x) => x.id === drw.bom!.view) ?? drw.views[0];
@@ -96,7 +98,7 @@ export function bomForDrawing(s: State, drw: DrawingDoc) {
   const cols = [{ w: 10, k: 'item' }, { w: 12, k: 'qty' }, { w: 45, k: 'pn' }, { w: 63, k: 'desc' }, { w: 30, k: 'mat' }, { w: 20, k: 'mass' }] as const;
   const x0 = W - 10 - 180, y0 = 10 + TB_H;
   const all = [{ item: 'Pos.', qty: 'Cant.', pn: 'Nº de pieza', desc: 'Descripción', mat: 'Material', mass: 'Masa kg' }, ...rows.slice(0, 30).map((r, i) => ({
-    item: String(i + 1), qty: String(r.qty), pn: r.pn, desc: r.desc, mat: r.material, mass: r.mass ? fmt(r.mass, 2) : '',
+    item: String(i + 1), qty: String(r.qty), pn: clip(r.pn, 26), desc: clip(r.desc, 38), mat: clip(r.material, 17), mass: r.mass ? fmt(r.mass, 2) : '',
   }))];
   return all.reverse().map((r, i) => {
     let x = x0;

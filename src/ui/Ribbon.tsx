@@ -234,7 +234,11 @@ export default function Ribbon() {
               <Small icon="hins" label="Aislamiento" onClick={H('insulation')} />
             </Col>
           </Group>
-          <Group label="Espirotubo comercial">
+          <Group label="Red de conductos">
+            <Big icon="hbranch" label="Red" disabled={k !== 'assembly'} onClick={() => s.open({ kind: 'ductnet' })} title={k === 'assembly' ? 'Red de conductos: trazado, dimensionado, cálculo, equilibrado, ventilador, ruido, aislamiento, mediciones y generación automática' : 'Disponible en un ensamblaje'} />
+            <Col><Small icon="skel" label="Trazado" disabled={k !== 'assembly'} onClick={() => A.openSkel()} title="Dibuja los ejes de la red con líneas 3D (esqueleto)" /></Col>
+          </Group>
+                    <Group label="Espirotubo comercial">
             <Big icon="hduct" label="Espirotubo" onClick={() => s.open({ kind: 'spiro', sk: 'tube' })} title="Tubo espiral y accesorios comerciales con extremos macho: diámetros y espesores de catálogo" />
             <Col>
               <Small icon="helbow" label="Codo 15-90°" onClick={() => s.open({ kind: 'spiro', sk: 'elbow' })} title="Codos de espirotubo de 15, 30, 45, 60 y 90° prensados o por gajos" />

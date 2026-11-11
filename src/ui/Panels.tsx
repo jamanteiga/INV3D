@@ -1,3 +1,4 @@
+import { DuctNetDialog } from './DuctNetDialog';
 import { normalizeAsm } from '../core/subasm';
 import { docGetter } from '../core/store';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -63,10 +64,10 @@ export function Expr({ value, onCommit, live, unit = 'mm', autoFocus }: { value:
   );
 }
 
-const Row = ({ label, children }: { label: string; children: ReactNode }) => (
+export const Row = ({ label, children }: { label: string; children: ReactNode }) => (
   <label className="prow"><span className="plabel">{label}</span><span className="pfield">{children}</span></label>
 );
-function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+export function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
     <div className="seg">
       {options.map(([v, l]) => <button key={v} className={value === v ? 'on' : ''} onClick={() => onChange(v)} title={l}>{l}</button>)}
@@ -766,11 +767,15 @@ function SkelDialog() {
       <Head icon="skel" name="Línea de esqueleto" />
       <Steps current={d.step ?? 0} items={[['Punto inicial', !!k.a], ['Punto final', !!k.b]]} />
       {coord(k.a, 'a')}{coord(k.b, 'b')}
+      {k.a && <div className="prow3"><span className="plabel">Relativo</span>{[0, 1, 2].map((i) => <input key={i} className="num-in" placeholder={'Δ' + 'XYZ'[i]}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { const v = Number((e.target as HTMLInputElement).value.replace(',', '.')); if (isFinite(v)) { const n: V3 = [...k.a] as V3; n[i] += v; s.updateDraft({ b: n }); } } }} />)}</div>}
+      {k.a && <div className="chips">{([['+X', 0, 1], ['−X', 0, -1], ['+Y', 1, 1], ['−Y', 1, -1], ['+Z', 2, 1], ['−Z', 2, -1]] as const).map(([l, i, sg]) => <button key={l} className="chip" title={`Fin a ${k.len ?? 1000} mm en ${l}`} onClick={() => { const n: V3 = [...k.a] as V3; n[i] += sg * (k.len ?? 1000); s.updateDraft({ b: n }); }}>{l}</button>)}
+        <input className="num-in" style={{ width: 70 }} value={k.len ?? 1000} onChange={(e) => s.updateDraft({ len: Number(e.target.value) || 1000 })} onKeyDown={(e) => e.stopPropagation()} title="Longitud para los botones de dirección (mm)" /></div>}
       {ok && <div className="pick-info">Longitud {fmt(v3.len(v3.sub(k.b, k.a)), 1)} mm</div>}
-      <p className="phelp">Clic en vértices de componentes o extremos de líneas, o escribe las coordenadas (mm). Tras aceptar, la siguiente línea empieza en el punto final.</p>
+      <p className="phelp">Clic en vértices de componentes o extremos de líneas, escribe las coordenadas (mm), un desplazamiento relativo (Intro) o usa los botones de dirección. Tras aceptar, la siguiente línea empieza en el punto final. Para una derivación, empieza la línea en un punto de otra línea.</p>
       <Btns okLabel="Añadir línea" okDisabled={!ok} onOk={() => {
         s.commitAsm((a) => { a.skeleton.push({ id: k.id, a: k.a, b: k.b }); });
-        useStore.setState({ dialog: { kind: 'skel', draft: { id: 'k' + Date.now().toString(36), a: k.b }, step: 1 }, tool: 'skelPoint' });
+        useStore.setState({ dialog: { kind: 'skel', draft: { id: 'k' + Date.now().toString(36), a: k.b, len: k.len }, step: 1 }, tool: 'skelPoint' });
       }} onCancel={s.closeDialog} />
     </div>
   );
@@ -1146,7 +1151,7 @@ export function PropertyPanel() {
 }
 
 // =================== MODALES ===================
-function Modal({ title, onClose, children, wide, xwide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; xwide?: boolean }) {
+export function Modal({ title, onClose, children, wide, xwide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; xwide?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
@@ -2511,6 +2516,7 @@ export function Modals() {
     case 'replace': return <ReplaceDialog onClose={close} />;
     case 'viewreps': return <ViewRepDialog onClose={close} />;
     case 'mstates': return <ModelStateDialog onClose={close} />;
+    case 'ductnet': return <DuctNetDialog onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;
     case 'bom': return <BomDialog onClose={close} />;
