@@ -238,8 +238,21 @@ export async function loadPartForPlace(file: File): Promise<string | null> {
       d.features.push({ id: uid('f'), name: 'Sólido importado1', type: 'import', fileName: file.name, step: text });
       return s.addDocument('part', d, fn, false);
     }
-    if (ext === 'i3a') throw new Error('Los subensamblajes todavía no se pueden colocar: abre el .i3a y coloca sus piezas');
-    throw new Error(`Formato .${ext} no se puede colocar (usa .i3p o STEP)`);
+    if (ext === 'i3a') {
+      const ex = s.docs.find((d) => d.kind === 'assembly' && d.fileName === file.name)?.id;
+      if (ex) return ex;
+      const raw = JSON.parse(await file.text());
+      const embedded = (raw.embedded ?? {}) as Record<string, { fileName: string; kind: string; data: unknown }>;
+      delete raw.embedded;
+      for (const [id, e] of Object.entries(embedded)) {
+        if (s.docs.some((d) => d.id === id)) continue;
+        if (e.kind === 'part') s.addDocument('part', validateDoc(e.data), e.fileName, false, id);
+        else if (e.kind === 'assembly') s.addDocument('assembly', validateAsm(e.data), e.fileName, false, id);
+      }
+      remember(file);
+      return s.addDocument('assembly', validateAsm(raw), file.name, false);
+    }
+    throw new Error(`Formato .${ext} no se puede colocar (usa .i3p, .i3a o STEP)`);
   } catch (e) { s.notify((e as Error).message, 'error'); return null; }
 }
 

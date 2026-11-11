@@ -1,10 +1,12 @@
+import { normalizeAsm } from '../core/subasm';
+import { docGetter } from '../core/store';
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
 import { useStore, type SkOp } from '../core/store';
 import { uid, v3, newDoc, MATERIALS, type V3, type SketchF, type PartDoc } from '../core/doc';
-import { IDENTITY, solveAssembly, patternPoses, mirrorPose, q as qq, type FrameMember, type BoltGroup, type EndType, type Xform } from '../core/asm';
+import { IDENTITY, solveAssembly, patternPoses, mirrorPose, xfPoint, q as qq, q, type Occurrence, type FrameMember, type BoltGroup, type EndType, type Xform } from '../core/asm';
 import { CONTENT } from '../core/content';
-import { makeEval } from '../core/expr';
-import { cad } from '../core/cadClient';
+import { makeEval, fmt } from '../core/expr';
+import { cad, type MeshData } from '../core/cadClient';
 import { projectedDir, drawStyle, SHEETS, SCALES, VIEW_NAMES, scaleLabel, allPages, loadPage, extractPage, type DView, type TableKind } from '../core/drawing';
 import { writeDxf, type DxfDoc } from '../core/dxf';
 import { saveText } from '../core/files';
@@ -45,6 +47,32 @@ export const partActions = {
 };
 
 // ---------------- Ensamblaje ----------------
+/** Pose de b expresada en el sistema de a (a⁻¹·b) */
+function rel(a: Xform, b: Xform): Xform {
+  const qi: [number, number, number, number] = [-a.quat[0], -a.quat[1], -a.quat[2], a.quat[3]];
+  return { pos: q.rotate(qi, [b.pos[0] - a.pos[0], b.pos[1] - a.pos[1], b.pos[2] - a.pos[2]]), quat: q.mul(qi, b.quat) };
+}
+/** Une varias mallas transformadas en una sola (para mostrar y seleccionar el contexto del ensamblaje). */
+function mergeMeshes(list: { m: MeshData; xf: Xform }[]): MeshData {
+  let nv = 0, nt = 0, nl = 0;
+  for (const { m } of list) { nv += m.vertices.length; nt += m.triangles.length; nl += m.lines.length; }
+  const V = new Float32Array(nv), N = new Float32Array(nv), T = new Uint32Array(nt), L = new Float32Array(nl);
+  const fg: MeshData['faceGroups'] = [], eg: MeshData['edgeGroups'] = [];
+  let ov = 0, ot = 0, ol = 0, fid = 0, eid = 0;
+  for (const { m, xf } of list) {
+    for (let i = 0; i < m.vertices.length; i += 3) {
+      const p = xfPoint(xf, [m.vertices[i], m.vertices[i + 1], m.vertices[i + 2]]), n = q.rotate(xf.quat, [m.normals[i], m.normals[i + 1], m.normals[i + 2]]);
+      V.set(p, ov + i); N.set(n, ov + i);
+    }
+    for (let i = 0; i < m.lines.length; i += 3) L.set(xfPoint(xf, [m.lines[i], m.lines[i + 1], m.lines[i + 2]]), ol + i);
+    const base = ov / 3;
+    for (let i = 0; i < m.triangles.length; i++) T[ot + i] = m.triangles[i] + base;
+    for (const g of m.faceGroups) fg.push({ start: g.start + ot, count: g.count, faceId: fid++ });
+    for (const g of m.edgeGroups) eg.push({ start: g.start + ol / 3, count: g.count, edgeId: eid++ });
+    ov += m.vertices.length; ot += m.triangles.length; ol += m.lines.length;
+  }
+  return { vertices: V, normals: N, triangles: T, faceGroups: fg, lines: L, edgeGroups: eg };
+}
 /** Nombre libre «Pieza:n» para una nueva ocurrencia de la pieza. */
 function occName(a: { occurrences: { name: string }[] }, partId: string) {
   const base = (S().docs.find((d) => d.id === partId)?.fileName ?? 'Pieza').replace(/\.[^.]+$/, '');
@@ -59,10 +87,39 @@ export const asmActions = {
     const n = s.docs.filter((x) => x.kind === 'part').length + 1;
     d.iProperties.partNumber = `Pieza${n}`;
     const pid = s.addDocument('part', d, `Pieza${n}.i3p`, false);
-    s.commitAsm((a) => { a.occurrences.push({ id: uid('o'), name: `Pieza${n}:1`, part: pid, xf: { ...IDENTITY }, grounded: a.occurrences.length === 0 }); });
+    const oid = uid('o');
+    // como en Inventor: la pieza nueva queda fija donde se crea y se edita en contexto
+    s.commitAsm((a) => { a.occurrences.push({ id: oid, name: `Pieza${n}:1`, part: pid, xf: { ...IDENTITY }, grounded: true }); });
     void asmId;
-    s.activate(pid);
-    s.notify('Pieza creada en el ensamblaje: modélala y vuelve a la pestaña del ensamblaje');
+    asmActions.editInPlace(oid);
+    S().setTool('pickPlane');
+    S().notify('Pieza nueva en contexto: elige una cara de otro componente o un plano para el primer boceto · «Volver» para regresar al ensamblaje');
+  },
+  /** Edición en contexto (como Inventor): la pieza se edita viendo el resto del ensamblaje en transparente.
+   *  Sus caras sirven como plano de boceto y sus aristas se pueden proyectar (sin actualización automática). */
+  editInPlace: (occId: string) => {
+    const s = S(); const r = s.asmResult;
+    const flat = (r?.view?.occurrences ?? s.asm.occurrences) as (Occurrence & { sub?: string })[];
+    const me = flat.find((o) => o.id === occId) ?? s.asm.occurrences.find((o) => o.id === occId);
+    if (!me) return;
+    const X = r?.xf[me.id] ?? me.xf;
+    const meshes: { m: MeshData; xf: Xform }[] = [];
+    for (const o of flat) {
+      if (o.id === me.id || o.suppressed || o.hidden) continue;
+      const m = r?.occCut[o.id]?.mesh ?? r?.parts[o.part]?.mesh; if (!m) continue;
+      meshes.push({ m, xf: rel(X, r?.xf[o.id] ?? o.xf) });
+    }
+    for (const fm of r?.members ?? []) meshes.push({ m: fm.mesh, xf: rel(X, IDENTITY) });
+    useStore.setState({ ctxEdit: { asm: s.active, occ: me.id, part: me.part, asmName: s.fileName, mesh: meshes.length ? mergeMeshes(meshes) : null } });
+    s.activate(me.part);
+  },
+  /** Termina la edición en contexto y vuelve al ensamblaje (la pestaña de la pieza se cierra; sigue en memoria). */
+  returnToAsm: () => {
+    const s = S(); const c = s.ctxEdit; if (!c) return;
+    if (s.mode === 'sketch') s.finishSketch();
+    useStore.setState({ ctxEdit: null });
+    s.activate(c.asm);
+    S().hideDocument(c.part);
   },
   placePart: (partId: string) => {
     const s = S();
@@ -172,18 +229,49 @@ export const asmActions = {
       const t = a.joints.find((x) => x.id === jid)!;
       t.lock = true;
       if (t.type === 'rot') t.angle = `${v} deg`; else t.offset = `${v} mm`;
-      const r = solveAssembly(a, ev);
+      const r = solveAssembly(normalizeAsm(a, docGetter(S()), ev), ev);
       for (const o of a.occurrences) if (r.xf[o.id] && !o.grounded) o.xf = r.xf[o.id];
       useStore.setState({ asm: a });
       await new Promise((res) => setTimeout(res, ms));
     }
   },
+  /** Estados de modelo (como Inventor): supresiones y posiciones guardadas con nombre */
+  saveModelState: (name: string) => S().commitAsm((a) => {
+    const sup = [...a.occurrences, ...a.frames, ...a.welds, ...a.bolts].filter((x) => x.suppressed).map((x) => x.id);
+    const pos: Record<string, Xform> = {}; for (const o of a.occurrences) if (!o.grounded) pos[o.id] = { pos: [...o.xf.pos], quat: [...o.xf.quat] };
+    const id = uid('ms'); (a.modelStates ??= []).push({ id, name, suppressed: sup, positions: pos }); a.activeState = id;
+  }),
+  applyModelState: (id: string | null) => S().commitAsm((a) => {
+    const st = id ? a.modelStates?.find((x) => x.id === id) : null;
+    const sup = new Set(st?.suppressed ?? []);
+    for (const x of [...a.occurrences, ...a.frames, ...a.welds, ...a.bolts]) x.suppressed = sup.has(x.id) || undefined;
+    if (st?.positions) for (const o of a.occurrences) { const p = st.positions[o.id]; if (p && !o.grounded) o.xf = { pos: [...p.pos], quat: [...p.quat] }; }
+    a.activeState = st?.id;
+  }),
   saveViewRep: (name: string) => S().commitAsm((a) => { (a.viewReps ??= []).push({ id: uid('vr'), name, hidden: a.occurrences.filter((o) => o.hidden).map((o) => o.id) }); }),
   applyViewRep: (id: string) => S().commitAsm((a) => { const r = a.viewReps?.find((x) => x.id === id); if (!r) return; for (const o of a.occurrences) o.hidden = r.hidden.includes(o.id); }),
+  /** Tras mover un componente: comprueba si choca con otros (detección de colisiones activada) */
+  checkCollision: async (occId: string) => {
+    const s0 = S(); if (!s0.collide || s0.kind !== 'assembly') return;
+    // espera a que el ensamblaje se recalcule con la nueva posición
+    await new Promise((r) => setTimeout(r, 600));
+    const s = S(); const A = s.asmResult?.view ?? s.asm;
+    const mine = (id: string) => id === occId || id.startsWith(occId + '/');
+    const ids = [...new Set(A.occurrences.map((o) => o.part))];
+    try {
+      const r = (await cad.interference(A, s.partsMap(ids))).filter((x) => mine(x.a) !== mine(x.b) && (mine(x.a) || mine(x.b)));
+      if (r.length) {
+        const nm = (id: string) => A.occurrences.find((o) => o.id === id)?.name ?? id;
+        S().set({ interf: r });
+        S().notify(`Colisión: ${r.map((x) => `${nm(mine(x.a) ? x.b : x.a)} (${fmt(x.volume / 1000, 2)} cm³)`).join(', ')} · Ctrl+Z para deshacer el movimiento`, 'error');
+      } else if (S().interf) S().set({ interf: null });
+    } catch { /* sin comprobación */ }
+  },
   interference: async () => {
     const s = S();
-    const ids = [...new Set(s.asm.occurrences.map((o) => o.part))];
-    try { const r = await cad.interference(s.asm, s.partsMap(ids)); S().set({ interf: r }); }
+    const A = s.asmResult?.view ?? s.asm;
+    const ids = [...new Set(A.occurrences.map((o) => o.part))];
+    try { const r = await cad.interference(A, s.partsMap(ids)); S().set({ interf: r }); }
     catch (e) { s.notify((e as Error).message, 'error'); }
   },
   toggleGround: () => { const s = S(); s.commitAsm((a) => { const o = a.occurrences.find((x) => x.id === s.selItem); if (o) o.grounded = !o.grounded; }); },

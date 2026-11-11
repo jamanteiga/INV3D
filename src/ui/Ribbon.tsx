@@ -133,7 +133,7 @@ export default function Ribbon() {
             <Col>
               <Small icon="slot" label="Ranura" active={tool === 'slot'} onClick={T('slot')} title="Ranura: centro 1, centro 2 y anchura" />
               <Small icon="pointtool" label="Punto" active={tool === 'point'} onClick={T('point')} title="Punto (centros de agujero)" />
-              <Small icon="projectgeom" label="Proyectar geometría" active={tool === 'projectGeom'} onClick={T('projectGeom')} disabled={!hasSolid} />
+              <Small icon="projectgeom" label="Proyectar geometría" active={tool === 'projectGeom'} onClick={T('projectGeom')} disabled={!hasSolid && !s.ctxEdit} />
             </Col>
           </Group>
           <Group label="Modificar">
@@ -353,7 +353,8 @@ export default function Ribbon() {
           <Group label="Componente">
             <SplitBig onPick={(t) => s.open({ kind: t as 'place' | 'content' })} items={[
               { key: 'place', icon: 'place', label: 'Colocar', title: 'Colocar pieza (P)' }, { key: 'content', icon: 'content', label: 'Centro de contenido', title: 'Tornillería, pasadores, rodamientos y chavetas normalizados' }]} />
-            <Big icon="newpart" label="Crear" title="Crear una pieza nueva y colocarla" onClick={A.createPart} />
+            <Big icon="newpart" label="Crear" title="Crear una pieza nueva en contexto: elige una cara de otro componente para su primer boceto" onClick={A.createPart} />
+            <Big icon="part" label="Editar" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem && s.docs.find((d) => d.id === o.part)?.kind === 'part')} onClick={() => A.editInPlace(s.selItem!)} title="Editar la pieza seleccionada en contexto (doble clic sobre el componente)" />
             <Col>
               <Small icon="pattern_comp" label="Patrón" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={() => s.open({ kind: 'cpattern' })} title="Patrón rectangular o circular del componente seleccionado" />
               <Small icon="content" label="Centro de contenido" onClick={() => s.open({ kind: 'content' })} />
@@ -362,6 +363,7 @@ export default function Ribbon() {
             <Col>
               <Small icon="replace" label="Sustituir" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={() => s.open({ kind: 'replace' })} />
               <Small icon="eye" label="Representaciones" onClick={() => s.open({ kind: 'viewreps' })} title="Representaciones de vista (componentes ocultos)" />
+              <Small icon="params" label="Estados de modelo" onClick={() => s.open({ kind: 'mstates' })} title="Estados de modelo: variantes con elementos suprimidos y posiciones" />
             </Col>
           </Group>
           <Group label="Posición">
@@ -424,7 +426,8 @@ export default function Ribbon() {
           </Group>
         </>)}
         {k === 'assembly' && cur === 'inspect' && (<>
-          <Group label="Interferencias"><Big icon="interf" label="Analizar interferencias" onClick={() => s.open({ kind: 'interf' })} /></Group>
+          <Group label="Interferencias"><Big icon="interf" label="Analizar interferencias" onClick={() => s.open({ kind: 'interf' })} />
+            <Big icon="interf" label="Colisiones al mover" active={s.collide} onClick={() => { s.set({ collide: !s.collide }); s.notify(!s.collide ? 'Detección de colisiones activada: se comprueba cada vez que mueves un componente' : 'Detección de colisiones desactivada'); }} title="Comprueba si el componente choca con otros al arrastrarlo o moverlo con el gizmo" /></Group>
           <Group label="Medir"><Big icon="mass" label="Propiedades" onClick={() => s.open({ kind: 'bom' })} /></Group>
         </>)}
         {/* ---------- PLANO ---------- */}

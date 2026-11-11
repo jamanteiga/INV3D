@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useStore, activeSketch, type State } from '../core/store';
+import { asmActions } from './actions';
 import { makeEval, fmt } from '../core/expr';
 import {
   docParams, planeFrame, toWorld, entityOutline, consumedSketches, uid, v3, MATERIALS, PLANE_STD, resolveWorkPlanes,
@@ -79,6 +80,26 @@ export default function PartViewport() {
     (window as unknown as { __v3d: View3D }).__v3d = V; // ayuda de depuración / pruebas
     const { scene, camera } = V;
     const partGroup = new THREE.Group(); scene.add(partGroup);
+    // Edición en contexto: resto del ensamblaje en transparente (coordenadas de la pieza)
+    const ctxGroup = new THREE.Group(); scene.add(ctxGroup);
+    let ctxMesh: MeshData | null = null, ctxObj: THREE.Mesh | null = null;
+    const buildCtx = (s: State) => {
+      V.clearGroup(ctxGroup); ctxMesh = null; ctxObj = null;
+      const c = s.ctxEdit;
+      if (!c || c.part !== s.active || !c.mesh) { V.request(); return; }
+      const { grp, mesh } = V.meshFromData(c.mesh, '#8f99a6', { opacity: 0.28, edges: true });
+      grp.traverse((x: any) => { if (x.material) x.material.depthWrite = false; x.renderOrder = 1; });
+      ctxGroup.add(grp); ctxGroup.updateMatrixWorld(true);
+      ctxMesh = c.mesh; ctxObj = mesh;
+      V.request();
+    };
+    const ctxFace = (ev: MouseEvent) => {
+      if (!ctxObj || !ctxMesh) return null;
+      const hit = V.ray(ev).intersectObject(ctxObj)[0];
+      if (!hit || hit.faceIndex == null) return null;
+      const pf = planarFaceAt(ctxMesh, hit.faceIndex);
+      return pf ? { ...pf, point: hit.point.clone(), distance: hit.distance } : null;
+    };
     const sketchGroup = new THREE.Group(); scene.add(sketchGroup);
     const dimGroup = new THREE.Group(); scene.add(dimGroup);
     const originGroup = new THREE.Group(); scene.add(originGroup);
@@ -852,8 +873,8 @@ export default function PartViewport() {
     };
 
     /** Proyecta una arista del modelo sobre el plano del boceto como geometría de referencia. */
-    const projectEdge = (gi: number) => {
-      const s = useStore.getState(), fr = state.frame, m = state.mesh; if (!fr || !m) return;
+    const projectEdge = (gi: number, mm?: MeshData) => {
+      const s = useStore.getState(), fr = state.frame, m = mm ?? state.mesh; if (!fr || !m) return;
       const a = groupPts(gi, m), pts: V2[] = [];
       for (let i = 0; i < a.length; i += 3) { const d = v3.sub([a[i], a[i + 1], a[i + 2]], fr.origin); pts.push([v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]); }
       const uniq = pts.filter((p, i) => i === 0 || dist2(p, pts[i - 1]) > 1e-7);
@@ -986,9 +1007,17 @@ export default function PartViewport() {
       if (btn !== 0) return;
       const d = s.dialog && 'draft' in s.dialog ? s.dialog.draft : null;
       if (s.tool === 'pickPlane' || s.tool === 'pickWorkBase') {
-        const ph = hitPlane(ev), fh = faceHit(ev);
+        const ph = hitPlane(ev), fh = faceHit(ev), ch = ctxFace(ev);
         let plane: Parameters<typeof s.startSketch>[0] | null = null;
-        if (fh && (!ph || fh.distance <= ph.dist)) {
+        if (ch && (!fh || ch.distance < fh.distance) && (!ph || ch.distance <= ph.dist)) {
+          if (!ch.planar) { s.notify('Selecciona una cara plana o un plano', 'error'); return; }
+          // cara de otro componente del ensamblaje: plano fijo (sin actualización automática)
+          const n = ch.normal.clone().normalize(), o = n.clone().multiplyScalar(ch.point.dot(n));
+          let x = new THREE.Vector3(1, 0, 0).projectOnPlane(n);
+          if (x.length() < 0.3) x = new THREE.Vector3(0, 1, 0).projectOnPlane(n);
+          x.normalize();
+          plane = { kind: 'custom', label: 'Cara del ensamblaje', origin: vArr(o), xDir: vArr(x), normal: vArr(n) };
+        } else if (fh && (!ph || fh.distance <= ph.dist)) {
           if (!fh.planar) { s.notify('Selecciona una cara plana o un plano', 'error'); return; }
           const n = fh.normal, o = n.clone().multiplyScalar(fh.point.dot(n));
           let x = new THREE.Vector3(1, 0, 0).projectOnPlane(n);
@@ -1132,9 +1161,13 @@ export default function PartViewport() {
         return;
       }
       if (tool === 'projectGeom') {
-        const m = state.mesh; if (!m) { s.notify('No hay modelo que proyectar', 'error'); return; }
-        const hit = V.nearestEdge(ev, m, null, []); if (!hit) return;
-        projectEdge(hit.group);
+        const m = state.mesh;
+        const hit = m ? V.nearestEdge(ev, m, null, []) : null;
+        if (hit) { projectEdge(hit.group); return; }
+        // aristas de otros componentes (edición en contexto)
+        const hc = ctxMesh ? V.nearestEdge(ev, ctxMesh, null, []) : null;
+        if (hc) { projectEdge(hc.group, ctxMesh!); return; }
+        if (!m && !ctxMesh) s.notify('No hay modelo que proyectar', 'error');
         return;
       }
       // --- herramientas de dibujo ---
@@ -1319,7 +1352,9 @@ export default function PartViewport() {
       if (s.doc !== p.doc || s.sketchId !== p.sketchId || s.selEntity !== p.selEntity || s.selEntities !== p.selEntities || s.selCon !== p.selCon || s.tool !== p.tool || s.mode !== p.mode || s.skInfo !== p.skInfo || s.showCons !== p.showCons || s.dialog !== p.dialog) buildSketches(s);
       if (s.tool !== p.tool || s.mode !== p.mode || s.conType !== p.conType) { applyMouse(s); cancelTool(); setHint(''); state.hoverEdge = -1; hoverFace = -1; measureSel = []; buildOverlay(s); }
       if (s.view !== p.view) setView(s.view.name);
+      if (s.ctxEdit !== p.ctxEdit || s.active !== p.active) buildCtx(s);
     });
+    buildCtx(useStore.getState());
     setView('home');
     return () => { unsub(); window.removeEventListener('keydown', onKey, true); V.dispose(); };
   }, []);
@@ -1341,6 +1376,7 @@ export default function PartViewport() {
 
   const mode = useStore((s) => s.mode);
   const tool = useStore((s) => s.tool);
+  const ctxEdit = useStore((s) => s.ctxEdit), active = useStore((s) => s.active);
   const conType = useStore((s) => s.conType);
   const toolParam = useStore((s) => s.toolParam);
   const hints: Record<string, string> = {
@@ -1360,6 +1396,12 @@ export default function PartViewport() {
   return (
     <div className="viewport" ref={host}>
       <div className="viewcube" ref={cubeHost} />
+      {ctxEdit && ctxEdit.part === active && (
+        <div className="ctx-bar">
+          <span>Edición en contexto · <b>{ctxEdit.asmName}</b></span>
+          <button className="btn primary" onClick={() => asmActions.returnToAsm()}>Volver al ensamblaje</button>
+        </div>
+      )}
       <button className="vp-home" title="Vista de inicio (F6)" onClick={() => useStore.getState().setView('home')}>
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </button>

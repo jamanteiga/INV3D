@@ -1,6 +1,6 @@
 import { drwActions } from './actions';
 import { allPages } from '../core/drawing';
-import { useState, type ReactNode } from 'react';
+import { useState, Fragment, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
 import { planeLabel, ENTITY_NAMES, type Feature, type StdPlane, type PartDoc } from '../core/doc';
@@ -206,9 +206,10 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
       const e = s.docs.find((d) => d.id === o.part);
       const bad = s.asmResult?.parts[o.part]?.ok === false;
       return (
-        <div key={o.id} className={rowCls(o.id, o.suppressed ? 'supp' : '')} style={{ paddingLeft: 10 }} onClick={() => sel(o.id)}
-          onDoubleClick={() => s.activate(o.part)}
+        <Fragment key={o.id}><div className={rowCls(o.id, o.suppressed ? 'supp' : '')} style={{ paddingLeft: 10 }} onClick={() => sel(o.id)}
+          onDoubleClick={() => (e?.kind === 'part' ? asmActions.editInPlace(o.id) : s.activate(o.part))}
           onContextMenu={(ev) => { ev.preventDefault(); sel(o.id); setMenu({ x: ev.clientX, y: ev.clientY, items: [
+            ...(e?.kind === 'part' ? [{ label: 'Editar en contexto', run: () => asmActions.editInPlace(o.id) }] : []),
             { label: 'Abrir', run: () => s.activate(o.part) },
             { label: o.grounded ? 'Liberar' : 'Fijar', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.grounded = !t.grounded; }) },
             { label: o.hidden ? 'Mostrar' : 'Ocultar', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.hidden = !t.hidden; }) },
@@ -221,11 +222,16 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
             { label: 'Eliminar', danger: true, run: () => del('occurrences', o.id) },
           ] }); }}
           title={bad ? s.asmResult?.parts[o.part]?.error : e?.fileName}>
-          <Icon name="part" size={17} /><span className="tree-name">{o.name}</span>
+          <Icon name={e?.kind === 'assembly' ? 'assembly' : 'part'} size={17} /><span className="tree-name">{o.name}</span>
           {o.grounded && <span className="pin" title="Fijo"><Icon name="ground" size={13} /></span>}
           {!o.grounded && s.asmDof && s.asmDof[o.id] !== undefined && <span className={`gdl ${s.asmDof[o.id] === 0 ? 'zero' : ''}`} title="Grados de libertad">{s.asmDof[o.id]} GDL</span>}
           {bad && <span className="tree-err"><Icon name="error" size={14} /></span>}
         </div>
+        {e?.kind === 'assembly' && !o.suppressed && (s.asmResult?.view?.occurrences ?? []).filter((c) => (c as { sub?: string }).sub === o.id).map((c) => (
+          <div key={c.id} className="tree-row sub" style={{ paddingLeft: 30 }} onDoubleClick={() => s.activate(c.part)} title="Componente del subensamblaje (doble clic: abrir pieza)">
+            <Icon name="part" size={15} /><span className="tree-name">{c.name.slice(o.name.length + 1)}</span>
+          </div>
+        ))}</Fragment>
       );
     })}
     {s.asm.frames.length > 0 && (

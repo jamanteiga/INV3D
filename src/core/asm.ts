@@ -119,11 +119,15 @@ export interface BoltCalc {
 /** Patrón de componentes (copias de uno o varios componentes). */
 
 /** Representación de vista: componentes ocultos */
-export interface ViewRep { id: string; name: string; hidden: string[] }
+export interface ViewRep { id: string; name: string; hidden: string[]; /** colores por componente y cámara (opcionales) */ colors?: Record<string, string> }
+/** Estado de modelo: qué componentes, barras, cordones y tornillos están suprimidos, y posiciones de los no restringidos */
+export interface ModelState { id: string; name: string; suppressed: string[]; positions?: Record<string, Xform> }
 
 export interface AsmDoc {
   format: 'inv3d.assembly';
   viewReps?: ViewRep[];
+  modelStates?: ModelState[];
+  activeState?: string;
   patterns?: CompPattern[];
   motions?: Motion[];
   version: 1;

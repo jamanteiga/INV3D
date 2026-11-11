@@ -1,3 +1,5 @@
+import { normalizeAsm } from '../core/subasm';
+import { docGetter } from '../core/store';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore, activeSketch } from '../core/store';
 import { evaluate, resolveParams, makeEval, fmt, isValidName } from '../core/expr';
@@ -17,7 +19,8 @@ import { cad, type FlatResult } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
 import { writeDxf } from '../core/dxf';
 import { asmActions, drwActions } from './actions';
-import { bomRows, bomCsv } from './bom';
+import { bomRows, bomCsv, bomPartsOnly, bomTotal, type BomRow } from './bom';
+import { downloadXlsx, type Sheet } from '../core/xlsx';
 import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
@@ -672,7 +675,7 @@ function JointDialog() {
     const [A, B] = gb && !ga ? [j.b, j.a] : [j.a, j.b];
     const joint: Joint = { id: j.id, name: j.name, type: j.type, a: A, b: B, c: j.type === 'sym' ? j.c : undefined, offset: j.offset, angle: j.angle, aligned: j.type === 'insert' ? !!j.aligned : undefined, lock: j.lock || undefined, min: j.min || undefined, max: j.max || undefined };
     s.commitAsm((a) => { a.joints.push(joint); });
-    const err = solveAssembly(useStore.getState().asm, (x) => { try { return makeEval([])(x); } catch { return NaN; } }).errors[joint.id];
+    const err = solveAssembly(normalizeAsm(useStore.getState().asm, docGetter(useStore.getState()), (x) => { try { return makeEval([])(x); } catch { return NaN; } }), (x) => { try { return makeEval([])(x); } catch { return NaN; } }).errors[joint.id];
     if (err) s.notify(`${joint.name}: ${err}`, 'error'); else s.notify(`${joint.name} (${JOINT_NAMES[joint.type] ?? joint.type}) aplicada`);
     return true;
   };
@@ -985,7 +988,7 @@ function NumIn({ value, onCommit, disabled }: { value: number; onCommit: (v: num
 function AsmSummary() {
   const s = useStore();
   const rows = bomRows(s, s.asm);
-  const mass = rows.reduce((a, r) => a + r.mass * (r.kind === 'part' ? r.qty : 1), 0);
+  const mass = bomTotal(rows);
   const r = s.asmResult;
   return (
     <div className="psec">
@@ -1292,28 +1295,30 @@ function FileInfoDialog({ title, info, onClose }: { title: string; info: import(
 
 function PlaceDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const parts = s.docs.filter((d) => d.kind === 'part');
+  // piezas y otros ensamblajes abiertos (subensamblajes); nunca el propio ensamblaje ni uno que ya lo contenga
+  const contains = (asmId: string, target: string, depth = 0): boolean => depth < 8 && ((s.docData(asmId) as AsmDoc | null)?.occurrences ?? []).some((o) => o.part === target || (s.docs.find((d) => d.id === o.part)?.kind === 'assembly' && contains(o.part, target, depth + 1)));
+  const parts = s.docs.filter((d) => d.kind === 'part' || (d.kind === 'assembly' && d.id !== s.active && !contains(d.id, s.active)));
   const [files, setFiles] = useState<FolderEntry[]>([]);
   const [q, setQ] = useState('');
-  useEffect(() => { if (s.folder.state === 'granted') listFolder().then((f) => setFiles(f.filter((x) => /\.(i3p|step|stp)$/i.test(x.name)))).catch(() => setFiles([])); }, [s.folder.state]);
+  useEffect(() => { if (s.folder.state === 'granted') listFolder().then((f) => setFiles(f.filter((x) => /\.(i3p|i3a|step|stp)$/i.test(x.name)))).catch(() => setFiles([])); }, [s.folder.state]);
   const go = (pid: string | null) => { if (!pid) return; onClose(); asmActions.startPlace(pid); };
-  const browse = async () => { const f = await pickFile('.i3p,.json,.step,.stp,.zip'); if (f) go(await loadPartForPlace(f)); };
+  const browse = async () => { const f = await pickFile('.i3p,.i3a,.json,.step,.stp,.zip'); if (f) go(await loadPartForPlace(f)); };
   const fromFolder = async (path: string) => { try { const { readFromFolder } = await import('../core/persist'); go(await loadPartForPlace(await readFromFolder(path))); } catch (e) { s.notify((e as Error).message, 'error'); } };
   const shown = files.filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase())).slice(0, 200);
   return (
     <Modal title="Colocar componente" onClose={onClose}>
       <p className="phelp">El primer componente queda <b>fijo en el origen</b>. Las demás copias siguen al cursor: <b>clic</b> para soltar (puedes soltar varias), <b>X/Y/Z</b> giran 90°, <b>Esc</b> o clic derecho termina. Después relaciónalas con <b>Restringir (J)</b>.</p>
       <div className="modal-btns" style={{ marginTop: 0 }}>
-        <button className="btn primary" onClick={browse}>Examinar… (.i3p, STEP)</button>
+        <button className="btn primary" onClick={browse}>Examinar… (.i3p, .i3a, STEP)</button>
         <button className="btn" onClick={() => { onClose(); asmActions.createPart(); }}>Crear pieza nueva</button>
         <button className="btn" onClick={() => s.open({ kind: 'content' })}>Centro de contenido…</button>
       </div>
-      {!!parts.length && <div className="plabel">Piezas abiertas</div>}
+      {!!parts.length && <div className="plabel">Piezas y ensamblajes abiertos</div>}
       <div className="place-list">
         {parts.map((p) => (
           <button key={p.id} className="place-item" onClick={() => go(p.id)}>
-            <Icon name={(s.docData(p.id) as PartDoc).sheet ? 'sheetmetal' : 'part'} size={24} />
-            <span><b>{p.fileName}</b><span className="muted">{(s.docData(p.id) as PartDoc).iProperties.description || (s.docData(p.id) as PartDoc).iProperties.material}</span></span>
+            <Icon name={p.kind === 'assembly' ? 'assembly' : (s.docData(p.id) as PartDoc).sheet ? 'sheetmetal' : 'part'} size={24} />
+            <span><b>{p.fileName}</b><span className="muted">{p.kind === 'assembly' ? `Subensamblaje · ${(s.docData(p.id) as AsmDoc).occurrences.length} componentes` : (s.docData(p.id) as PartDoc).iProperties.description || (s.docData(p.id) as PartDoc).iProperties.material}</span></span>
           </button>
         ))}
       </div>
@@ -2284,23 +2289,61 @@ function ViewRepDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function ModelStateDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [name, setName] = useState(`Estado${(s.asm.modelStates?.length ?? 0) + 1}`);
+  const act = s.asm.activeState;
+  const nSup = [...s.asm.occurrences, ...s.asm.frames, ...s.asm.welds, ...s.asm.bolts].filter((x) => x.suppressed).length;
+  return (
+    <Modal title="Estados de modelo" onClose={onClose}>
+      <p className="phelp">Variantes del ensamblaje: componentes, barras, cordones y tornillos suprimidos (clic derecho › Suprimir) y posición de los componentes libres. Ahora hay {nSup} elementos suprimidos.</p>
+      <div className="vr-list">
+        <button className={`btn wide ${!act ? 'primary' : ''}`} onClick={() => asmActions.applyModelState(null)}>Principal (todo activo)</button>
+        {(s.asm.modelStates ?? []).map((r) => (
+          <div key={r.id} className="vr-row">
+            <button className={`btn wide ${act === r.id ? 'primary' : ''}`} onClick={() => asmActions.applyModelState(r.id)}>{r.name} <span className="ro">· {r.suppressed.length} suprimidos</span></button>
+            <button className="btn icon" title="Actualizar con lo actual" onClick={() => s.commitAsm((a) => { const t = a.modelStates!.find((x) => x.id === r.id)!; t.suppressed = [...a.occurrences, ...a.frames, ...a.welds, ...a.bolts].filter((x) => x.suppressed).map((x) => x.id); })}><Icon name="save" size={14} /></button>
+            <button className="btn icon" title="Eliminar" onClick={() => s.commitAsm((a) => { a.modelStates = (a.modelStates ?? []).filter((x) => x.id !== r.id); if (a.activeState === r.id) a.activeState = undefined; })}><Icon name="trash" size={14} /></button>
+          </div>
+        ))}
+      </div>
+      <Row label="Nuevo"><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></Row>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={() => { asmActions.saveModelState(name); setName(`Estado${(s.asm.modelStates?.length ?? 0) + 2}`); }}>Guardar el actual</button><button className="btn" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
 function BomDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const rows = bomRows(s, s.asm);
-  const total = rows.reduce((a, r) => a + r.mass * (r.kind === 'part' ? r.qty : 1), 0);
+  const [view, setView] = useState<'struct' | 'parts'>('struct');
+  const all = bomRows(s, s.asm);
+  const rows = view === 'parts' ? bomPartsOnly(all) : all;
+  const total = bomTotal(all);
   const cut = rows.filter((r) => r.kind === 'member');
+  const unitMass = (r: BomRow) => (r.kind === 'part' || r.kind === 'asm' ? r.mass : r.qty ? r.mass / r.qty : r.mass);
+  const totMass = (r: BomRow) => (r.kind === 'part' || r.kind === 'asm' ? r.mass * r.qty : r.mass);
+  const posOf = (r: BomRow, i: number) => (view === 'struct' && r.pos ? r.pos : String(i + 1));
+  const toXls = () => {
+    const head = ['Pos.', 'Nivel', 'Cant.', 'Nº de pieza / designación', 'Descripción', 'Material', 'Masa unit. (kg)', 'Masa total (kg)', 'Longitud (mm)'];
+    const data = rows.map((r, i) => [posOf(r, i), r.level ?? '', r.qty, `${'   '.repeat(r.level ?? 0)}${r.pn}`, r.desc, r.material, r.mass ? +unitMass(r).toFixed(3) : '', r.mass ? +totMass(r).toFixed(3) : '', r.length ? +r.length.toFixed(1) : '']);
+    const sheets: Sheet[] = [{ name: view === 'parts' ? 'Solo piezas' : 'Estructurada', rows: [head, ...data, ['', '', '', 'TOTAL', '', '', '', +total.toFixed(2), '']], bold: [0, data.length + 1] }];
+    if (cut.length) sheets.push({ name: 'Lista de corte', rows: [['Perfil', 'Cant.', 'Longitud (mm)', 'Corte', 'Material', 'Masa (kg)'], ...cut.map((r) => [r.pn, r.qty, r.length ?? '', r.desc.replace(/^L = [^·]*·?\s*/, ''), r.material, +r.mass.toFixed(2)])] });
+    downloadXlsx(sheets, `${s.asm.iProperties.partNumber}-LM`);
+  };
   return (
     <Modal title={`Lista de materiales — ${s.asm.iProperties.partNumber}`} onClose={onClose} xwide>
+      <Row label="Vista"><Seg value={view} onChange={setView} options={[['struct', 'Estructurada (por niveles)'], ['parts', 'Solo piezas']]} /></Row>
       <table className="ptable bom">
         <thead><tr><th>Pos.</th><th>Cant.</th><th>Nº de pieza / designación</th><th>Descripción</th><th>Material</th><th className="num">Masa (kg)</th></tr></thead>
         <tbody>{rows.map((r, i) => (
-          <tr key={i} className={`k-${r.kind}`}><td>{i + 1}</td><td>{r.qty}</td><td>{r.pn}</td><td>{r.desc}</td><td>{r.material}</td><td className="num">{r.mass ? fmt(r.kind === 'part' ? r.mass * r.qty : r.mass, 2) : ''}</td></tr>
+          <tr key={i} className={`k-${r.kind}`}><td>{posOf(r, i)}</td><td>{r.qty}</td><td style={{ paddingLeft: 6 + 16 * (view === 'struct' ? r.level ?? 0 : 0) }}>{r.kind === 'asm' ? <b>{r.pn}</b> : r.pn}</td><td>{r.desc}</td><td>{r.material}</td><td className="num">{r.mass ? fmt(totMass(r), 2) : ''}</td></tr>
         ))}</tbody>
         <tfoot><tr><td colSpan={5}>Total</td><td className="num"><b>{fmt(total, 2)}</b></td></tr></tfoot>
       </table>
       {cut.length > 0 && <p className="phelp">Barras de estructura: {cut.reduce((a, r) => a + r.qty, 0)} cortes · {fmt(cut.reduce((a, r) => a + (r.length ?? 0) * r.qty, 0) / 1000, 2)} m de perfil.</p>}
       <div className="modal-btns"><span className="grow" />
-        <button className="btn" onClick={() => saveText('﻿' + bomCsv(rows), `${s.asm.iProperties.partNumber}-LM.csv`, 'CSV', '.csv', 'text/csv')}>Exportar CSV</button>
+        <button className="btn" onClick={() => saveText('\ufeff' + bomCsv(rows), `${s.asm.iProperties.partNumber}-LM.csv`, 'CSV', '.csv', 'text/csv')}>Exportar CSV</button>
+        <button className="btn" onClick={toXls}>Exportar Excel</button>
         <button className="btn primary" onClick={onClose}>Cerrar</button>
       </div>
     </Modal>
@@ -2467,6 +2510,7 @@ export function Modals() {
     case 'folder': return <FolderDialog onClose={close} />;
     case 'replace': return <ReplaceDialog onClose={close} />;
     case 'viewreps': return <ViewRepDialog onClose={close} />;
+    case 'mstates': return <ModelStateDialog onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;
     case 'bom': return <BomDialog onClose={close} />;

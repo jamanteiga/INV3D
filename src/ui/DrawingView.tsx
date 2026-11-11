@@ -1,3 +1,7 @@
+import { makeEval } from '../core/expr';
+import { hasSubs, expandAsm, normalizeAsm } from '../core/subasm';
+import { docGetter } from '../core/store';
+import { solveAssembly } from '../core/asm';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, type State } from '../core/store';
 import { cad, type ProjSource } from '../core/cadClient';
@@ -20,7 +24,9 @@ export function sourceFor(s: State, id: string): ProjSource | null {
   if (!d) return null;
   if ((d as PartDoc).format === 'inv3d.part') return { kind: 'part', doc: d as PartDoc };
   if ((d as AsmDoc).format === 'inv3d.assembly') {
-    const a = d as AsmDoc;
+    let a = d as AsmDoc;
+    const get = docGetter(s), ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+    if (hasSubs(a, get)) a = expandAsm(a, solveAssembly(normalizeAsm(a, get, ev), ev).xf, get, ev);
     return { kind: 'asm', asm: a, parts: s.partsMap([...new Set(a.occurrences.map((o) => o.part))]) };
   }
   return null;
@@ -85,7 +91,7 @@ export function bomForDrawing(s: State, drw: DrawingDoc) {
   if (!v) return null;
   const d = s.docData(v.source) as AsmDoc | null;
   if (!d || d.format !== 'inv3d.assembly') return null;
-  const rows = bomRows(s, d);
+  const rows = bomRows(s, d).filter((r) => (r.level ?? 0) === 0);
   const [W] = SHEETS[drw.sheet];
   const cols = [{ w: 10, k: 'item' }, { w: 12, k: 'qty' }, { w: 45, k: 'pn' }, { w: 63, k: 'desc' }, { w: 30, k: 'mat' }, { w: 20, k: 'mass' }] as const;
   const x0 = W - 10 - 180, y0 = 10 + TB_H;

@@ -25,6 +25,8 @@ export interface AsmResult {
   bolts: { id: string; mesh: MeshData; length: number; count: number }[];
   errors: Record<string, string>;
   ms: number;
+  /** Ensamblaje aplanado (con subensamblajes): ocurrencias virtuales «padre/hijo» */
+  view?: AsmDoc;
 }
 export interface FlatResult { paths: string[]; bends: { a: V2; b: V2; label: string }[]; t: number; r: number; k: number }
 export interface Projection { visible: string[]; hidden: string[]; center: V3; cut: number[] }

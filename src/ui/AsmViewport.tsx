@@ -6,6 +6,8 @@ import { makeEval } from '../core/expr';
 import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
 import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
 import { asmActions } from './actions';
+import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
+import { docGetter } from '../core/store';
 import type { MeshData } from '../core/cadClient';
 import { View3D, css, tv, vArr, planarFaceAt, faceVertices } from './view3d';
 
@@ -122,6 +124,7 @@ export default function AsmViewport() {
         const s = useStore.getState(); const id = s.selItem;
         const o = s.asm.occurrences.find((x) => x.id === id);
         if (o) s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === id)!; t.xf = { pos: vArr(gizmoProxy.position, 4), quat: gizmoProxy.quaternion.toArray() as [number, number, number, number] }; });
+        if (o) void asmActions.checkCollision(o.id);
       }
     });
     tc.addEventListener('change', () => {
@@ -132,13 +135,14 @@ export default function AsmViewport() {
     });
 
     let pickables: THREE.Mesh[] = [];
-    let ghost: { grp: THREE.Object3D; part: string } | null = null;
+    let ghost: { grp: THREE.Group; part: string; box: THREE.Box3 } | null = null;
     let lastCursor: { x: number; y: number } | null = null;
     let ghostXf: Xform | null = null;
     /** Posición de la copia pendiente bajo el cursor: sobre la cara apuntada (apoyada en ella) o en el plano de la vista por el centro del modelo. */
     const moveGhost = (c: { x: number; y: number }) => {
       const s = useStore.getState(); const p = s.placing; if (!ghost || !p) return;
-      const bb = s.asmResult?.parts[p.part]?.props?.bbox; if (!bb) return;
+      if (ghost.box.isEmpty()) return;
+      const bb = [ghost.box.min.toArray(), ghost.box.max.toArray()];
       const ev = { clientX: c.x, clientY: c.y } as MouseEvent;
       const q = new THREE.Quaternion(...p.quat);
       const cL = new THREE.Vector3((bb[0][0] + bb[1][0]) / 2, (bb[0][1] + bb[1][1]) / 2, (bb[0][2] + bb[1][2]) / 2);
@@ -170,22 +174,32 @@ export default function AsmViewport() {
         const a = structuredClone(s.asm);
         if (d.type === 'sym' && !d.c) return false;
         a.joints.push({ id: '__prev', name: '', type: d.type, a: d.a, b: d.b, c: d.type === 'sym' ? d.c : undefined, offset: d.offset, angle: d.angle, aligned: d.type === 'insert' ? !!d.aligned : undefined, lock: d.lock, min: d.min, max: d.max });
-        const r = solveAssembly(a, (x) => { try { return makeEval([])(x); } catch { return NaN; } });
-        for (const m of pickables) if (m.userData.kind === 'occ' && r.xf[m.userData.id]) { m.parent!.matrix.copy(xfMatrix(r.xf[m.userData.id], explodeOf(s, m.userData.id))); m.parent!.matrixWorldNeedsUpdate = true; }
+        const evv = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+        const r = solveAssembly(normalizeAsm(a, docGetter(s), evv), evv);
+        for (const m of pickables) {
+          if (m.userData.kind !== 'occ') continue;
+          const fo = findOcc(s, m.userData.id);
+          const x = fo?.sub && fo.local && r.xf[fo.sub] ? compose(r.xf[fo.sub], fo.local) : r.xf[m.userData.id];
+          if (x) { m.parent!.matrix.copy(xfMatrix(x, explodeOf(s, m.userData.id))); m.parent!.matrixWorldNeedsUpdate = true; }
+        }
         V.request();
         return true;
       } catch { return false; }
     };
     let cands: CandLine[] = [];
     let hoverKey = '';
+    /** Ocurrencias a dibujar (aplanadas si hay subensamblajes) y búsqueda por id (también virtuales «padre/hijo») */
+    const occs = (s: State) => (s.asmResult?.view?.occurrences ?? s.asm.occurrences) as FlatOcc[];
+    const findOcc = (s: State, id: string): FlatOcc | undefined => occs(s).find((x) => x.id === id) ?? s.asm.occurrences.find((x) => x.id === id);
+    const topOf = (s: State, id: string) => findOcc(s, id)?.sub ?? id;
     const meshOf = (kind: string, id: string): MeshData | null => {
       const s = useStore.getState(), r = s.asmResult; if (!r) return null;
-      if (kind === 'occ') { const o = s.asm.occurrences.find((x) => x.id === id); return o ? (r.occCut[id]?.mesh ?? r.parts[o.part]?.mesh ?? null) : null; }
+      if (kind === 'occ') { const o = findOcc(s, id); return o ? (r.occCut[id]?.mesh ?? r.parts[o.part]?.mesh ?? null) : null; }
       if (kind === 'member') return r.members.find((m) => m.id === id)?.mesh ?? null;
       if (kind === 'weld') return r.welds.find((m) => m.id === id)?.mesh ?? null;
       return r.bolts.find((m) => m.id === id)?.mesh ?? null;
     };
-    const explodeOf = (s: State, id: string): V3 => v3.mul(s.asm.explode[id] ?? [0, 0, 0], s.mode === 'present' ? s.explodeT : 0);
+    const explodeOf = (s: State, id: string): V3 => v3.mul(s.asm.explode[(findOcc(s, id)?.sub ?? id)] ?? [0, 0, 0], s.mode === 'present' ? s.explodeT : 0);
 
     const build = (s: State) => {
       V.clearGroup(modelGroup);
@@ -195,7 +209,7 @@ export default function AsmViewport() {
       if (r) {
         const add = (kind: string, id: string, m: MeshData | undefined | null, color: string, matrix: THREE.Matrix4 | null) => {
           if (!m || !m.triangles.length) return;
-          const sel = s.selItem === id;
+          const sel = !!s.selItem && (s.selItem === id || (kind === 'occ' && topOf(s, id) === s.selItem));
           const { grp, mesh } = V.meshFromData(m, color, { edges: s.showEdges, emissive: sel ? css('--accent') : undefined });
           if (matrix) { grp.matrixAutoUpdate = false; grp.matrix.copy(matrix); }
           mesh.userData = { kind, id };
@@ -206,18 +220,20 @@ export default function AsmViewport() {
           box.union(mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld));
         };
         ghost = null; ghostXf = null;
-        for (const o of s.asm.occurrences) {
+        for (const o of occs(s)) {
           if (o.suppressed || o.hidden) continue;
           const doc = s.docData(o.part) as PartDoc | null;
           const color = MATERIALS.find((x) => x.name === doc?.iProperties.material)?.color ?? '#c3c8cf';
           const xf = r.xf[o.id] ?? o.xf;
-          if (s.placing?.occ === o.id) {
+          if (s.placing && s.placing.occ === (o.sub ?? o.id)) {
+            // copia pendiente (pieza o todas las piezas del subensamblaje) en un grupo que sigue al cursor
             const m = r.parts[o.part]?.mesh; if (!m) continue;
+            if (!ghost) { const g = new THREE.Group(); g.matrixAutoUpdate = false; g.matrix.copy(xfMatrix(r.xf[o.sub ?? o.id] ?? (o.sub ? compose(xf, { pos: [0, 0, 0], quat: [0, 0, 0, 1] }) : xf))); modelGroup.add(g); ghost = { grp: g, part: s.placing.part, box: new THREE.Box3() }; }
             const { grp } = V.meshFromData(m, color, { edges: true, emissive: css('--accent') });
             grp.traverse((x: any) => { if (x.material) { x.material = x.material.clone(); x.material.transparent = true; x.material.opacity = 0.55; x.material.depthWrite = false; } x.renderOrder = 7; });
-            grp.matrixAutoUpdate = false; grp.matrix.copy(xfMatrix(xf));
-            ghost = { grp, part: o.part };
-            modelGroup.add(grp);
+            grp.matrixAutoUpdate = false; grp.matrix.copy(xfMatrix(o.local ?? { pos: [0, 0, 0], quat: [0, 0, 0, 1] }));
+            ghost.grp.add(grp);
+            grp.traverse((x: any) => { if (x.isMesh) { x.geometry.computeBoundingBox(); ghost!.box.union(x.geometry.boundingBox.clone().applyMatrix4(grp.matrix)); } });
             continue;
           }
           add('occ', o.id, meshOf('occ', o.id), color, xfMatrix(xf, explodeOf(s, o.id)));
@@ -291,7 +307,7 @@ export default function AsmViewport() {
       const s = useStore.getState();
       const toL = (pW: V3, nWv: V3): [V3, V3] => {
         if (kind !== 'occ') return [pW, nWv];
-        const o = s.asm.occurrences.find((x) => x.id === id)!;
+        const o = findOcc(s, id)!;
         const xf = s.asmResult?.xf[id] ?? o.xf;
         return [vArr(tv(xfInvPoint(xf, pW))), vArr(tv(xfInvDir(xf, nWv)).normalize())];
       };
@@ -326,7 +342,7 @@ export default function AsmViewport() {
       if (!h) return null;
       const f = faceFromHit(h);
       if (!f || f.ownerKind !== 'occ') return null;
-      const nm = useStore.getState().asm.occurrences.find((o) => o.id === f.owner)?.name ?? '';
+      const nm = findOcc(useStore.getState(), f.owner)?.name ?? '';
       return { ref: { occ: f.owner, point: f.pointL, normal: f.normalL, kind: f.kind, radius: f.radius, convex: f.convex, center: f.centerL, xdir: f.xdirL }, pW: f.pointW, label: `${nm} · ${f.kind === 'axis' ? `eje Ø${Math.round((f.radius ?? 0) * 20) / 10}` : 'cara'}` };
     };
     const nearestCand = (ev: MouseEvent): CandLine | null => {
@@ -371,17 +387,19 @@ export default function AsmViewport() {
     const cvs = V.renderer.domElement;
     // Arrastre libre (como Inventor): clic izquierdo mantenido sobre un componente no fijo lo mueve en el plano de la vista;
     // al soltar se vuelven a resolver las restricciones (se mueve solo en sus grados de libertad libres).
-    let drag: { id: string; grp: THREE.Object3D; plane: THREE.Plane; start: THREE.Vector3; xf: Xform; moved: boolean } | null = null;
+    let drag: { id: string; grp: THREE.Object3D; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; plane: THREE.Plane; start: THREE.Vector3; xf: Xform; moved: boolean } | null = null;
     host.current!.addEventListener('pointerdown', (ev) => {
       const s = useStore.getState();
       if (ev.button !== 0 || s.tool || s.mode === 'present') return;
       const hit = hitAt(ev);
       if (!hit || hit.object.userData.kind !== 'occ') return;
-      const o = s.asm.occurrences.find((x) => x.id === hit.object.userData.id);
+      const top = topOf(s, hit.object.userData.id);
+      const o = s.asm.occurrences.find((x) => x.id === top);
       if (!o || o.grounded || o.mirrorOf || o.patternOf) return;
       V.controls.enabled = false;
       const dir = camera.getWorldDirection(new THREE.Vector3());
-      drag = { id: o.id, grp: hit.object.parent!, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(dir, hit.point), start: hit.point.clone(), xf: s.asmResult?.xf[o.id] ?? o.xf, moved: false };
+      const grps = pickables.filter((m) => m.userData.kind === 'occ' && topOf(s, m.userData.id) === top).map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() }));
+      drag = { id: o.id, grp: hit.object.parent!, grps, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(dir, hit.point), start: hit.point.clone(), xf: s.asmResult?.xf[o.id] ?? o.xf, moved: false };
     }, { capture: true });
     window.addEventListener('pointermove', (ev) => {
       if (!drag || !downAt) return;
@@ -389,7 +407,8 @@ export default function AsmViewport() {
       drag.moved = true;
       const p = V.ray(ev).ray.intersectPlane(drag.plane, new THREE.Vector3()); if (!p) return;
       const d = p.sub(drag.start);
-      drag.grp.matrix.compose(tv(drag.xf.pos).add(d), new THREE.Quaternion(...drag.xf.quat), new THREE.Vector3(1, 1, 1)); drag.grp.matrixWorldNeedsUpdate = true;
+      const T = new THREE.Matrix4().makeTranslation(d.x, d.y, d.z);
+      for (const { g, m } of drag.grps) { g.matrix.copy(m).premultiply(T); g.matrixWorldNeedsUpdate = true; }
       cvs.style.cursor = 'move';
       V.request();
     });
@@ -400,6 +419,7 @@ export default function AsmViewport() {
       const p = V.ray(ev).ray.intersectPlane(dd.plane, new THREE.Vector3());
       const d = p ? p.sub(dd.start) : new THREE.Vector3();
       useStore.getState().commitAsm((a) => { const t = a.occurrences.find((x) => x.id === dd.id); if (t) t.xf = { pos: vArr(tv(dd.xf.pos).add(d), 4), quat: [...dd.xf.quat] }; });
+      void asmActions.checkCollision(dd.id);
       return true;
     };
     cvs.addEventListener('pointerdown', (ev) => { downAt = { x: ev.clientX, y: ev.clientY, button: ev.button }; });
@@ -410,7 +430,7 @@ export default function AsmViewport() {
       if (small && ev.button === 2 && !useStore.getState().tool) {
         downAt = null;
         const pk = pickRef(ev);
-        if (pk) { const o = useStore.getState().asm.occurrences.find((x) => x.id === pk.ref.occ); useStore.setState({ selItem: o?.id ?? null }); setCtx({ x: ev.clientX, y: ev.clientY, ref: pk.ref, pW: pk.pW, label: pk.label }); }
+        if (pk) { const st = useStore.getState(); useStore.setState({ selItem: pk.ref.occ === ASM_REF ? null : topOf(st, pk.ref.occ) }); setCtx({ x: ev.clientX, y: ev.clientY, ref: pk.ref, pW: pk.pW, label: pk.label }); }
         else setCtx(null);
         return;
       }
@@ -452,7 +472,7 @@ export default function AsmViewport() {
         if (!pk) { s.notify('Selecciona una cara o eje de un componente, o un plano/eje de origen', 'error'); return; }
         if (dlg.kind === 'asmwp') {
           if (pk.ref.kind === 'axis') { s.notify('Elige una cara plana o un plano', 'error'); return; }
-          const X = pk.ref.occ === ASM_REF ? { pos: [0, 0, 0] as V3, quat: [0, 0, 0, 1] as [number, number, number, number] } : (s.asmResult?.xf[pk.ref.occ] ?? s.asm.occurrences.find((o) => o.id === pk.ref.occ)!.xf);
+          const X = pk.ref.occ === ASM_REF ? { pos: [0, 0, 0] as V3, quat: [0, 0, 0, 1] as [number, number, number, number] } : (s.asmResult?.xf[pk.ref.occ] ?? findOcc(s, pk.ref.occ)!.xf);
           s.updateDraft({ base: 'face', face: { origin: xfPoint(X, pk.ref.center ?? pk.ref.point), normal: v3.norm(vArr(tv(xfPoint(X, pk.ref.normal)).sub(tv(xfPoint(X, [0, 0, 0]))))), xdir: v3.norm(vArr(tv(xfPoint(X, pk.ref.xdir ?? [1, 0, 0])).sub(tv(xfPoint(X, [0, 0, 0]))))) }, faceLabel: pk.label });
           return;
         }
@@ -489,15 +509,17 @@ export default function AsmViewport() {
       // Selección normal
       const hit = hitAt(ev);
       const id = hit ? (hit.object.userData.id as string) : null;
-      useStore.setState({ selItem: id });
+      useStore.setState({ selItem: id && hit!.object.userData.kind === 'occ' ? topOf(s, id) : id });
     });
     cvs.addEventListener('dblclick', (ev) => {
       const s = useStore.getState();
       if (s.tool) return;
       const hit = hitAt(ev);
       if (hit?.object.userData.kind === 'occ') {
-        const o = s.asm.occurrences.find((x) => x.id === hit.object.userData.id);
-        if (o) s.activate(o.part);
+        const o = findOcc(s, hit.object.userData.id);
+        // como en Inventor: doble clic edita la pieza en contexto
+        if (o && s.docs.find((d) => d.id === o.part)?.kind === 'part') asmActions.editInPlace(o.id);
+        else if (o) s.activate(o.part);
       }
     });
     cvs.addEventListener('pointermove', (ev) => {
@@ -594,7 +616,9 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
     window.addEventListener('pointerdown', off, true); window.addEventListener('keydown', esc, true);
     return () => { window.removeEventListener('pointerdown', off, true); window.removeEventListener('keydown', esc, true); };
   }, [close]);
-  const occ = s.asm.occurrences.find((o) => o.id === ctx.ref.occ);
+  const vo = (s.asmResult?.view?.occurrences as FlatOcc[] | undefined)?.find((o) => o.id === ctx.ref.occ);
+  const occ = s.asm.occurrences.find((o) => o.id === (vo?.sub ?? ctx.ref.occ));
+  const openPart = vo?.part ?? occ?.part;
   const isAxis = ctx.ref.kind === 'axis';
   const start = (type: JointType, extra: Record<string, unknown> = {}, b?: { ref: FaceRef; label: string }) => {
     close();
@@ -623,7 +647,8 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}
       {occ && (<><hr />
         <button onClick={() => { close(); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.grounded = !t.grounded; }); }}>{occ.grounded ? 'Liberar' : 'Fijar'}</button>
-        <button onClick={() => { close(); s.activate(occ.part); }}>Abrir pieza</button></>)}
+        {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); asmActions.editInPlace(vo?.id ?? occ.id); }}>Editar en contexto</button>}
+        <button onClick={() => { close(); s.activate(openPart!); }}>{vo?.sub ? 'Abrir pieza del subensamblaje' : s.docs.find((d) => d.id === occ.part)?.kind === 'assembly' ? 'Abrir subensamblaje' : 'Abrir pieza'}</button></>)}
     </div>
   );
 }

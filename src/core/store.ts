@@ -5,7 +5,8 @@ import {
 } from './doc';
 import { makeEval } from './expr';
 import { solve, applySolution, checkNew } from './sketch';
-import { newAsm, solveAssembly, applyAssociative, type AsmDoc } from './asm';
+import { newAsm, solveAssembly, applyAssociative, type AsmDoc, type Xform } from './asm';
+import { normalizeAsm, expandAsm, hasSubs } from './subasm';
 import { newDrawing, type DrawingDoc } from './drawing';
 import { cad, type RegenResult, type AsmResult, type MeshData } from './cadClient';
 import { DEFAULT_SETTINGS, type AppSettings, type UserLibs, type RecentItem } from './persist';
@@ -31,7 +32,7 @@ export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' }
   | { kind: 'sketch3d'; id?: string }
   | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN' }
   | { kind: 'hvac'; hk: string; shape?: 'rect' | 'round' | 'oval' }
@@ -82,6 +83,10 @@ export interface State {
   /** Parámetros de la herramienta de boceto activa (radio de empalme, etc.) */
   toolParam: string;
   /** Colocación interactiva: componente pendiente que sigue al cursor */
+  /** Edición en contexto: pieza que se edita dentro de un ensamblaje y geometría del resto de componentes (en coordenadas de la pieza) */
+  /** Detección de colisiones al mover componentes */
+  collide: boolean;
+  ctxEdit: { asm: string; occ: string; part: string; asmName: string; mesh: MeshData | null } | null;
   placing: { part: string; occ: string; quat: [number, number, number, number]; extras?: string[] } | null;
   selItem: string | null;        // ensamblaje: componente/barra/cordón/tornillo/unión; plano: vista
   dialog: Dialog;
@@ -215,7 +220,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null,
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, ctxEdit: null, collide: false,
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
@@ -247,7 +252,7 @@ export const useStore = create<State>((set, get) => ({
   addDocument: (kind, data, fileName, activate = true, id) => {
     const nid = id ?? uid('d');
     if (kind === 'part') { data = clone(data); resolveAll(data as PartDoc); }
-    set({ docs: [...get().docs, { id: nid, kind, fileName, data, past: [], future: [], dirty: false, hidden: !activate && kind === 'part' ? true : undefined }] });
+    set({ docs: [...get().docs, { id: nid, kind, fileName, data, past: [], future: [], dirty: false, hidden: !activate && kind !== 'drawing' ? true : undefined }] });
     if (activate) get().activate(nid);
     return nid;
   },
@@ -277,6 +282,7 @@ export const useStore = create<State>((set, get) => ({
   activate: (id) => {
     const s = get();
     if (id === s.active) return;
+    if (s.ctxEdit && id !== s.ctxEdit.part) set({ ctxEdit: null });
     // Colocación pendiente: se descarta el componente que seguía al cursor
     if (s.placing && s.kind === 'assembly') { const pend = s.placing.occ; set({ asm: { ...s.asm, occurrences: s.asm.occurrences.filter((o) => o.id !== pend) }, placing: null }); return get().activate(id); }
     // Guardar el documento activo en el registro
@@ -372,7 +378,7 @@ export const useStore = create<State>((set, get) => ({
     fn(next);
     // Restricciones: se resuelven aquí y se guardan las posiciones resultantes
     if (next.joints.some((j) => !j.suppressed)) {
-      const r = solveAssembly(next, (x) => { try { return makeEval([])(x); } catch { return NaN; } });
+      const r = solveAssembly(normalizeAsm(next, docGetter(get()), (x) => { try { return makeEval([])(x); } catch { return NaN; } }), (x) => { try { return makeEval([])(x); } catch { return NaN; } });
       for (const o of next.occurrences) if (r.xf[o.id] && !o.grounded) o.xf = { pos: r.xf[o.id].pos.map((v) => Number(v.toFixed(6))) as V3, quat: r.xf[o.id].quat.map((v) => Number(v.toFixed(9))) as [number, number, number, number] };
     }
     if (next.patterns?.length || next.occurrences.some((o) => o.mirrorOf)) applyAssociative(next, (x) => { try { return makeEval([])(x); } catch { return NaN; } }, uid);
@@ -630,14 +636,24 @@ async function runRegen() {
     if (my === regenSeq) { useStore.setState({ busy: false }); useStore.getState().notify((e as Error).message, 'error'); }
   }
 }
+/** Acceso a los datos de cualquier documento abierto (para subensamblajes) */
+export const docGetter = (s: State) => (id: string) => { const e = s.docs.find((d) => d.id === id); return e ? { kind: e.kind, data: s.docData(id) } : null; };
 async function runAsm() {
   const s = useStore.getState();
   if (s.oc !== 'ready' || s.kind !== 'assembly') return;
   const my = ++asmSeq;
   useStore.setState({ busy: true });
   try {
-    const ids = [...new Set(s.asm.occurrences.map((o) => o.part))];
-    const r = await cad.asm(s.asm, s.partsMap(ids), [...meshCache.keys()]);
+    const get = docGetter(s), ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+    // Con subensamblajes se resuelve aquí y se envía al núcleo el ensamblaje aplanado
+    let send = s.asm, view: AsmDoc | undefined, errs: Record<string, string> = {}, solXf: Record<string, Xform> = {};
+    if (hasSubs(s.asm, get)) {
+      const sol = solveAssembly(normalizeAsm(s.asm, get, ev), ev);
+      view = expandAsm(s.asm, sol.xf, get, ev); send = view; errs = sol.errors; solXf = sol.xf;
+    }
+    const ids = [...new Set(send.occurrences.map((o) => o.part))];
+    const r = await cad.asm(send, s.partsMap(ids), [...meshCache.keys()]);
+    if (view) { r.view = view; r.errors = { ...r.errors, ...errs }; for (const [k, v] of Object.entries(solXf)) r.xf[k] ??= v; }
     for (const p of Object.values(r.parts)) {
       if (p.mesh) meshCache.set(p.key, p.mesh); else p.mesh = meshCache.get(p.key);
     }
@@ -678,7 +694,7 @@ useStore.subscribe((s, prev) => {
   }
   if (s.kind === 'assembly' && (s.asm !== prev.asm || s.active !== prev.active)) {
     clearTimeout(dofTimer);
-    dofTimer = setTimeout(() => { const st = useStore.getState(); if (st.kind === 'assembly') useStore.setState({ asmDof: solveAssembly(st.asm, (x) => { try { return makeEval([])(x); } catch { return NaN; } }, { dof: true }).dof }); }, 200);
+    dofTimer = setTimeout(() => { const st = useStore.getState(); if (st.kind === 'assembly') useStore.setState({ asmDof: solveAssembly(normalizeAsm(st.asm, docGetter(st), (x) => { try { return makeEval([])(x); } catch { return NaN; } }), (x) => { try { return makeEval([])(x); } catch { return NaN; } }, { dof: true }).dof }); }, 200);
   }
   const ocNow = s.oc === 'ready' && prev.oc !== 'ready';
   if (s.kind === 'part' && (s.doc !== prev.doc || ocNow || s.active !== prev.active)) {

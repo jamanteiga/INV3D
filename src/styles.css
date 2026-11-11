@@ -510,3 +510,4 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .ctx-title { font-size: 11px; color: var(--muted); padding: 4px 10px 2px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ref-row { margin: 4px 0 6px; }
 .ref-sel { width: 100%; font-size: 12px; }
+.ctx-bar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 12px; padding: 6px 8px 6px 14px; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.15); font-size: 13px; }
