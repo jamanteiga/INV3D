@@ -49,7 +49,7 @@ export interface NetEdge { id: number; a: number; b: number }
 export interface Graph { nodes: NetNode[]; edges: NetEdge[] }
 
 /** Une extremos coincidentes y parte las líneas en los puntos donde llega otra línea (derivaciones en T). */
-export function buildGraph(asm: AsmDoc, net: DuctNet): Graph {
+export function buildGraph(asm: AsmDoc, net: { lines: string[] }): Graph {
   const lines = asm.skeleton.filter((l) => !net.lines.length || net.lines.includes(l.id)).map((l) => [l.a, l.b] as [V3, V3]);
   // partir en los extremos de otras líneas que caen en su interior
   const pts = lines.flatMap((l) => l);

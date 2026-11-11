@@ -267,6 +267,12 @@ export default function Ribbon() {
               {norm === 'ASME' && <Col><Small icon="pstub" label="Portabridas" onClick={() => s.open({ kind: 'piping', pk: 'stub', norm })} /></Col>}
             </Group>
           ))}
+          <Group label="Redes y cálculo a presión">
+            <Big icon="pipe" label="Red de tuberías" disabled={k !== 'assembly'} onClick={() => s.open({ kind: 'pipenet' })} title={k === 'assembly' ? 'Trazado, dimensionado, pérdidas, espesores, PED, vanos, generación e isométrico' : 'Disponible en un ensamblaje'} />
+            <Big icon="hcalc" label="Comprobar a presión" onClick={() => s.open({ kind: 'pressure' })} title="Espesor de tubo (B31.3 / EN 13480), bridas P-T (B16.5 / EN 1092-1), refuerzo de derivaciones y vanos entre soportes" />
+            <Big icon="pcap" label="Recipiente EN 13445" onClick={() => s.open({ kind: 'vessel' })} title="Recipiente a presión: espesores, prueba hidráulica, categoría PED y modelo 3D con tubuladuras y soportes" />
+            <Col><Small icon="skel" label="Trazado" disabled={k !== 'assembly'} onClick={() => A.openSkel()} title="Ejes de la red con líneas 3D" /></Col>
+          </Group>
         </>)}
         {k === 'part' && cur === 'model' && (<>
           <Group label="Boceto">

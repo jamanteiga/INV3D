@@ -235,6 +235,28 @@ export const asmActions = {
       await new Promise((res) => setTimeout(res, ms));
     }
   },
+  /** Coloca en el ensamblaje las piezas generadas por una red (conductos/tuberías), sustituyendo las de la generación anterior. */
+  placeGenerated: (genId: string, items: { fileName: string; make: () => PartDoc; xf: Xform }[], old: string[] = []): string[] => {
+    const s = S(); const prev = new Set(old);
+    const byFile = new Map<string, string>();
+    for (const it of items) {
+      if (byFile.has(it.fileName)) continue;
+      const ex = s.docs.find((d) => d.fileName === it.fileName)?.id;
+      byFile.set(it.fileName, ex ?? s.addDocument('part', it.make(), it.fileName, false));
+    }
+    const ids: string[] = [];
+    S().commitAsm((a) => {
+      a.occurrences = a.occurrences.filter((o) => !prev.has(o.id) && o.gen !== genId);
+      a.joints = a.joints.filter((j) => !prev.has(j.a.occ) && !prev.has(j.b.occ));
+      const cnt = new Map<string, number>();
+      for (const it of items) {
+        const id = uid('o'); ids.push(id);
+        const base = it.fileName.replace(/\.i3p$/, ''); const k = (cnt.get(base) ?? 0) + 1; cnt.set(base, k);
+        a.occurrences.push({ id, name: `${base}:${k}`, part: byFile.get(it.fileName)!, xf: it.xf, grounded: true, gen: genId });
+      }
+    });
+    return ids;
+  },
   /** Estados de modelo (como Inventor): supresiones y posiciones guardadas con nombre */
   saveModelState: (name: string) => S().commitAsm((a) => {
     const sup = [...a.occurrences, ...a.frames, ...a.welds, ...a.bolts].filter((x) => x.suppressed).map((x) => x.id);

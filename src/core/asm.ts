@@ -130,6 +130,7 @@ export interface AsmDoc {
   viewReps?: ViewRep[];
   modelStates?: ModelState[];
   ductNets?: import('./ductnet').DuctNet[];
+  pipeNets?: import('./pipenet').PipeNet[];
   activeState?: string;
   patterns?: CompPattern[];
   motions?: Motion[];

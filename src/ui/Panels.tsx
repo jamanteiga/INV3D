@@ -1,3 +1,4 @@
+import { PipeNetDialog, PressureDialog, VesselDialog } from './PipeDialogs';
 import { DuctNetDialog } from './DuctNetDialog';
 import { normalizeAsm } from '../core/subasm';
 import { docGetter } from '../core/store';
@@ -2517,6 +2518,9 @@ export function Modals() {
     case 'viewreps': return <ViewRepDialog onClose={close} />;
     case 'mstates': return <ModelStateDialog onClose={close} />;
     case 'ductnet': return <DuctNetDialog onClose={close} />;
+    case 'pipenet': return <PipeNetDialog onClose={close} />;
+    case 'pressure': return <PressureDialog onClose={close} />;
+    case 'vessel': return <VesselDialog onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;
     case 'bom': return <BomDialog onClose={close} />;
