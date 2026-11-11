@@ -1,7 +1,7 @@
 // Iconos propios (trazo simple) para la cinta y el navegador.
 import type { ReactNode } from 'react';
 import { useStore } from '../core/store';
-import { ICON_THEMES } from '../core/persist';
+import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { KIT, KitIcon, KitDefs } from './iconkit';
 export { KitDefs };
 
@@ -234,16 +234,19 @@ export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
   fem: (p) => <S {...p}><path d="M4 26L14 6l14 20z" fill={B} /><path d="M9 26l5-10 5 10M14 16l9 10" stroke={A} /><path d="M4 26h24" /></S>,
   spring: (p) => <S {...p}><path d="M8 4h16M8 28h16M10 4l12 4-12 4 12 4-12 4 12 4-12 4" stroke={A} /></S>,
   bearing: (p) => <S {...p}><circle cx="16" cy="16" r="12" fill={B} /><circle cx="16" cy="16" r="5" /><circle cx="16" cy="7.5" r="2.3" stroke={A} /><circle cx="24.5" cy="16" r="2.3" stroke={A} /><circle cx="16" cy="24.5" r="2.3" stroke={A} /><circle cx="7.5" cy="16" r="2.3" stroke={A} /></S>,
+  epoint: (p) => <S {...p}><circle cx="13" cy="19" r="4.5" fill={A} stroke="none" /><path d="M13 19L25 7" stroke={A} strokeWidth="2.2" /><path d="M25 7l-6 1.2M25 7l-1.2 6" stroke={A} strokeWidth="2.2" /><path d="M4 27h18" /><path d="M13 23.5V27" /></S>,
   shaft: (p) => <S {...p}><path d="M3 13h6v-3h10v-2h6v16h-6v-2H9v-3H3z" fill={B} /><path d="M12 13h5" stroke={A} /></S>,
 };
 
-export const Icon = ({ name, size }: { name: string; size?: number }) => {
-  const th = useStore((s) => s.settings.iconTheme ?? 'inv3d');
-  if (th !== 'inv3d' && KIT[name]) return <KitIcon name={name} size={size} theme={th} />;
+export const Icon = ({ name, size: size0 }: { name: string; size?: number }) => {
+  // iconos un 20 % mayores en toda la interfaz
+  const size = Math.round((size0 ?? 32) * 1.2);
+  const th = useStore((s) => iconThemeOf(s.settings.iconTheme));
+  if (th !== 'e1' && KIT[name]) return <KitIcon name={name} size={size} theme={th} />;
   return (Icons[name] ?? Icons.part)({ size });
 };
 
-/** Degradados de los estilos de iconos (Inventor 2027, SolidWorks 2026, CATIA): se referencian desde las variables CSS */
+/** Degradados de los estilos de iconos (estilos 2, 3 y 4): se referencian desde las variables CSS */
 export const IconDefs = () => (
   <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden focusable="false">
     <defs>
@@ -260,12 +263,12 @@ export const IconDefs = () => (
 /** Selector de estilo de iconos con vista previa (Opciones y cinta Vista) */
 export function IconThemePicker() {
   const s = useStore();
-  const cur = s.settings.iconTheme ?? 'inv3d';
+  const cur = iconThemeOf(s.settings.iconTheme);
   return (
     <div className="ico-themes">
       {ICON_THEMES.map(([k, l]) => (
         <button key={k} className={`ico-theme ${cur === k ? 'on' : ''}`} onClick={() => useStore.setState({ settings: { ...useStore.getState().settings, iconTheme: k } })}>
-          <span className="ico-prev row" data-p={k}>{['extrude', 'revolve', 'fillet', 'assembly'].map((n) => (k === 'inv3d' ? <span key={n}>{Icons[n]({ size: 28 })}</span> : <KitIcon key={n} name={n} size={28} theme={k} />))}</span>
+          <span className="ico-prev row" data-p={k}>{['extrude', 'revolve', 'fillet', 'assembly'].map((n) => (k === 'e1' ? <span key={n}>{Icons[n]({ size: 28 })}</span> : <KitIcon key={n} name={n} size={28} theme={k} />))}</span>
           {l}
         </button>
       ))}

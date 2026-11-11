@@ -58,6 +58,8 @@ export interface DDim {
   r?: number; c?: P2d;
   /** Tolerancia: «±0.1», «+0.2/-0», «H7»… */
   tol?: string;
+  /** Símbolo delante del valor (Ø, □, R, M, SR, S, ±, °…) y texto detrás */
+  prefix?: string; suffix?: string;
   /** Cota por coordenadas: eje medido (a = origen, b = punto, c = posición del texto) */
   axis?: 'x' | 'y';
   /** Cota recuperada del modelo (asociativa): boceto + restricción, u operación */
@@ -98,7 +100,18 @@ export interface TitleBlock {
  *  field: clave del cajetín (title, partNumber…), «#sheet» (hoja n/N), «#format», «#proj» (método de proyección),
  *  «custom:Nombre» (campo propio) o «=texto» (texto fijo). */
 export interface TbCell { x: number; y: number; w: number; h: number; label: string; field: string; big?: boolean }
-export interface TbTemplate { name: string; w: number; h: number; cells: TbCell[]; /** símbolo de proyección (centro, relativo al cajetín) */ proj?: { x: number; y: number } | null }
+/** Etiqueta libre del cajetín: texto en una posición que muestra el valor del campo al que hace referencia */
+export interface TbLabel { x: number; y: number; h: number; field: string; label: string; rot?: number; anchor?: 'start' | 'middle' | 'end' }
+export interface TbTemplate {
+  name: string; w: number; h: number; cells: TbCell[];
+  /** símbolo de proyección (centro, relativo al cajetín) */ proj?: { x: number; y: number } | null;
+  /** Dibujo importado (DXF, DWG o DGN): líneas y textos fijos, en mm desde la esquina inferior izquierda */
+  geo?: { lines: [number, number][][]; texts: { x: number; y: number; h: number; text: string; rot?: number }[] };
+  /** Etiquetas con referencia a un campo (tantas como se quiera) */
+  labels?: TbLabel[];
+  /** fichero de origen del dibujo importado */
+  source?: string;
+}
 export const TB_FIELDS: [string, string][] = [
   ['title', 'Título'], ['partNumber', 'Nº de plano'], ['description', 'Descripción'], ['company', 'Empresa'], ['project', 'Proyecto'],
   ['designer', 'Dibujado'], ['checker', 'Revisado'], ['approved', 'Aprobado'], ['approvedDate', 'Fecha aprob.'], ['date', 'Fecha'],

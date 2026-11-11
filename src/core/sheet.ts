@@ -238,7 +238,10 @@ export function dimValue(d: DDim, v: DView): number {
 export function dimText(d: DDim, v: DView): string {
   if (d.text) return d.text;
   const val = dimValue(d, v);
-  const base = d.kind === 'd' ? `Ø${fmtD(val)}` : d.kind === 'r' ? `R${fmtD(val)}` : d.kind === 'ang' ? `${fmt(val, 1).replace('.', ST.decSep)}°` : fmtD(val);
+  let base = d.kind === 'd' ? `Ø${fmtD(val)}` : d.kind === 'r' ? `R${fmtD(val)}` : d.kind === 'ang' ? `${fmt(val, 1).replace('.', ST.decSep)}°` : fmtD(val);
+  // símbolo delante del valor (sustituye a Ø/R automáticos si se elige otro)
+  if (d.prefix) base = d.prefix + base.replace(/^(Ø|R)/, d.prefix === 'Ø' || d.prefix === 'R' ? '' : '$1');
+  if (d.suffix) base += d.suffix;
   return d.tol ? `${base} ${d.tol}` : base;
 }
 const arrowTri = (P: P2, dir: P2, L = 3, W = 0.9): P2[] => { const u = unit(dir), n: P2 = [-u[1], u[0]]; const b = sub(P, mul(u, L)); return [P, add(b, mul(n, W)), sub(b, mul(n, W))]; };
@@ -263,10 +266,10 @@ export function dimGeometry(d: DDim, v: DView) {
     const A = add(O, d.a), B = add(O, d.b), r = d.r ?? 0, u = unit(sub(B, A));
     const P2_ = add(A, mul(u, r)), P1 = sub(A, mul(u, r));
     const lines: P2[][] = d.kind === 'd' ? [[P1, P2_]] : [[A, P2_]];
-    if (len(sub(B, A)) > r) lines.push([P2_, B], [B, add(B, [u[0] >= 0 ? 6 : -6, 0])]);
+    if (len(sub(B, A)) > r) lines.push([P2_, B], [B, add(B, [(u[0] >= 0 ? 1 : -1) * (6 + text.length * ST.dimTextH * 0.6), 0])]);
     const e = dimEnds(d.kind === 'd' ? [[P2_, u], [P1, mul(u, -1)]] : [[P2_, u]]);
     const arrows = e.fills; lines.push(...e.lines);
-    const tx: P2 = len(sub(B, A)) > r ? add(B, [u[0] >= 0 ? 3 : -3, 1]) : add(A, mul(u, r * 0.5));
+    const tl2 = text.length * ST.dimTextH * 0.3, tx: P2 = len(sub(B, A)) > r ? add(B, [u[0] >= 0 ? 3 + tl2 : -3 - tl2, Math.max(0.8, ST.dimTextH * 0.3)]) : add(A, mul(u, r * 0.5));
     return { lines, arrows, text, mid: tx, ang: 0, anchor: (u[0] >= 0 ? 'middle' : 'middle') as 'middle' };
   }
   if (d.kind === 'ang') {
@@ -303,9 +306,12 @@ export function dimGeometry(d: DDim, v: DView) {
   const ext = (P: P2, Q: P2): P2[] => { const u = unit(sub(Q, P)); return [add(P, mul(u, ST.extGap)), add(Q, mul(u, ST.extOver))]; };
   const u = unit(sub(p2, p1));
   const ang = (Math.atan2(u[1], u[0]) * 180) / Math.PI;
-  const mid: P2 = add(mul(add(p1, p2), 0.5), mul(n, 1.2));
+  // El texto va siempre por encima de la línea de cota en el sentido de lectura (no la pisa), separado ~1/3 de su altura
+  const flip = ang > 90 || ang < -90, tdir: P2 = flip ? mul(u, -1) : u, up: P2 = [-tdir[1], tdir[0]];
+  const mid: P2 = add(mul(add(p1, p2), 0.5), mul(up, Math.max(0.8, ST.dimTextH * 0.3)));
+  void n;
   const e = dimEnds([[p1, mul(u, -1)], [p2, u]]);
-  return { lines: [ext(A, p1), ext(B, p2), [p1, p2], ...e.lines], arrows: e.fills, text, mid, ang: ang > 90 || ang < -90 ? ang + 180 : ang, anchor: 'middle' as const };
+  return { lines: [ext(A, p1), ext(B, p2), [p1, p2], ...e.lines], arrows: e.fills, text, mid, ang: flip ? ang + 180 : ang, anchor: 'middle' as const };
 }
 
 // ---------- Anotaciones ----------
@@ -435,6 +441,11 @@ export function titleBlockGeometry(drw: DrawingDoc) {
   return {
     x0, y0, w: tpl.w, h: tpl.h, proj: tpl.proj ? { x: x0 + tpl.proj.x, y: y0 + tpl.proj.y } : null,
     cells: tpl.cells.map((c) => ({ x: x0 + c.x, y: y0 + c.y, w: c.w, h: c.h, label: c.label, value: tbValue(drw, c.field), big: c.big })),
+    lines: (tpl.geo?.lines ?? []).map((l) => l.map(([x, y]) => [x0 + x, y0 + y] as P2)),
+    texts: [
+      ...(tpl.geo?.texts ?? []).map((t) => ({ ...t, x: x0 + t.x, y: y0 + t.y, anchor: undefined as 'start' | 'middle' | 'end' | undefined })),
+      ...(tpl.labels ?? []).map((l) => ({ x: x0 + l.x, y: y0 + l.y, h: l.h, rot: l.rot, anchor: l.anchor, text: tbValue(drw, l.field) })).filter((t) => t.text),
+    ],
   };
 }
 
@@ -565,6 +576,8 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     P.push({ t: 'txt', cls: 'tbl', x: c.x + 1.2, y: c.y + c.h - 2.6, h: 1.8, text: c.label });
     if (c.value) P.push({ t: 'txt', cls: c.big ? 'tbb' : 'tbv', x: c.x + 1.2, y: c.y + (c.big ? 3 : 1.4), h: c.big ? 5 : 2.5, text: c.value, bold: c.big });
   }
+  for (const l of tb.lines) P.push({ t: 'pl', cls: 'tb', pts: l });
+  for (const t of tb.texts) P.push({ t: 'txt', cls: 'tbv', x: t.x, y: t.y, h: t.h, text: t.text, rot: t.rot || undefined, anchor: t.anchor });
   // Símbolo de proyección (europea: círculos a la izquierda del cono; americana: a la derecha)
   if (tb.proj) {
   const sx = tb.proj.x + 3, sy = tb.proj.y, third = ST.projection === 'third';

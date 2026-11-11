@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../core/store';
-import { TB_PRESETS, TB_FIELDS, tbTemplate, type TbTemplate, type TbCell } from '../core/drawing';
+import { TB_PRESETS, TB_FIELDS, tbTemplate, type TbTemplate, type TbCell, type TbLabel } from '../core/drawing';
+import { dxfToGeo, dwgToGeo, dgnToGeo, normalizeGeo, fieldForTag } from '../core/cad2d';
 import { tbValue } from '../core/sheet';
 import { saveText, pickFile } from '../core/files';
 import { Modal } from './Panels';
@@ -13,7 +14,12 @@ const saveLib = (l: TbTemplate[]) => { try { localStorage.setItem(LIB_KEY, JSON.
 function valid(x: unknown): TbTemplate {
   const t = x as TbTemplate;
   if (!t || typeof t.name !== 'string' || !Array.isArray(t.cells) || !(t.w > 0) || !(t.h > 0)) throw new Error('No es una plantilla de cajetín válida');
-  return { name: t.name, w: +t.w, h: +t.h, proj: t.proj ?? null, cells: t.cells.map((c) => ({ x: +c.x || 0, y: +c.y || 0, w: +c.w || 10, h: +c.h || 8, label: String(c.label ?? ''), field: String(c.field ?? ''), big: !!c.big })) };
+  return {
+    name: t.name, w: +t.w, h: +t.h, proj: t.proj ?? null, source: t.source,
+    cells: t.cells.map((c) => ({ x: +c.x || 0, y: +c.y || 0, w: +c.w || 10, h: +c.h || 8, label: String(c.label ?? ''), field: String(c.field ?? ''), big: !!c.big })),
+    geo: t.geo && Array.isArray(t.geo.lines) ? { lines: t.geo.lines, texts: t.geo.texts ?? [] } : undefined,
+    labels: Array.isArray(t.labels) ? t.labels.map((l) => ({ x: +l.x || 0, y: +l.y || 0, h: +l.h || 2.5, field: String(l.field ?? ''), label: String(l.label ?? ''), rot: +(l.rot ?? 0) || 0, anchor: l.anchor })) : [],
+  };
 }
 
 export default function TbTplDialog({ onClose }: { onClose: () => void }) {
@@ -21,10 +27,15 @@ export default function TbTplDialog({ onClose }: { onClose: () => void }) {
   const [tpl, setTpl] = useState<TbTemplate>(() => structuredClone(tbTemplate(s.drw)));
   const [lib, setLib] = useState(loadLib);
   const [sel, setSel] = useState(-1);
+  const [selL, setSelL] = useState(-1);
+  const [impScale, setImpScale] = useState(1);
+  const [tab, setTab] = useState<'labels' | 'cells'>(() => (tbTemplate(s.drw).geo ? 'labels' : 'cells'));
+  const labels = tpl.labels ?? [];
+  const updL = (i: number, p: Partial<TbLabel>) => setTpl({ ...tpl, labels: labels.map((l, j) => (j === i ? { ...l, ...p } : l)) });
   const all = [...TB_PRESETS, ...lib];
   const upd = (i: number, p: Partial<TbCell>) => setTpl({ ...tpl, cells: tpl.cells.map((c, j) => (j === i ? { ...c, ...p } : c)) });
   const fieldOpts = useMemo(() => {
-    const custom = [...new Set(tpl.cells.filter((c) => c.field.startsWith('custom:')).map((c) => c.field))];
+    const custom = [...new Set([...tpl.cells.map((c) => c.field), ...(tpl.labels ?? []).map((l) => l.field)].filter((f) => f.startsWith('custom:')))];
     return [...TB_FIELDS, ...custom.map((c) => [c, `Propio: ${c.slice(7)}`] as [string, string])];
   }, [tpl]);
   // vista previa a escala
@@ -32,6 +43,7 @@ export default function TbTplDialog({ onClose }: { onClose: () => void }) {
   const drwPrev = { ...s.drw, tbTpl: tpl };
   const errs: string[] = [];
   tpl.cells.forEach((c, i) => { if (c.x < 0 || c.y < 0 || c.x + c.w > tpl.w + 1e-6 || c.y + c.h > tpl.h + 1e-6) errs.push(`Celda ${i + 1} fuera del cajetín`); });
+  (tpl.labels ?? []).forEach((l, i) => { if (!l.field) errs.push(`Etiqueta ${i + 1}: indica a qué hace referencia`); });
 
   const apply = () => { s.commitDrw((d) => { d.tbTpl = structuredClone(tpl); }); s.notify(`Plantilla «${tpl.name}» aplicada`); onClose(); };
   const toLib = () => {
@@ -39,6 +51,20 @@ export default function TbTplDialog({ onClose }: { onClose: () => void }) {
     setLib(l); saveLib(l); s.notify(`«${tpl.name}» guardada en la biblioteca`);
   };
   const asDefault = () => { try { localStorage.setItem(DEF_KEY, JSON.stringify(tpl)); s.notify(`Los planos nuevos usarán «${tpl.name}»`); } catch { /* */ } };
+  // Dibujo externo como cajetín: DXF, DWG o DGN (V7); los atributos pasan a etiquetas enlazadas a campos
+  const impDraw = async () => {
+    const f = await pickFile('.dxf,.dwg,.dgn'); if (!f) return;
+    try {
+      const ext = f.name.split('.').pop()!.toLowerCase();
+      const raw = ext === 'dxf' ? dxfToGeo(await f.text()) : ext === 'dwg' ? await dwgToGeo(await f.arrayBuffer()) : dgnToGeo(await f.arrayBuffer());
+      const n = normalizeGeo(raw, impScale || 1);
+      const labs: TbLabel[] = n.geo.tags.map((t) => ({ x: t.x, y: t.y, h: t.h, rot: t.rot || 0, field: fieldForTag(t.tag), label: t.tag }));
+      setTpl({ name: f.name.replace(/\.[^.]+$/, ''), w: Math.round(n.w * 100) / 100, h: Math.round(n.h * 100) / 100, cells: [], proj: null, source: f.name,
+        geo: { lines: n.geo.lines, texts: n.geo.texts.map(({ x, y, h, text, rot }) => ({ x, y, h, text, rot })) }, labels: labs });
+      setTab('labels'); setSel(-1); setSelL(-1);
+      s.notify(`${f.name}: ${n.geo.lines.length} líneas, ${n.geo.texts.length} textos y ${labs.length} atributos convertidos en etiquetas (${Math.round(n.w)} × ${Math.round(n.h)} mm)`);
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
   const imp = async () => {
     const f = await pickFile('.json,.i3tb'); if (!f) return;
     try { setTpl(valid(JSON.parse(await f.text()))); } catch (e) { s.notify((e as Error).message, 'error'); }
@@ -57,8 +83,23 @@ export default function TbTplDialog({ onClose }: { onClose: () => void }) {
         <label><input type="checkbox" checked={!!tpl.proj} onChange={(e) => setTpl({ ...tpl, proj: e.target.checked ? { x: tpl.w - 12, y: 4 } : null })} /> Símbolo de proyección</label>
         {tpl.proj && <>x <input className="num" type="number" value={tpl.proj.x} onChange={(e) => setTpl({ ...tpl, proj: { ...tpl.proj!, x: +e.target.value } })} style={{ width: 56 }} /> y <input className="num" type="number" value={tpl.proj.y} onChange={(e) => setTpl({ ...tpl, proj: { ...tpl.proj!, y: +e.target.value } })} style={{ width: 50 }} /></>}
       </div>
-      <svg viewBox={`-2 -2 ${tpl.w * k + 4} ${tpl.h * k + 4}`} style={{ width: '100%', maxHeight: 220, background: 'var(--panel-2)', borderRadius: 6 }}>
-        <rect x={0} y={0} width={tpl.w * k} height={tpl.h * k} fill="#fff" stroke="#222" strokeWidth={1.2} />
+      <svg viewBox={`-2 -2 ${tpl.w * k + 4} ${tpl.h * k + 4}`} style={{ width: '100%', maxHeight: 240, background: 'var(--panel-2)', borderRadius: 6, cursor: tab === 'labels' && selL >= 0 ? 'crosshair' : 'default' }}
+        onClick={(e) => {
+          if (tab !== 'labels' || selL < 0) return;
+          const svg = e.currentTarget, pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+          const q = pt.matrixTransform(svg.getScreenCTM()!.inverse());
+          updL(selL, { x: Math.round((q.x / k) * 10) / 10, y: Math.round((tpl.h - q.y / k) * 10) / 10 });
+        }}>
+        <rect x={0} y={0} width={tpl.w * k} height={tpl.h * k} fill="#fff" stroke={tpl.geo ? '#ccc' : '#222'} strokeWidth={tpl.geo ? 0.5 : 1.2} strokeDasharray={tpl.geo ? '3 2' : undefined} />
+        {tpl.geo?.lines.map((l, i) => <polyline key={'g' + i} points={l.map(([x, y]) => `${x * k},${(tpl.h - y) * k}`).join(' ')} fill="none" stroke="#222" strokeWidth={0.7} />)}
+        {tpl.geo?.texts.map((t, i) => <text key={'t' + i} x={t.x * k} y={(tpl.h - t.y) * k} fontSize={t.h * k} fill="#333" fontFamily="Arial" transform={t.rot ? `rotate(${-t.rot} ${t.x * k} ${(tpl.h - t.y) * k})` : undefined}>{t.text}</text>)}
+        {labels.map((l, i) => {
+          const v = tbValue(drwPrev, l.field) || `‹${l.label || l.field.replace('custom:', '')}›`, X = l.x * k, Y = (tpl.h - l.y) * k;
+          return <g key={'l' + i} onClick={(e) => { e.stopPropagation(); setTab('labels'); setSelL(i); }} style={{ cursor: 'pointer' }}>
+            <text x={X} y={Y} fontSize={l.h * k} fill={selL === i ? '#1665c1' : '#0b6b2e'} fontFamily="Arial" fontWeight={600} textAnchor={l.anchor ?? 'start'} transform={l.rot ? `rotate(${-l.rot} ${X} ${Y})` : undefined}>{v}</text>
+            <circle cx={X} cy={Y} r={1.6} fill={selL === i ? '#1665c1' : '#0b6b2e'} />
+          </g>;
+        })}
         {tpl.cells.map((c, i) => {
           const X = c.x * k, Y = (tpl.h - c.y - c.h) * k, val = tbValue(drwPrev, c.field) || (!c.field || c.field.startsWith('#') || c.field.startsWith('=') ? '' : `‹${c.field.replace('custom:', '')}›`);
           return (
@@ -72,7 +113,48 @@ export default function TbTplDialog({ onClose }: { onClose: () => void }) {
         {tpl.proj && <g stroke="#222" fill="none" strokeWidth={0.8}><circle cx={(tpl.proj.x - 3) * k} cy={(tpl.h - tpl.proj.y) * k} r={2.6 * k} /><circle cx={(tpl.proj.x - 3) * k} cy={(tpl.h - tpl.proj.y) * k} r={1.2 * k} /></g>}
       </svg>
       {errs.length > 0 && <p style={{ color: 'var(--danger)', fontSize: 12 }}>{errs.join(' · ')}</p>}
-      <div style={{ maxHeight: 260, overflow: 'auto' }}>
+      <div className="modal-btns">
+        <div className="seg-mini">
+          <button className={tab === 'labels' ? 'on' : ''} onClick={() => setTab('labels')}>Etiquetas ({labels.length})</button>
+          <button className={tab === 'cells' ? 'on' : ''} onClick={() => setTab('cells')}>Celdas ({tpl.cells.length})</button>
+        </div>
+        <span style={{ flex: 1 }} />
+        <label title="Factor aplicado a las coordenadas del dibujo importado (p. ej. 1000 si está en metros sin unidades)">Escala al importar <input className="num" type="number" value={impScale} onChange={(e) => setImpScale(+e.target.value || 1)} style={{ width: 64 }} /></label>
+        <button className="btn" onClick={impDraw} title="Usa un cajetín dibujado en otro programa: DXF, DWG o DGN (V7). Los atributos del bloque se convierten en etiquetas">Importar DXF / DWG / DGN…</button>
+        {tpl.geo && <button className="btn" onClick={() => setTpl({ ...tpl, geo: undefined, source: undefined })}>Quitar dibujo</button>}
+      </div>
+      {tab === 'labels' && <div style={{ maxHeight: 260, overflow: 'auto' }}>
+        <table className="ptable">
+          <thead><tr><th>#</th><th>Etiqueta</th><th>Hace referencia a</th><th>x</th><th>y</th><th>altura</th><th>giro</th><th>alineación</th><th /></tr></thead>
+          <tbody>
+            {labels.map((l, i) => (
+              <tr key={i} style={selL === i ? { background: 'rgba(47,111,224,.08)' } : undefined} onClick={() => setSelL(i)}>
+                <td className="num">{i + 1}</td>
+                <td><input value={l.label} placeholder="Descripción" onChange={(e) => updL(i, { label: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></td>
+                <td style={{ minWidth: 190 }}>
+                  <select value={l.field.startsWith('=') ? '=' : fieldOpts.some(([f]) => f === l.field) ? l.field : ''} className={l.field ? '' : 'bad'} onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '=') updL(i, { field: '=' + (l.field.startsWith('=') ? l.field.slice(1) : l.label) });
+                    else if (v === '+') { const n = prompt('Nombre del campo propio'); if (n) updL(i, { field: 'custom:' + n.trim(), label: l.label || n.trim() }); }
+                    else updL(i, { field: v });
+                  }}>
+                    <option value="">— elegir —</option>
+                    {fieldOpts.map(([f, lb]) => <option key={f} value={f}>{lb}</option>)}
+                    <option value="=">Texto fijo</option>
+                    <option value="+">Campo propio nuevo…</option>
+                  </select>
+                  {l.field.startsWith('=') && <input value={l.field.slice(1)} onChange={(e) => updL(i, { field: '=' + e.target.value })} onKeyDown={(e) => e.stopPropagation()} />}
+                </td>
+                {(['x', 'y', 'h', 'rot'] as const).map((key) => <td key={key}><input type="number" value={l[key] ?? 0} onChange={(e) => updL(i, { [key]: +e.target.value || 0 })} style={{ width: 54 }} /></td>)}
+                <td><select value={l.anchor ?? 'start'} onChange={(e) => updL(i, { anchor: e.target.value as TbLabel['anchor'] })}><option value="start">Izquierda</option><option value="middle">Centro</option><option value="end">Derecha</option></select></td>
+                <td><button className="btn sm" title="Quitar etiqueta" onClick={(e) => { e.stopPropagation(); setTpl({ ...tpl, labels: labels.filter((_, j) => j !== i) }); setSelL(-1); }}>✕</button></td>
+              </tr>
+            ))}
+            {!labels.length && <tr><td colSpan={9} className="empty">Sin etiquetas. «+ Etiqueta» añade una; elige a qué campo hace referencia y haz clic en la vista previa para situarla.</td></tr>}
+          </tbody>
+        </table>
+      </div>}
+      {tab === 'cells' && <div style={{ maxHeight: 260, overflow: 'auto' }}>
         <table className="ptable">
           <thead><tr><th>#</th><th>Etiqueta</th><th>Contenido</th><th>x</th><th>y</th><th>ancho</th><th>alto</th><th>Grande</th><th /></tr></thead>
           <tbody>
@@ -101,11 +183,12 @@ export default function TbTplDialog({ onClose }: { onClose: () => void }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
       <div className="modal-btns">
-        <button className="btn" onClick={() => { setTpl({ ...tpl, cells: [...tpl.cells, { x: 0, y: 0, w: 30, h: 8, label: 'Nueva', field: 'custom:Nueva' }] }); setSel(tpl.cells.length); }}>+ Celda</button>
+        <button className="btn" onClick={() => { setTab('labels'); setTpl({ ...tpl, labels: [...labels, { x: 4, y: 4, h: 2.5, field: '', label: 'Etiqueta ' + (labels.length + 1) }] }); setSelL(labels.length); }}>+ Etiqueta</button>
+        <button className="btn" onClick={() => { setTab('cells'); setTpl({ ...tpl, cells: [...tpl.cells, { x: 0, y: 0, w: 30, h: 8, label: 'Nueva', field: 'custom:Nueva' }] }); setSel(tpl.cells.length); }}>+ Celda</button>
         <span style={{ flex: 1 }} />
-        <button className="btn" onClick={imp}>Importar…</button>
+        <button className="btn" onClick={imp}>Importar plantilla…</button>
         <button className="btn" onClick={() => saveText(JSON.stringify(tpl, null, 1), `${tpl.name.replace(/[^\w\-]+/g, '_')}.i3tb`, 'Plantilla de cajetín', '.i3tb', 'application/json')}>Exportar</button>
         <button className="btn" onClick={toLib} title="Guardar en la biblioteca de este navegador">Guardar en biblioteca</button>
         {lib.some((x) => x.name === tpl.name) && <button className="btn" onClick={() => { const l = lib.filter((x) => x.name !== tpl.name); setLib(l); saveLib(l); }}>Quitar de biblioteca</button>}

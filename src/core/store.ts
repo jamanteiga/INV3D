@@ -7,13 +7,13 @@ import { makeEval } from './expr';
 import { solve, applySolution, checkNew } from './sketch';
 import { newAsm, solveAssembly, applyAssociative, type AsmDoc, type Xform } from './asm';
 import { normalizeAsm, expandAsm, hasSubs } from './subasm';
-import { newDrawing, type DrawingDoc } from './drawing';
+import { type SheetSize, newDrawing, type DrawingDoc } from './drawing';
 import { cad, type RegenResult, type AsmResult, type MeshData } from './cadClient';
 import { DEFAULT_SETTINGS, type AppSettings, type UserLibs, type RecentItem } from './persist';
 
 export type DocKind = 'part' | 'assembly' | 'drawing';
 export type AnyDoc = PartDoc | AsmDoc | DrawingDoc;
-export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean; /** ruta relativa en la carpeta de trabajo */ path?: string; /** pieza cargada solo como referencia de un ensamblaje (en memoria, sin pestaña), como en Inventor */ hidden?: boolean }
+export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean; /** ruta relativa en la carpeta de trabajo */ path?: string; /** pieza cargada solo como referencia de un ensamblaje (en memoria, sin pestaña), */ hidden?: boolean }
 
 export type Mode = 'model' | 'sketch' | 'present';
 export interface FemLoad { faces: number[]; kind: 'force' | 'pressure'; F: [number, number, number]; p: number }
@@ -34,7 +34,7 @@ export type Tool = null
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
-  | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge' | 'femFace'
+  | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge' | 'femFace' | 'epPick'
   | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember' | 'place'
   | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum' | 'drwSectionPath' | 'drwBreakout';
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
@@ -46,7 +46,7 @@ export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' }
   | { kind: 'sketch3d'; id?: string }
   | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN' }
   | { kind: 'hvac'; hk: string; shape?: 'rect' | 'round' | 'oval' }
@@ -104,6 +104,8 @@ export interface State {
   memberUtil: Record<string, number> | null;
   /** Análisis FEM lineal de la pieza activa: caras elegidas y resultado (σ von Mises y desplazamiento por vértice) */
   fem: FemState | null;
+  /** Última cara elegida para un ePoint (punto, dirección y, si es cilíndrica, radio) */
+  epPick: { point: V3; dir: V3; radius?: number; axis: boolean; n: number } | null;
   /** Detección de colisiones al mover componentes */
   collide: boolean;
   ctxEdit: { asm: string; occ: string; part: string; asmName: string; mesh: MeshData | null } | null;
@@ -126,7 +128,7 @@ export interface State {
   /** Nombre del ratón 3D conectado ('' si no hay) */
   spaceMouse: string;
   clip: '' | 'X' | 'Y' | 'Z';
-  /** Barra de vista (como la de SolidWorks): estilo, sección, visibilidad y escena */
+  /** Barra de vista: estilo, sección, visibilidad y escena */
   hud: HudState;
   project: ProjectInfo | null;
   /** Configuración persistente */
@@ -141,7 +143,7 @@ export interface State {
   ask: (text: string, ok?: string) => Promise<boolean>;
 
   // Documentos
-  newDocument: (kind: 'part' | 'sheet' | 'assembly' | 'weldment' | 'drawing') => string;
+  newDocument: (kind: 'part' | 'sheet' | 'assembly' | 'weldment' | 'drawing', sheet?: SheetSize) => string;
   addDocument: (kind: DocKind, data: AnyDoc, fileName: string, activate?: boolean, id?: string) => string;
   activate: (id: string) => void;
   closeDocument: (id: string) => void;
@@ -248,7 +250,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, ctxEdit: null, collide: false, memberUtil: null, fem: null,
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null,
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
@@ -284,7 +286,7 @@ export const useStore = create<State>((set, get) => ({
     if (activate) get().activate(nid);
     return nid;
   },
-  newDocument: (k) => {
+  newDocument: (k, sheet) => {
     const docs = get().docs;
     if (k === 'part' || k === 'sheet') {
       const d = k === 'sheet' ? newSheetDoc() : newDoc();
@@ -304,7 +306,7 @@ export const useStore = create<State>((set, get) => ({
     }
     const fn = uniqueName(docs, 'Dibujo', '.i3d');
     const st = get().settings, dw = newDrawing();
-    dw.sheet = st.sheetDefault; dw.title.designer = st.userName; dw.title.company = st.company; dw.std = st.drawingStd;
+    dw.sheet = sheet ?? st.sheetDefault; dw.title.designer = st.userName; dw.title.company = st.company; dw.std = st.drawingStd;
     return get().addDocument('drawing', dw, fn);
   },
   activate: (id) => {

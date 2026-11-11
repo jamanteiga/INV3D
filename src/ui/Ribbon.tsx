@@ -2,7 +2,7 @@ import { openRecent } from './session';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
-import { ICON_THEMES } from '../core/persist';
+import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS } from '../core/doc';
 import { asmActions, drwActions, partActions } from './actions';
@@ -25,7 +25,7 @@ function Small({ icon, label, onClick, active, disabled, title }: { icon: string
     </button>
   );
 }
-/** Botón grande con desplegable de variantes (como los de Inventor: Arco ▾, Rectángulo ▾…). Recuerda la última usada. */
+/** Botón grande con desplegable de variantes (Arco ▾, Rectángulo ▾…). Recuerda la última usada. */
 function SplitBig({ items, activeKey, onPick }: { items: { key: string; icon: string; label: string; title?: string }[]; activeKey?: string | null; onPick: (k: string) => void }) {
   const [open, setOpen] = useState<null | { x: number; y: number }>(null);
   const [last, setLast] = useState(items[0].key);
@@ -330,6 +330,7 @@ export default function Ribbon() {
           </Group>
           <Group label="Operaciones de trabajo">
             <Big icon="workplane" label="Plano" onClick={() => s.openFeatureDialog('workplane')} title="Plano de trabajo desfasado o girado" />
+            <Big icon="epoint" label="ePoint" onClick={() => s.open({ kind: 'epoint' })} title="Puntos de conexión de la pieza: coincidencia, inserción y compuesto. Al colocar la pieza en un ensamblaje se conectan solos con los del mismo nombre" />
             <Col>
               <Small icon="workaxis" label="Eje" onClick={() => s.openFeatureDialog('workaxis')} />
               <Small icon="workpoint" label="Punto" onClick={() => s.openFeatureDialog('workpoint')} />
@@ -390,6 +391,7 @@ export default function Ribbon() {
           <Group label="Relaciones">
             <Big icon="constraint3d" label="Restringir" kbd="J" onClick={() => A.openJoint()} title="Coincidir, al ras, ángulo, perpendicular, tangente, insertar, simetría o rígida, entre componentes o con planos/ejes de origen (J). También con clic derecho sobre una cara" />
             <Big icon="joint" label="Unión" onClick={() => { A.openJoint(); s.updateDraft({ type: 'rot', name: 'Unión' }); }} title="Unión de rotación, corredera, cilíndrica, planar o bola" />
+            <Big icon="epoint" label="Conectar ePoints" onClick={() => A.connectEPoints()} title="Une automáticamente los ePoints del mismo nombre y tipo de los componentes (coincidencia, inserción y compuestos)" />
             <Col>
               <Small icon="insert3d" label="Insertar" onClick={() => { A.openJoint(); s.updateDraft({ type: 'insert' }); }} />
               <Small icon="angle3d" label="Ángulo" onClick={() => { A.openJoint(); s.updateDraft({ type: 'angle', angle: '90 deg' }); }} />
@@ -550,8 +552,8 @@ export default function Ribbon() {
             <Big icon="iprops" label="iProperties" onClick={() => s.open({ kind: 'iprops' })} />
             <Big icon="project" label="Proyectos" onClick={() => s.open({ kind: 'project' })} />
           </Group>
-          <Group label="Inventor">
-            <Big icon="ilogic" label="Regla de exportación" onClick={() => s.open({ kind: 'ilogic' })} title="Regla iLogic para exportar un proyecto de Inventor a STEP y DWG" />
+          <Group label="Intercambio">
+            <Big icon="ilogic" label="Regla de exportación" onClick={() => s.open({ kind: 'ilogic' })} title="Regla (VB.NET) para exportar un proyecto .ipj a STEP y DWG" />
           </Group>
           <Group label="Ejemplos">
             <Big icon="part" label="Brida" onClick={() => s.addDocument('part', demoDoc(), 'Brida-DN80.i3p')} />
@@ -581,10 +583,10 @@ export default function Ribbon() {
           </Group>
           <Group label="Estilo de iconos">
             <Col>
-              {ICON_THEMES.slice(0, 2).map(([k, l]) => <Small key={k} icon="extrude" label={l} active={(s.settings.iconTheme ?? 'inv3d') === k} onClick={() => s.set({ settings: { ...s.settings, iconTheme: k } })} />)}
+              {ICON_THEMES.slice(0, 2).map(([k, l]) => <Small key={k} icon="extrude" label={l} active={(iconThemeOf(s.settings.iconTheme)) === k} onClick={() => s.set({ settings: { ...s.settings, iconTheme: k } })} />)}
             </Col>
             <Col>
-              {ICON_THEMES.slice(2).map(([k, l]) => <Small key={k} icon="extrude" label={l} active={(s.settings.iconTheme ?? 'inv3d') === k} onClick={() => s.set({ settings: { ...s.settings, iconTheme: k } })} />)}
+              {ICON_THEMES.slice(2).map(([k, l]) => <Small key={k} icon="extrude" label={l} active={(iconThemeOf(s.settings.iconTheme)) === k} onClick={() => s.set({ settings: { ...s.settings, iconTheme: k } })} />)}
             </Col>
           </Group>
           <Group label="Ratón 3D">

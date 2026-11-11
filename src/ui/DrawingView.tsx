@@ -6,13 +6,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, type State } from '../core/store';
 import { cad, type ProjSource } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
-import { SHEETS, VIEW_CAMERAS, VIEW_NAMES, nextLabel, type DrawingDoc, type DView, type DAnn } from '../core/drawing';
+import { SHEETS, VIEW_CAMERAS, VIEW_NAMES, nextLabel, drawStyle, type DrawingDoc, type DView, type DAnn, type DDim } from '../core/drawing';
 import { v3, uid, type PartDoc, type V3 } from '../core/doc';
 import type { AsmDoc } from '../core/asm';
 import { fmt } from '../core/expr';
 import { bomRows } from './bom';
 import { modelDims, refreshModelDims, type ModelDim } from '../core/retrieve';
-import { buildSheet, geomOf, detectCircles, chainSegments, breakMap, tbHeight, BREAK_GAP, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
+import { buildSheet, dimGeometry, geomOf, detectCircles, chainSegments, breakMap, tbHeight, BREAK_GAP, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
 
 export type { ProjData };
 const projStore = new WeakMap<object, Map<string, Promise<ProjData>>>();
@@ -229,6 +229,14 @@ export default function DrawingView() {
   };
   const viewAt = (p: P2) => drw.views.find((v) => { const g = geoms[v.id]; return g && p[0] >= g.rect[0] - 3 && p[0] <= g.rect[2] + 3 && p[1] >= g.rect[1] - 3 && p[1] <= g.rect[3] + 3; });
   const rel = (v: DView, p: P2): [number, number] => [p[0] - v.x, p[1] - v.y];
+  /** Cota lineal provisional: tipo y desfase según la posición del cursor (la cota sigue al ratón) */
+  const linearDimAt = (A: P2, B: P2, p: P2): { kind: 'h' | 'v'; offset: number } => {
+    const mid: P2 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+    const dx = Math.abs(p[0] - mid[0]), dy = Math.abs(p[1] - mid[1]);
+    const kind: 'h' | 'v' = Math.abs(B[0] - A[0]) < 1e-6 ? 'v' : Math.abs(B[1] - A[1]) < 1e-6 ? 'h' : dy >= dx ? 'h' : 'v';
+    const offset = kind === 'h' ? p[1] - Math.max(A[1], B[1]) : p[0] - Math.max(A[0], B[0]);
+    return { kind, offset };
+  };
 
   const addAnn = (a: Omit<DAnn, 'id'>) => { const id = uid('an'); useStore.getState().commitDrw((d) => { (d.anns ??= []).push({ ...a, id }); }); useStore.setState({ selItem: id }); };
   const reset = () => setClicks({ pts: [], refs: [] });
@@ -249,10 +257,7 @@ export default function DrawingView() {
         }
         const v = drw.views.find((x) => x.id === clicks.view)!;
         const [A, B] = P;
-        const mid: P2 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
-        const dx = Math.abs(p[0] - mid[0]), dy = Math.abs(p[1] - mid[1]);
-        const kind: 'h' | 'v' = Math.abs(B[0] - A[0]) < 1e-6 ? 'v' : Math.abs(B[1] - A[1]) < 1e-6 ? 'h' : dy >= dx ? 'h' : 'v';
-        const offset = kind === 'h' ? p[1] - Math.max(A[1], B[1]) : p[0] - Math.max(A[0], B[0]);
+        const { kind, offset } = linearDimAt(A, B, p);
         s.commitDrw((d) => { d.dims.push({ id: uid('dm'), view: v.id, a: rel(v, A), b: rel(v, B), offset, kind }); });
         reset(); return;
       }
@@ -552,6 +557,21 @@ export default function DrawingView() {
         {(tool === 'drwAux' || tool === 'drwOrd' || tool === 'drwFcf' || tool === 'drwDatum') && clicks.pts.length >= 1 && cursor && <polyline points={pl([clicks.pts[clicks.pts.length - 1], cursor])} className="ln-preview" />}
         {(tool === 'drwSection' || tool === 'drwCenterline' || tool === 'drwLeader' || tool === 'drwWeld' || tool === 'drwBalloon') && clicks.pts.length === 1 && cursor && <polyline points={pl([clicks.pts[0], cursor])} className="ln-preview" />}
         {(tool === 'drwDim' || tool === 'drwOrd' || tool === 'drwBaseline' || tool === 'drwFcf' || tool === 'drwDatum' || tool === 'drwLeader' || tool === 'drwCenterline' || tool === 'drwSection' || tool === 'drwSurface') && cursor && (() => { const sp = snapPoint(cursor); return sp ? <circle cx={sp.pt[0]} cy={Y(sp.pt[1])} r={1.6} className="snap-hover" /> : null; })()}
+        {(() => {
+          // Cota provisional que sigue al cursor hasta el clic que la suelta
+          if (!cursor) return null;
+          const v = drw.views.find((x) => x.id === clicks.view); if (!v) return null;
+          let tmp: DDim | null = null;
+          if (tool === 'drwDim' && clicks.pts.length === 2) { const [A, B] = clicks.pts; tmp = { id: '_prev', view: v.id, a: rel(v, A), b: rel(v, B), ...linearDimAt(A, B, cursor) }; }
+          else if ((tool === 'drwDimD' || tool === 'drwDimR') && clicks.pts.length === 1) tmp = { id: '_prev', view: v.id, kind: tool === 'drwDimD' ? 'd' : 'r', a: rel(v, clicks.pts[0]), b: rel(v, cursor), r: clicks.refs[0] as number, offset: 0 };
+          if (!tmp) return null;
+          const g = dimGeometry(tmp, v);
+          return <g className="dim-preview">
+            {g.lines.map((l, i) => <polyline key={i} points={pl(l)} className="ln-dim" />)}
+            {g.arrows.map((a, i) => <polygon key={'a' + i} points={pl(a)} className="arrow" />)}
+            <text x={g.mid[0]} y={Y(g.mid[1])} fontSize={drawStyle(drw).dimTextH} textAnchor="middle" className="dim-text" transform={g.ang ? `rotate(${-g.ang} ${g.mid[0]} ${Y(g.mid[1])})` : undefined}>{g.text}</text>
+          </g>;
+        })()}
         {(tool === 'drwDimD' || tool === 'drwDimR' || tool === 'drwHole' || tool === 'drwCenterMark') && cursor && !clicks.pts.length && (() => { const c = circleAt(cursor); return c ? <circle cx={c.c[0]} cy={Y(c.c[1])} r={c.r} className="snap-circle" /> : null; })()}
         {(tool === 'drwDimA' || (tool === 'drwAux' && !clicks.refs.length)) && cursor && (() => { const sg = segAt(cursor); return sg ? <polyline points={pl([sg.a, sg.b])} className="snap-seg" /> : null; })()}
       </svg>

@@ -79,7 +79,7 @@ code, .mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 .ribbon { background: var(--panel); border-bottom: 1px solid var(--line); position: relative; z-index: 20; flex: none; }
 .qat { display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .brand { display: grid; place-items: center; margin-right: 6px; }
-.qat-b { display: grid; place-items: center; width: 28px; height: 26px; border: 0; background: none; border-radius: 5px; color: var(--fg-2); }
+.qat-b { display: grid; place-items: center; width: 32px; height: 30px; border: 0; background: none; border-radius: 5px; color: var(--fg-2); }
 .qat-b:hover:not(:disabled) { background: var(--line); color: var(--fg); }
 .qat-sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 4px; }
 .qat-sel { height: 24px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); padding: 0 6px; max-width: 190px; }
@@ -98,7 +98,7 @@ code, .mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 .rb-group { display: flex; flex-direction: column; padding: 0 6px; border-right: 1px solid var(--line); flex: none; }
 .rb-items { display: flex; align-items: flex-start; gap: 2px; flex: 1; }
 .rb-label { text-align: center; font-size: 11px; color: var(--fg-3); padding-top: 2px; letter-spacing: 0.02em; }
-.rb-big { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 66px; min-height: 66px; padding: 5px 2px 3px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--fg); font-size: 11.5px; line-height: 1.15; text-align: center; }
+.rb-big { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 72px; min-height: 74px; padding: 5px 2px 3px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--fg); font-size: 11.5px; line-height: 1.15; text-align: center; }
 .rb-big:hover:not(:disabled), .rb-small:hover:not(:disabled) { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .rb-big.on, .rb-small.on { background: var(--accent-soft); border-color: var(--accent); }
 .rb-col { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
@@ -402,7 +402,7 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .btn.icon.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 /* ---- Cinta: desplegables, rejilla de iconos ---- */
 .rb-split { position: relative; display: flex; flex-direction: column; align-items: stretch; }
-.rb-split .rb-big { min-height: 56px; padding-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.rb-split .rb-big { min-height: 64px; padding-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .rb-drop { border: 1px solid transparent; background: none; height: 14px; line-height: 10px; font-size: 10px; color: var(--fg-2); border-radius: 0 0 6px 6px; padding: 0; }
 .rb-drop:hover, .rb-split .rb-big:hover { background: var(--accent-soft); }
 .rb-menu { position: absolute; top: 100%; left: 0; z-index: 60; min-width: 190px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; }
@@ -580,30 +580,45 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .vprops td input[type=checkbox], .vprops td input[type=radio] { width: auto; height: auto; flex: none; margin: 0; }
 .vprops .check { justify-content: flex-start; text-align: left; }
 /* ---- Estilos de iconos (Opciones › General, o Vista › Iconos) ---- */
-:root[data-icons="inventor"] { --ico-ink: #2b3036; --ico-accent: #f08c00; --ico-fill: url(#icoF-inv); --ico-warm: #0696d7; }
-:root[data-icons="inventor"] .ico { stroke-width: 1.7px; }
-:root[data-icons="solidworks"] { --ico-ink: #4b4f55; --ico-accent: #1f5fbf; --ico-fill: url(#icoF-sw); --ico-warm: #d6261c; }
-:root[data-icons="solidworks"] .ico { stroke-width: 1.85px; filter: drop-shadow(0 0.7px 0.5px rgba(0, 0, 0, 0.28)); }
-:root[data-icons="catia"] { --ico-ink: #0e3556; --ico-accent: #f29a00; --ico-fill: url(#icoF-cat); --ico-warm: #e2231a; }
-:root[data-icons="catia"] .ico { stroke-width: 2.15px; filter: drop-shadow(0 1px 0.8px rgba(0, 45, 90, 0.38)); }
-:root[data-theme="dark"][data-icons="inventor"] { --ico-ink: #d5dbe1; --ico-accent: #ffa22e; --ico-fill: url(#icoF-invd); }
-:root[data-theme="dark"][data-icons="solidworks"] { --ico-ink: #d8dadd; --ico-accent: #5b9bf0; --ico-fill: url(#icoF-swd); }
-:root[data-theme="dark"][data-icons="catia"] { --ico-ink: #cfe6f7; --ico-fill: url(#icoF-catd); }
+:root[data-icons="e2"] { --ico-ink: #2b3036; --ico-accent: #f08c00; --ico-fill: url(#icoF-inv); --ico-warm: #0696d7; }
+:root[data-icons="e2"] .ico { stroke-width: 1.7px; }
+:root[data-icons="e3"] { --ico-ink: #4b4f55; --ico-accent: #1f5fbf; --ico-fill: url(#icoF-sw); --ico-warm: #d6261c; }
+:root[data-icons="e3"] .ico { stroke-width: 1.85px; filter: drop-shadow(0 0.7px 0.5px rgba(0, 0, 0, 0.28)); }
+:root[data-icons="e4"] { --ico-ink: #0e3556; --ico-accent: #f29a00; --ico-fill: url(#icoF-cat); --ico-warm: #e2231a; }
+:root[data-icons="e4"] .ico { stroke-width: 2.15px; filter: drop-shadow(0 1px 0.8px rgba(0, 45, 90, 0.38)); }
+:root[data-theme="dark"][data-icons="e2"] { --ico-ink: #d5dbe1; --ico-accent: #ffa22e; --ico-fill: url(#icoF-invd); }
+:root[data-theme="dark"][data-icons="e3"] { --ico-ink: #d8dadd; --ico-accent: #5b9bf0; --ico-fill: url(#icoF-swd); }
+:root[data-theme="dark"][data-icons="e4"] { --ico-ink: #cfe6f7; --ico-fill: url(#icoF-catd); }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"])[data-icons="inventor"] { --ico-ink: #d5dbe1; --ico-accent: #ffa22e; --ico-fill: url(#icoF-invd); }
-  :root:not([data-theme="light"])[data-icons="solidworks"] { --ico-ink: #d8dadd; --ico-accent: #5b9bf0; --ico-fill: url(#icoF-swd); }
-  :root:not([data-theme="light"])[data-icons="catia"] { --ico-ink: #cfe6f7; --ico-fill: url(#icoF-catd); }
+  :root:not([data-theme="light"])[data-icons="e2"] { --ico-ink: #d5dbe1; --ico-accent: #ffa22e; --ico-fill: url(#icoF-invd); }
+  :root:not([data-theme="light"])[data-icons="e3"] { --ico-ink: #d8dadd; --ico-accent: #5b9bf0; --ico-fill: url(#icoF-swd); }
+  :root:not([data-theme="light"])[data-icons="e4"] { --ico-ink: #cfe6f7; --ico-fill: url(#icoF-catd); }
 }
 .ico-themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .ico-theme { border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 6px 6px; background: var(--panel); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg); }
 .ico-theme.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); font-weight: 600; }
 .ico-theme .row { display: flex; gap: 2px; }
-.ico-prev[data-p="inv3d"] { --ico-ink: #34404d; --ico-accent: #1673d0; --ico-fill: #b7d2f2; --ico-warm: #e8890c; }
-.ico-prev[data-p="inv3d"] .ico { stroke-width: 2px; filter: none; }
-.ico-prev[data-p="inventor"] { --ico-ink: #2b3036; --ico-accent: #f08c00; --ico-fill: url(#icoF-inv); --ico-warm: #0696d7; }
-.ico-prev[data-p="inventor"] .ico { stroke-width: 1.7px; filter: none; }
-.ico-prev[data-p="solidworks"] { --ico-ink: #4b4f55; --ico-accent: #1f5fbf; --ico-fill: url(#icoF-sw); --ico-warm: #d6261c; }
-.ico-prev[data-p="solidworks"] .ico { stroke-width: 1.85px; filter: drop-shadow(0 0.7px 0.5px rgba(0, 0, 0, 0.28)); }
-.ico-prev[data-p="catia"] { --ico-ink: #0e3556; --ico-accent: #f29a00; --ico-fill: url(#icoF-cat); --ico-warm: #e2231a; }
-.ico-prev[data-p="catia"] .ico { stroke-width: 2.15px; filter: drop-shadow(0 1px 0.8px rgba(0, 45, 90, 0.38)); }
+.ico-prev[data-p="e1"] { --ico-ink: #34404d; --ico-accent: #1673d0; --ico-fill: #b7d2f2; --ico-warm: #e8890c; }
+.ico-prev[data-p="e1"] .ico { stroke-width: 2px; filter: none; }
+.ico-prev[data-p="e2"] { --ico-ink: #2b3036; --ico-accent: #f08c00; --ico-fill: url(#icoF-inv); --ico-warm: #0696d7; }
+.ico-prev[data-p="e2"] .ico { stroke-width: 1.7px; filter: none; }
+.ico-prev[data-p="e3"] { --ico-ink: #4b4f55; --ico-accent: #1f5fbf; --ico-fill: url(#icoF-sw); --ico-warm: #d6261c; }
+.ico-prev[data-p="e3"] .ico { stroke-width: 1.85px; filter: drop-shadow(0 0.7px 0.5px rgba(0, 0, 0, 0.28)); }
+.ico-prev[data-p="e4"] { --ico-ink: #0e3556; --ico-accent: #f29a00; --ico-fill: url(#icoF-cat); --ico-warm: #e2231a; }
+.ico-prev[data-p="e4"] .ico { stroke-width: 2.15px; filter: drop-shadow(0 1px 0.8px rgba(0, 45, 90, 0.38)); }
 .ico-prev { background: #f6f8fa; border-radius: 5px; padding: 4px; }
+.seg-mini { display: inline-flex; border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
+.seg-mini button { border: 0; background: none; padding: 5px 10px; font-size: 12px; cursor: pointer; color: var(--fg); }
+.seg-mini button + button { border-left: 1px solid var(--line-2); }
+.seg-mini button.on { background: var(--accent); color: var(--accent-fg, #fff); }
+.ptable select.bad { border-color: var(--danger); }
+.tpl-row5 .tpl { width: 128px; }
+.sym-row { display: flex; flex-wrap: wrap; gap: 3px; } .sym-row .btn.sm { min-width: 28px; padding: 0 5px; height: 24px; font-size: 13px; }
+.dim-preview { opacity: .75; pointer-events: none; }
+.ep-panel { width: min(420px, calc(100% - 32px)); }
+.ep-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.ep-def { background: #f08c00; } .ep-insert { background: #1673d0; } .ep-mate { background: #2f9a4c; } .ep-composite { background: linear-gradient(90deg, #1673d0 50%, #2f9a4c 50%); }
+.ep-members { display: flex; flex-direction: column; gap: 3px; max-height: 160px; overflow: auto; }
+.ptable tr.sel td { background: var(--accent-soft); }
+.tree-plus { display: inline-grid; place-items: center; width: 13px; height: 13px; border: 1px solid var(--line-2); border-radius: 2px; font: 600 11px/1 var(--f-mono); color: var(--fg-2); background: var(--panel); flex: none; cursor: pointer; margin-right: 1px; }
+.tree-plus:hover { border-color: var(--accent); color: var(--accent); }

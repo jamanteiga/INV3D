@@ -1,4 +1,5 @@
 import { femColor } from './FemPanel';
+import { partEPoints } from '../core/epoints';
 import HeadsUp from './HeadsUp';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
@@ -190,6 +191,19 @@ export default function PartViewport() {
         { const om = mesh.material as THREE.Material; om.colorWrite = false; om.depthWrite = false; mesh.userData.noColor = true; }
         grp.add(cm);
       }
+      // ePoints: esfera y flecha (naranja = inserción por defecto, azul = inserción, verde = coincidencia)
+      if (s.mode !== 'sketch') {
+        const sz = Math.max(2, V.bbox.getSize(new THREE.Vector3()).length() * 0.025);
+        for (const e of partEPoints(s.doc)) {
+          if (e.kind === 'composite') continue;
+          const col = e.isDefault ? 0xf08c00 : e.kind === 'insert' ? 0x1673d0 : 0x2f9a4c;
+          const sph = new THREE.Mesh(new THREE.SphereGeometry(sz * 0.45, 16, 12), new THREE.MeshBasicMaterial({ color: col, depthTest: false }));
+          sph.position.set(...e.point); sph.renderOrder = 6; sph.raycast = () => {}; sph.userData.keep = true;
+          const ar = new THREE.ArrowHelper(new THREE.Vector3(...e.dir).normalize(), new THREE.Vector3(...e.point), sz * 2.6, col, sz * 0.9, sz * 0.5);
+          ar.traverse((o: any) => { if (o.material) { o.material.depthTest = false; o.renderOrder = 6; } o.raycast = () => {}; o.userData.keep = true; });
+          partGroup.add(sph, ar);
+        }
+      }
       V.applyVisual(s.mode === 'sketch' ? '' : s.clip, s.wire && s.mode !== 'sketch', [grp]);
       // Roscas cosméticas: anillos a paso constante sobre la cara cilíndrica
       for (const f of s.doc.features) {
@@ -275,6 +289,7 @@ export default function PartViewport() {
         for (const l of s.fem.loads) for (const g of l.faces) if (g < fm.faceGroups.length) overlayGroup.add(faceOverlay(fm, g, '#e0452f', 0.5));
         if (s.tool === 'femFace' && hoverFace >= 0 && hoverFace < fm.faceGroups.length) overlayGroup.add(faceOverlay(fm, hoverFace, css('--hover'), 0.35));
       }
+      if (s.tool === 'epPick' && state.mesh && hoverFace >= 0 && hoverFace < state.mesh.faceGroups.length) overlayGroup.add(faceOverlay(state.mesh, hoverFace, css('--hover'), 0.4));
       if (m && state.hoverEdge >= 0 && state.hoverEdge < m.edgeGroups.length && (s.tool === 'pickEdges' || s.tool === 'pickFlangeEdge' || s.tool === 'projectGeom' || s.tool === 'measure')) {
         overlayGroup.add(V.segs(groupPts(state.hoverEdge, m), V.lineMat(css('--hover'), 4, false, false)));
       }
@@ -1113,6 +1128,33 @@ export default function PartViewport() {
         buildOverlay(s);
         return;
       }
+      if (s.tool === 'epPick') {
+        const fh = faceHit(ev); if (!fh) return;
+        const m = fh.mesh, g = m.faceGroups[fh.group];
+        if (fh.planar) {
+          useStore.setState({ epPick: { point: vArr(fh.point, 4), dir: vArr(fh.normal, 6), axis: false, n: (s.epPick?.n ?? 0) + 1 }, tool: null });
+        } else {
+          // cara cilíndrica: eje a partir de las normales, centro por tres puntos y extremo más cercano al clic
+          const vs: THREE.Vector3[] = [], ns: THREE.Vector3[] = [];
+          for (let i = g.start; i < g.start + g.count; i++) { const v = m.triangles[i]; vs.push(new THREE.Vector3(m.vertices[v * 3], m.vertices[v * 3 + 1], m.vertices[v * 3 + 2])); ns.push(new THREE.Vector3(m.normals[v * 3], m.normals[v * 3 + 1], m.normals[v * 3 + 2])); }
+          let axis: THREE.Vector3 | null = null;
+          for (let i = 1; i < ns.length && !axis; i++) { const c = ns[0].clone().cross(ns[i]); if (c.length() > 0.2) axis = c.normalize(); }
+          if (!axis) { s.notify('No se reconoce el eje de esa cara', 'error'); return; }
+          const flat = vs.map((v) => v.clone().addScaledVector(axis!, -v.dot(axis!)));
+          const a = flat[0], b = flat.reduce((p, q) => (q.distanceTo(a) > p.distanceTo(a) ? q : p), a);
+          const c = flat.reduce((p, q) => { const d = (x: THREE.Vector3) => Math.min(x.distanceTo(a), x.distanceTo(b)); return d(q) > d(p) ? q : p; }, a);
+          // circunferencia por tres puntos (en el plano perpendicular al eje)
+          const ab = b.clone().sub(a), ac = c.clone().sub(a), nn = ab.clone().cross(ac);
+          let center = a.clone().add(b).multiplyScalar(0.5);
+          if (nn.lengthSq() > 1e-12) center = a.clone().add(ac.clone().multiplyScalar(ab.lengthSq()).cross(nn).add(nn.clone().cross(ab).multiplyScalar(ac.lengthSq())).divideScalar(2 * nn.lengthSq()).multiplyScalar(1));
+          const r = center.distanceTo(a);
+          const ts = vs.map((v) => v.dot(axis!)), t0 = Math.min(...ts), t1 = Math.max(...ts), th = fh.point.dot(axis);
+          const atEnd = Math.abs(th - t1) < Math.abs(th - t0) ? t1 : t0, dir = atEnd === t1 ? axis.clone() : axis.clone().negate();
+          const P = center.clone().addScaledVector(axis, atEnd);
+          useStore.setState({ epPick: { point: vArr(P, 4), dir: vArr(dir, 6), radius: Math.round(r * 1000) / 1000, axis: true, n: (s.epPick?.n ?? 0) + 1 }, tool: null });
+        }
+        return;
+      }
       if (s.tool === 'femFace' && s.fem) {
         const fh = faceHit(ev); if (!fh) return;
         const g = fh.group, f = s.fem;
@@ -1328,7 +1370,7 @@ export default function PartViewport() {
         if (gi !== state.hoverEdge) { state.hoverEdge = gi; buildOverlay(s); }
         return;
       }
-      if (s.tool === 'pickFaces' || s.tool === 'femFace') {
+      if (s.tool === 'pickFaces' || s.tool === 'femFace' || s.tool === 'epPick') {
         const fh = faceHit(ev), gi = fh?.group ?? -1;
         if (gi !== hoverFace) { hoverFace = gi; buildOverlay(s); }
         return;
@@ -1370,7 +1412,7 @@ export default function PartViewport() {
 
     const cancelTool = () => { state.chain = []; state.chainIds = []; state.clicks = []; state.picks = []; buildPreview(useStore.getState()); };
     const applyMouse = (s: State) => {
-      const picking = ['pickEdges', 'pickPlane', 'pickFaces', 'femFace', 'pickFlangeEdge', 'pickWorkBase', 'measure'].includes(s.tool ?? '');
+      const picking = ['pickEdges', 'pickPlane', 'pickFaces', 'femFace', 'epPick', 'pickFlangeEdge', 'pickWorkBase', 'measure'].includes(s.tool ?? '');
       V.setMouse(s.mode === 'sketch' || picking, s.mode === 'sketch');
       cvs.style.cursor = s.tool && !picking ? 'crosshair' : s.tool ? 'pointer' : 'default';
     };
@@ -1419,6 +1461,7 @@ export default function PartViewport() {
   const hints: Record<string, string> = {
     pickEdges: 'Selecciona aristas · clic de nuevo para quitar',
     pickFaces: 'Selecciona caras · clic de nuevo para quitar',
+    epPick: 'Clic en una cara plana (ePoint de coincidencia) o cilíndrica cerca del extremo (ePoint de inserción) · Esc cancela',
     femFace: 'Clic en las caras para añadirlas al grupo activo (azul = fija, rojo = carga) · clic de nuevo para quitar',
     pickFlangeEdge: 'Selecciona la arista superior del borde de la chapa',
     pickWorkBase: 'Selecciona un plano o una cara plana de referencia',

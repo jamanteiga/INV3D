@@ -1,4 +1,4 @@
-// Evaluador de expresiones con unidades, al estilo del cuadro de Parámetros (fx) de Inventor.
+// Evaluador de expresiones con unidades.
 // Longitudes se normalizan a mm y ángulos a grados.
 
 const UNITS: Record<string, number> = {

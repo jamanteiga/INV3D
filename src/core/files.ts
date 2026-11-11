@@ -1,4 +1,4 @@
-// Entrada/salida de ficheros: .i3p propio, STEP/STL, .ipj de Inventor y lectura de metadatos OLE (.ipt/.iam/.idw/.ipn).
+// Entrada/salida de ficheros: .i3p propio, STEP/STL, proyectos .ipj y lectura de metadatos OLE (.ipt/.iam/.idw/.ipn).
 import * as CFB from 'cfb';
 import { useStore, type FileInfo } from './store';
 import { cad } from './cadClient';
@@ -241,7 +241,7 @@ export async function openFile(file?: File | null) {
     } else if (ext === 'ipj') {
       await openIpj(file);
     } else if (['ipt', 'iam', 'idw', 'ipn'].includes(ext)) {
-      s.open({ kind: 'fileinfo', title: 'Fichero de Autodesk Inventor', info: await inventorInfo(file) });
+      s.open({ kind: 'fileinfo', title: 'Fichero .ipt/.iam/.idw/.ipn', info: await oleFileInfo(file) });
     } else if (ext === 'dwg') {
       s.open({ kind: 'fileinfo', title: 'Dibujo DWG', info: await dwgInfo(file) });
     } else {
@@ -352,7 +352,7 @@ export async function importStep(file?: File | null, asNew = false) {
   s.notify(`Importado ${file.name}`);
 }
 
-// ---------- Proyecto .ipj (XML de Inventor) ----------
+// ---------- Proyecto .ipj (XML) ----------
 export async function openIpj(file: File) {
   const xml = await file.text();
   const dom = new DOMParser().parseFromString(xml, 'application/xml');
@@ -387,10 +387,10 @@ export function newIpj(name: string) {
   <!-- Creado con INV3D -->
 </InventorProject>
 `;
-  return saveAs(xml, `${name}.ipj`, 'Proyecto de Inventor', '.ipj', 'application/xml');
+  return saveAs(xml, `${name}.ipj`, 'Proyecto .ipj', '.ipj', 'application/xml');
 }
 
-// ---------- Metadatos de ficheros OLE de Inventor ----------
+// ---------- Metadatos de ficheros OLE (.ipt/.iam/.idw/.ipn) ----------
 const SUMMARY: Record<number, string> = { 2: 'Título', 3: 'Asunto', 4: 'Autor', 5: 'Palabras clave', 6: 'Comentarios', 8: 'Último autor', 9: 'Revisión', 12: 'Creado', 13: 'Guardado', 18: 'Aplicación' };
 const DOCSUMMARY: Record<number, string> = { 2: 'Categoría', 14: 'Responsable', 15: 'Empresa' };
 
@@ -463,17 +463,17 @@ function thumbFromCF(cf: Uint8Array): string | undefined {
   return undefined;
 }
 
-export async function inventorInfo(file: File): Promise<FileInfo> {
+export async function oleFileInfo(file: File): Promise<FileInfo> {
   const ext = file.name.split('.').pop()!.toLowerCase();
   const kinds: Record<string, string> = { ipt: 'Pieza (.ipt)', iam: 'Ensamblaje (.iam)', idw: 'Dibujo (.idw)', ipn: 'Presentación (.ipn)' };
   const buf = new Uint8Array(await file.arrayBuffer());
   const info: FileInfo = {
     fileName: file.name, kind: kinds[ext] ?? ext,
-    message: 'La geometría de Inventor está en un formato cerrado de Autodesk y no puede reconstruirse. Para editarla aquí, en Inventor usa Archivo › Exportar › Formato CAD › STEP y abre el .stp en INV3D.',
+    message: 'La geometría de este fichero está en un formato cerrado y no puede reconstruirse. Para editarla aquí, expórtala a STEP desde el programa de origen y abre el .stp en INV3D.',
     props: [], streams: [],
   };
   let cfb: CFB.CFB$Container;
-  try { cfb = CFB.read(buf, { type: 'array' }); } catch { info.message = 'El fichero no es un contenedor OLE de Inventor válido.'; return info; }
+  try { cfb = CFB.read(buf, { type: 'array' }); } catch { info.message = 'El fichero no es un contenedor OLE válido.'; return info; }
   info.streams = cfb.FullPaths.filter((p) => !p.endsWith('/')).map((p) => p.replace(/^Root Entry\//, '')).slice(0, 60);
   for (let i = 0; i < cfb.FileIndex.length; i++) {
     const ent = cfb.FileIndex[i];
@@ -513,6 +513,8 @@ async function dwgInfo(file: File, dxf = false): Promise<FileInfo> {
     } catch (e) { info.message = `No se pudo interpretar el DXF: ${(e as Error).message}`; }
     return info;
   }
+  // LibreDWG falla (y puede cerrar la página) con DWG anteriores a 2004
+  if (!/^AC10(1[89]|2\d|3\d)/.test(head)) { info.message = `Vista no disponible para DWG ${ver[head] ?? head}: guárdalo como DWG 2004 o posterior, o como DXF.`; return info; }
   try {
     dwgLib ??= import('@mlightcad/libredwg-web').then(async (m: any) => ({ m, lib: await m.LibreDwg.create(new URL('./dwg', document.baseURI).href.replace(/\/$/, '')) }));
     const { m, lib } = await dwgLib;

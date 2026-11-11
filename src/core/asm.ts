@@ -28,11 +28,11 @@ export interface CompPattern { id: string; name: string; parent: string; p: Reco
  *  cara plana (punto + normal) o eje de una cara cilíndrica (punto del eje + dirección + radio). */
 export interface FaceRef { occ: string; point: V3; normal: V3; kind?: 'plane' | 'axis'; radius?: number; convex?: boolean; /** dirección de referencia X y centro de la cara (uniones) */ xdir?: V3; center?: V3 }
 
-/** Coincidir, al ras, rígida, ángulo, tangente e insertar (como las restricciones de ensamblaje de Inventor). */
+/** Coincidir, al ras, rígida, ángulo, tangente e insertar. */
 export type JointType = 'mate' | 'flush' | 'rigid' | 'angle' | 'tangent' | 'insert' | 'perp' | 'sym' | 'rot' | 'slider' | 'cyl' | 'planar' | 'ball';
 export const JOINT_NAMES: Record<JointType, string> = { mate: 'Coincidir', flush: 'Al ras', rigid: 'Rígida', angle: 'Ángulo', tangent: 'Tangente', insert: 'Insertar', perp: 'Perpendicular', sym: 'Simetría',
   rot: 'Unión de rotación', slider: 'Unión corredera', cyl: 'Unión cilíndrica', planar: 'Unión planar', ball: 'Unión de bola' };
-/** Uniones de Inventor (orígenes con eje): grados de libertad que dejan libres */
+/** Uniones (orígenes con eje): grados de libertad que dejan libres */
 export const JOINT_DOF: Partial<Record<JointType, string>> = { rot: '1 giro', slider: '1 traslación', cyl: '1 giro + 1 traslación', planar: '2 traslaciones + 1 giro', ball: '3 giros', rigid: 'ninguno' };
 export interface Joint {
   id: string; name: string; type: JointType;
@@ -47,6 +47,8 @@ export interface Joint {
   /** Límites de recorrido (rotación en grados, corredera en mm) */
   min?: string; max?: string;
   suppressed?: boolean;
+  /** Creada al conectar ePoints (ids en A y B y nombre) */
+  ep?: { a: string; b: string; name: string };
 }
 /** Restricciones de movimiento entre dos uniones: engranaje (rotación-rotación) y piñón-cremallera (rotación-traslación). */
 export interface Motion { id: string; name: string; type: 'gear' | 'rack'; j1: string; j2: string; ratio: string; reverse?: boolean; base: number; suppressed?: boolean }
@@ -210,7 +212,7 @@ export const xfInvPoint = (x: Xform, p: V3): V3 => q.rotate([-x.quat[0], -x.quat
 export const xfInvDir = (x: Xform, d: V3): V3 => q.rotate([-x.quat[0], -x.quat[1], -x.quat[2], x.quat[3]], d);
 
 /**
- * Resolución secuencial de uniones (como el orden del navegador de Inventor):
+ * Resolución secuencial de uniones:
  * cada unión mueve el componente B para cumplirla respecto a A.
  */
 export function solveJoints(asm: AsmDoc, ev: (s: string) => number): { xf: Record<string, Xform>; errors: Record<string, string> } {

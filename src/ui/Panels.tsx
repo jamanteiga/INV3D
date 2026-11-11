@@ -1,8 +1,9 @@
 import FemPanel from './FemPanel';
 import TbTplDialog from './TbDialog';
 import OccPropsDialog from './OccPropsDialog';
+import EPointPanel from './EPointPanel';
 import DrwViewPropsDialog from './DrwViewDialog';
-import { tbTemplate, TB_FIELDS } from '../core/drawing';
+import { tbTemplate, TB_FIELDS, type SheetSize } from '../core/drawing';
 import { GenDialog } from './MachineDialog';
 import { FrameCalcDialog, JointCalcDialog } from './CalcDialogs';
 import { PipeNetDialog, PressureDialog, VesselDialog } from './PipeDialogs';
@@ -52,7 +53,7 @@ function useEval() {
   return (x: string) => evaluate(x, (n) => values[n]);
 }
 
-/** Campo de expresión con validación en vivo, como los cuadros de cota de Inventor. */
+/** Campo de expresión con validación en vivo. */
 export function Expr({ value, onCommit, live, unit = 'mm', autoFocus }: { value: string; onCommit: (v: string) => void; live?: boolean; unit?: string; autoFocus?: boolean }) {
   const ev = useEval();
   const [txt, setTxt] = useState(value);
@@ -1078,6 +1079,9 @@ function DrwPanel() {
         {dim.ref && <div className={`pick-info ${dim.orphan ? 'err' : ''}`}>{dim.orphan ? 'La cota del modelo ya no existe' : 'Cota asociada al modelo'}{' '}<button className="btn" onClick={() => s.commitDrw((dd) => { const t = dd.dims.find((x) => x.id === dim.id); if (t) { delete t.ref; delete t.orphan; } })}>Desvincular</button></div>}
         <div className="psec-title">Cota {dim.kind === 'd' ? 'de diámetro' : dim.kind === 'r' ? 'de radio' : dim.kind === 'ang' ? 'angular' : dim.kind === 'ord' ? `por coordenadas (${dim.axis === 'y' ? 'Y' : 'X'})` : 'lineal'}</div>
         <Row label="Texto"><input value={dim.text ?? ''} placeholder="automático" onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.text = e.target.value || undefined; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        <Row label="Símbolo delante"><div className="sym-row">{DIM_SYMS.map(([sym, tip]) => <button key={sym || 'none'} className={`btn sm ${((dim.prefix ?? '') === sym) ? 'primary' : ''}`} title={tip} onClick={() => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.prefix = sym || undefined; })}>{sym || '—'}</button>)}</div></Row>
+        <Row label="Prefijo libre"><input value={dim.prefix ?? ''} placeholder="p. ej. 4×Ø" onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.prefix = e.target.value || undefined; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        <Row label="Sufijo"><input value={dim.suffix ?? ''} placeholder="p. ej. (REF)" onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.suffix = e.target.value || undefined; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
         <Row label="Tolerancia"><select value={TOLS.includes(dim.tol ?? '') ? dim.tol ?? '' : '*'} onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.tol = e.target.value === '*' ? '±0.1' : e.target.value || undefined; })}>
           {TOLS.map((x) => <option key={x} value={x}>{x || 'Sin tolerancia'}</option>)}<option value="*">Otra…</option>
         </select></Row>
@@ -1147,6 +1151,8 @@ function tbFieldsOf(d: DrawingDoc): [string, string][] {
   for (const [k, l] of TB_FIELDS) if (!k.startsWith('#') && !seen.has(k) && ['title', 'partNumber', 'material', 'designer', 'date', 'revision', 'scale'].includes(k)) out.push([k, l]);
   return out;
 }
+/** Símbolos para poner delante del valor de una cota */
+const DIM_SYMS: [string, string][] = [['', 'Sin símbolo'], ['Ø', 'Diámetro'], ['□', 'Cuadrado'], ['R', 'Radio'], ['SØ', 'Diámetro esférico'], ['SR', 'Radio esférico'], ['M', 'Rosca métrica'], ['⌴', 'Refrentado'], ['⌵', 'Avellanado'], ['↧', 'Profundidad'], ['±', 'Más/menos'], ['≈', 'Aproximado'], ['⌒', 'Longitud de arco'], ['t=', 'Espesor']];
 const TOLS = ['', '±0.05', '±0.1', '±0.2', '±0.5', '+0.1/0', '0/-0.1', 'H7', 'h6', 'g6', 'js7'];
 
 export function PropertyPanel() {
@@ -1280,7 +1286,7 @@ function ProjectDialog({ onClose }: { onClose: () => void }) {
       {p ? (<>
         <div className="proj-head"><Icon name="project" size={26} /><div><b>{p.name}</b><div className="muted">{p.fileName}</div></div></div>
         <table className="ptable kv"><tbody>{p.entries.map((e, i) => <tr key={i}><td>{e.label}</td><td className="mono">{e.value}</td></tr>)}</tbody></table>
-      </>) : <p className="phelp">No hay proyecto activo. Abre un <code>.ipj</code> de Inventor para ver su espacio de trabajo y librerías, o crea uno nuevo compatible.</p>}
+      </>) : <p className="phelp">No hay proyecto activo. Abre un proyecto <code>.ipj</code> para ver su espacio de trabajo y librerías, o crea uno nuevo compatible.</p>}
       <div className="modal-btns">
         <button className="btn" onClick={() => openFile()}>Abrir .ipj…</button>
         <button className="btn" onClick={() => newIpj('Proyecto')}>Crear .ipj nuevo</button><span className="grow" />
@@ -1451,7 +1457,7 @@ function SpaceMouseDialog({ onClose }: { onClose: () => void }) {
       <label className="check"><input type="checkbox" checked={st.invR} onChange={(e) => up({ invR: e.target.checked })} />Invertir giros</label>
       <label className="check"><input type="checkbox" checked={st.lockRot} onChange={(e) => up({ lockRot: e.target.checked })} />Bloquear giros (solo encuadre y zoom)</label>
       <label className="check"><input type="checkbox" checked={st.lockPan} onChange={(e) => up({ lockPan: e.target.checked })} />Bloquear encuadre (solo giros y zoom)</label>
-      <p className="phelp">Modo objeto, como Inventor: el modelo sigue a la tapa. Botón izquierdo: vista de inicio · botón derecho: ajustar. Funciona con 3DxWare instalado; si no responde, cierra otras aplicaciones que usen el ratón 3D en el navegador. En la vista previa incrustada el navegador puede bloquear el acceso: abre la web directamente.</p>
+      <p className="phelp">Modo objeto: el modelo sigue a la tapa. Botón izquierdo: vista de inicio · botón derecho: ajustar. Funciona con 3DxWare instalado; si no responde, cierra otras aplicaciones que usen el ratón 3D en el navegador. En la vista previa incrustada el navegador puede bloquear el acceso: abre la web directamente.</p>
       <div className="modal-btns"><span className="grow" />
         <button className="btn primary" onClick={() => connectSpaceMouse()}>{s.spaceMouse ? 'Cambiar dispositivo…' : 'Conectar…'}</button>
         <button className="btn" onClick={onClose}>Cerrar</button>
@@ -2438,9 +2444,9 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
 
 function NewDocDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const go = (k: Parameters<typeof s.newDocument>[0]) => { onClose(); s.newDocument(k); };
-  const T = ({ icon, name, desc, k }: { icon: string; name: string; desc: string; k: Parameters<typeof s.newDocument>[0] }) => (
-    <button className="tpl" onClick={() => go(k)}><Icon name={icon} size={40} /><b>{name}</b><span>{desc}</span></button>
+  const go = (k: Parameters<typeof s.newDocument>[0], sheet?: SheetSize) => { onClose(); s.newDocument(k, sheet); };
+  const T = ({ icon, name, desc, k, sheet }: { icon: string; name: string; desc: string; k: Parameters<typeof s.newDocument>[0]; sheet?: SheetSize }) => (
+    <button className="tpl" onClick={() => go(k, sheet)}><Icon name={icon} size={34} /><b>{name}</b><span>{desc}</span></button>
   );
   return (
     <Modal title="Crear archivo nuevo" onClose={onClose} wide>
@@ -2449,7 +2455,7 @@ function NewDocDialog({ onClose }: { onClose: () => void }) {
       <div className="tpl-sec">Ensamblaje — ensamblar componentes 2D y 3D</div>
       <div className="tpl-row"><T icon="assembly" name="Normal (mm).i3a" desc="Componentes, uniones, estructura, tornillería" k="assembly" /><T icon="weldment" name="Soldadura (ISO).i3a" desc="Construcción soldada" k="weldment" /></div>
       <div className="tpl-sec">Dibujo — crear un documento anotado</div>
-      <div className="tpl-row"><T icon="drawing" name="ISO A3.i3d" desc="Plano con cajetín y proyección europea" k="drawing" /></div>
+      <div className="tpl-row tpl-row5">{(['A4', 'A3', 'A2', 'A1', 'A0'] as SheetSize[]).map((z) => <T key={z} icon="drawing" name={`ISO ${z}.i3d`} desc={`${SHEETS[z][0]} × ${SHEETS[z][1]} mm, cajetín y proyección europea`} k="drawing" sheet={z} />)}</div>
       <p className="phelp">La presentación (explosionado y animación) es un modo del ensamblaje: pestaña Presentación.</p>
     </Modal>
   );
@@ -2484,9 +2490,9 @@ function DrwViewDialog({ onClose }: { onClose: () => void }) {
 function ILogicDialog({ onClose }: { onClose: () => void }) {
   const copy = () => { navigator.clipboard?.writeText(ILOGIC_RULE).catch(() => {}); useStore.getState().notify('Regla copiada al portapapeles'); };
   return (
-    <Modal title="Exportar un proyecto de Inventor a STEP y DWG" onClose={onClose} xwide>
+    <Modal title="Exportar un proyecto .ipj a STEP y DWG" onClose={onClose} xwide>
       <ol className="howto">
-        <li>En Inventor, abre cualquier documento del proyecto y ve a <b>Administrar › iLogic › Agregar regla</b> (o crea una regla externa en el <b>Explorador de iLogic</b>).</li>
+        <li>En el programa de origen, abre cualquier documento del proyecto y ve a <b>Administrar › iLogic › Agregar regla</b> (o crea una regla externa en el <b>Explorador de iLogic</b>).</li>
         <li>Pega la regla y ejecútala. Recorre el espacio de trabajo del proyecto activo (.ipj) y crea <code>_EXPORT_INV3D</code> con un .stp por pieza y ensamblaje y un .dwg por plano.</li>
         <li>Abre los .stp en INV3D (los ensamblajes se convierten en componentes) y los .dwg con el visor.</li>
       </ol>
@@ -2544,6 +2550,7 @@ export function Modals() {
     case 'gen': return <GenDialog onClose={close} />;
     case 'fem': return <FemPanel onClose={close} />;
     case 'tbtpl': return <TbTplDialog onClose={close} />;
+    case 'epoint': return <EPointPanel onClose={close} />;
     case 'drwviewprops': return <DrwViewPropsDialog key={(d as { view: string }).view} id={(d as { view: string }).view} onClose={close} />;
     case 'occprops': return <OccPropsDialog key={(d as { occ: string }).occ} occ={(d as { occ: string }).occ} onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
@@ -2557,7 +2564,7 @@ export function Modals() {
     case 'shortcuts': return <Modal title="Atajos de teclado y ratón" onClose={close}><table className="ptable kv"><tbody>{SHORTCUTS.map(([k, v]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{v}</td></tr>)}</tbody></table></Modal>;
     default: return (
       <Modal title="Acerca de INV3D" onClose={close}>
-        <p><b>INV3D 0.8</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
+        <p><b>INV3D 0.8</b> · CAD paramétrico libre en el navegador.</p>
         <p className="phelp">Boceto con restricciones geométricas y cotas, pieza y chapa, ensamblaje con restricciones (solver simultáneo), Centro de contenido, estructura (perfiles EN), soldadura (ISO 2553), tornillería (ISO, cálculo EN 1993-1-8), planos con secciones y detalles (ISO, proyección europea) y presentación.</p>
         <p className="phelp">Núcleo OpenCascade (LGPL) vía replicad · visor Three.js · visor DWG LibreDWG (GPL-3.0).</p>
         <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={close}>Cerrar</button></div>

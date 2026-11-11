@@ -1,4 +1,5 @@
 import HeadsUp from './HeadsUp';
+import { insertPoint } from '../core/epoints';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -162,6 +163,9 @@ export default function AsmViewport() {
         const dir = camera.getWorldDirection(new THREE.Vector3());
         const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(dir, vb);
         target = ray.intersectPlane(pl, new THREE.Vector3()) ?? vb;
+        // en el espacio libre la pieza se coge por su ePoint de inserción
+        const pd = s.docData(p.part) as PartDoc | null;
+        if (pd?.format === 'inv3d.part') cL.set(...insertPoint(pd));
       }
       const pos = target.clone().sub(cL.clone().applyQuaternion(q));
       ghostXf = { pos: vArr(pos, 3), quat: p.quat };
@@ -389,7 +393,7 @@ export default function AsmViewport() {
 
     let downAt: { x: number; y: number; button: number } | null = null;
     const cvs = V.renderer.domElement;
-    // Arrastre libre (como Inventor): clic izquierdo mantenido sobre un componente no fijo lo mueve en el plano de la vista;
+    // Arrastre libre: clic izquierdo mantenido sobre un componente no fijo lo mueve en el plano de la vista;
     // al soltar se vuelven a resolver las restricciones (se mueve solo en sus grados de libertad libres).
     let drag: { id: string; grp: THREE.Object3D; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; plane: THREE.Plane; start: THREE.Vector3; xf: Xform; moved: boolean } | null = null;
     host.current!.addEventListener('pointerdown', (ev) => {
@@ -613,7 +617,7 @@ export default function AsmViewport() {
   );
 }
 
-/** Menú contextual del visor de ensamblaje: restringir la geometría pulsada (como el clic derecho de Inventor). */
+/** Menú contextual del visor de ensamblaje: restringir la geometría pulsada. */
 function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef; pW: V3; label: string }; close: () => void }) {
   const s = useStore.getState();
   useEffect(() => {

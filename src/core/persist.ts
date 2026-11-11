@@ -3,8 +3,10 @@
 import { MATERIALS } from './doc';
 import type { SheetSize } from './drawing';
 
-export type IconTheme = 'inv3d' | 'inventor' | 'solidworks' | 'catia';
-export const ICON_THEMES: [IconTheme, string][] = [['inv3d', 'INV3D clásico'], ['inventor', 'Inventor 2027'], ['solidworks', 'SolidWorks 2026'], ['catia', 'CATIA']];
+export type IconTheme = 'e1' | 'e2' | 'e3' | 'e4';
+export const ICON_THEMES: [IconTheme, string][] = [['e1', 'Estilo 1'], ['e2', 'Estilo 2'], ['e3', 'Estilo 3'], ['e4', 'Estilo 4']];
+/** Estilo de iconos vigente (convierte los nombres antiguos) */
+export function iconThemeOf(v: string | undefined): IconTheme { return v === 'e2' || v === 'inventor' ? 'e2' : v === 'e3' || v === 'solidworks' ? 'e3' : v === 'e4' || v === 'catia' ? 'e4' : 'e1'; }
 export type DrawStd = 'ISO' | 'DIN' | 'ANSI';
 export interface AppSettings {
   userName: string; company: string;

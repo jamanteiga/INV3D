@@ -111,9 +111,10 @@ const endsLabel = (s: HvacSpec) => ({ none: '', tdc: ' · bridas TDC', angle: ' 
 // ---------- Conducto recto ----------
 function makeDuct(s: HvacSpec): PartDoc {
   const t = autoT(s), L = s.L, b = new B(), sh = s.shape;
+  if (sh === 'rect') return makeRectDuctSheet(s, t);
   b.ext('Conducto', XY(), [secE(sh, s.W, s.H, s.D, 2 * t), secE(sh, s.W, s.H, s.D)], L);
-  if (s.ends === 'socket' && sh !== 'rect') b.ext('Manguito de unión', XY(L - 60), [secE(sh, s.W, s.H, s.D, 4 * t + 1), secE(sh, s.W, s.H, s.D, 2 * t)], 60);
-  const spiral = s.seam === 'spiral' && sh !== 'rect';
+  if (s.ends === 'socket') b.ext('Manguito de unión', XY(L - 60), [secE(sh, s.W, s.H, s.D, 4 * t + 1), secE(sh, s.W, s.H, s.D, 2 * t)], 60);
+  const spiral = s.seam === 'spiral';
   let pitch = 0;
   if (spiral && sh === 'round') pitch = spiralPitch(s.D);
   if (spiral && sh === 'round' && s.seamGeo) {
@@ -129,6 +130,21 @@ function makeDuct(s: HvacSpec): PartDoc {
   const nm = spiral ? 'Conducto espiral' : 'Conducto';
   const d = doc(s, `${nm} ${sizeLabel(s)} L=${L} e=${t}`, `${nm} ${SHAPE_NAME[sh]} ${sizeLabel(s)} · L ${L} mm · chapa ${String(t).replace(".", ",")} mm${spiral ? (sh === 'round' ? ` · grapa helicoidal paso ${pitch} mm (EN 12237)` : ' · oval plano conformado de tubo espiral') : ''}${endsLabel(s)}`,
     sh === 'round' ? [['D', s.D, 'Diámetro interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']] : [['W', s.W, sh === 'oval' ? 'Eje mayor interior' : 'Anchura interior'], ['H', s.H, sh === 'oval' ? 'Eje menor interior' : 'Altura interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']]);
+  d.features = b.f; return d;
+}
+
+/** Conducto rectangular de chapa plegada: pestaña de contorno con tres pliegues y cierre engatillado en la cuarta esquina.
+ *  Es una pieza de chapa: tiene desarrollo para corte (Chapa › Desarrollo) y espesor/radio en el estilo de chapa. */
+function makeRectDuctSheet(s: HvacSpec, t: number): PartDoc {
+  const L = s.L, W = s.W, H = s.H, r = Math.max(t, 1), gap = Math.round((r + t + 2) * 10) / 10, b = new B();
+  const P: [number, number][] = [[-W / 2, -H / 2 + gap], [-W / 2, H / 2], [W / 2, H / 2], [W / 2, -H / 2], [-W / 2 + gap, -H / 2]];
+  const ents: SkEntity[] = P.slice(0, -1).map((p, i) => ({ id: id('l'), type: 'line', a: [f1(p[0]), f1(p[1])], b: [f1(P[i + 1][0]), f1(P[i + 1][1])] }) as SkEntity);
+  const sk = b.sketch('Sección (boceto)', XY(), ents);
+  b.f.push({ id: 'cf1', name: 'Conducto (chapa plegada)', type: 'sm_contour', profile: sk, width: f1(L), dir: 'normal', side: 'in' });
+  endJoints(b, s, t, L);
+  const d = doc(s, `Conducto ${sizeLabel(s)} L=${L} e=${t}`, `Conducto rectangular de chapa plegada ${sizeLabel(s)} · L ${L} mm · chapa ${String(t).replace('.', ',')} mm · 3 pliegues R${String(r).replace('.', ',')} y cierre engatillado en la cuarta esquina${endsLabel(s)}`,
+    [['W', W, 'Anchura interior'], ['H', H, 'Altura interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']]);
+  d.sheet = { t: `${t} mm`, r: `${r} mm`, k: '0.44' };
   d.features = b.f; return d;
 }
 

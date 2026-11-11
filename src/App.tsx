@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore, activeSketch, startCad } from './core/store';
+import { iconThemeOf } from './core/persist';
 import Ribbon from './ui/Ribbon';
 import Browser from './ui/Browser';
 import PartViewport from './ui/PartViewport';
@@ -108,7 +109,7 @@ function FolderBanner() {
   );
 }
 
-/** Pestañas de documentos abiertos (como la barra inferior de Inventor). */
+/** Pestañas de documentos abiertos. */
 function DocTabs() {
   const s = useStore();
   const icon = { part: 'part', assembly: 'assembly', drawing: 'drawing' } as const;
@@ -123,7 +124,7 @@ function DocTabs() {
             <button className="doc-x" title="Cerrar" onClick={async (e) => {
               e.stopPropagation();
               const used = s.docs.some((o) => o.kind === 'assembly' && (s.docData(o.id) as any)?.occurrences?.some((x: any) => x.part === d.id));
-              // Como en Inventor: la pieza se cierra pero sigue cargada en memoria mientras la use el ensamblaje
+              // La pieza se cierra pero sigue cargada en memoria mientras la use el ensamblaje
               if (used) { s.hideDocument(d.id); return; }
               if (dirty && !(await s.ask(`${d.fileName} tiene cambios sin guardar. ¿Cerrarlo?`, 'Cerrar sin guardar'))) return;
               s.closeDocument(d.id);
@@ -140,7 +141,7 @@ export default function App() {
   useEffect(() => { startCad(); }, []);
   const kind = useStore((s) => s.kind);
   const active = useStore((s) => s.active);
-  const iconTheme = useStore((s) => s.settings.iconTheme ?? 'inv3d');
+  const iconTheme = useStore((s) => iconThemeOf(s.settings.iconTheme));
   useEffect(() => { document.documentElement.dataset.icons = iconTheme; }, [iconTheme]);
 
   useEffect(() => {

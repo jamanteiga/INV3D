@@ -1,3 +1,4 @@
+import { partEPoints, EP_KIND_NAMES } from '../core/epoints';
 import { drwActions } from './actions';
 import { allPages } from '../core/drawing';
 import { useState, Fragment, type ReactNode } from 'react';
@@ -126,6 +127,13 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
       {['X', 'Y', 'Z'].map((a) => <div key={a} className="tree-row" style={{ paddingLeft: 30 }}><Icon name="axis" size={16} /><span className="tree-name">Eje {a}</span></div>)}
       <div className="tree-row" style={{ paddingLeft: 30 }}><Icon name="point" size={16} /><span className="tree-name">Punto central</span></div>
     </Folder>
+    <Folder icon="epoint" label="ePoints" count={partEPoints(s.doc).length} defaultOpen={false}>
+      {partEPoints(s.doc).map((e) => (
+        <div key={e.id} className="tree-row" style={{ paddingLeft: 30 }} title="Doble clic: editar ePoints" onDoubleClick={() => s.open({ kind: 'epoint' })}>
+          <span className={`ep-dot ep-${e.isDefault ? 'def' : e.kind}`} /><span className="tree-name">{e.name}</span><span className="tree-count">{e.isDefault ? 'inserción' : EP_KIND_NAMES[e.kind].toLowerCase()}</span>
+        </div>
+      ))}
+    </Folder>
     {s.doc.sheet && <div className="tree-row" style={{ paddingLeft: 10 }} onDoubleClick={() => s.open({ kind: 'sheetstyle' })}><Icon name="style" size={16} /><span className="tree-name">Chapa: t = {s.doc.sheet.t}</span></div>}
     {s.doc.features.filter((x) => !nestOwner.has(x.id)).map((x) => row(x))}
     <div className="tree-row eop" style={{ paddingLeft: 10 }}><span className="eop-mark" />Fin de pieza</div>
@@ -144,6 +152,8 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
     delete a.explode[id];
   });
   const Err = ({ id }: { id: string }) => (errs[id] ? <span className="tree-err" title={errs[id]}><Icon name="error" size={14} /></span> : null);
+  const [openOcc, setOpenOcc] = useState<Set<string>>(new Set());
+  const toggleOcc = (id: string) => setOpenOcc((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   return (<>
     <div className="tree-row root"><Icon name={s.asm.kind === 'weldment' ? 'weldment' : 'assembly'} size={17} /><span className="tree-name">{s.asm.iProperties.partNumber || s.fileName}</span></div>
     {(s.asm.patterns ?? []).map((pt) => (
@@ -222,12 +232,29 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
             { label: 'Eliminar', danger: true, run: () => del('occurrences', o.id) },
           ] }); }}
           title={bad ? s.asmResult?.parts[o.part]?.error : e?.fileName}>
+          <span className="tree-plus" title={openOcc.has(o.id) ? 'Plegar' : 'Desplegar las operaciones de la pieza'} onClick={(ev) => { ev.stopPropagation(); toggleOcc(o.id); }} onDoubleClick={(ev) => ev.stopPropagation()}>{openOcc.has(o.id) ? '−' : '+'}</span>
           <Icon name={e?.kind === 'assembly' ? 'assembly' : 'part'} size={17} /><span className="tree-name">{o.name}</span>
           {o.grounded && <span className="pin" title="Fijo"><Icon name="ground" size={13} /></span>}
           {!o.grounded && s.asmDof && s.asmDof[o.id] !== undefined && <span className={`gdl ${s.asmDof[o.id] === 0 ? 'zero' : ''}`} title="Grados de libertad">{s.asmDof[o.id]} GDL</span>}
           {bad && <span className="tree-err"><Icon name="error" size={14} /></span>}
         </div>
-        {e?.kind === 'assembly' && !o.suppressed && (s.asmResult?.view?.occurrences ?? []).filter((c) => (c as { sub?: string }).sub === o.id).map((c) => (
+        {openOcc.has(o.id) && e?.kind === 'part' && (() => {
+          const pd = s.docData(o.part) as PartDoc | null; if (!pd || pd.format !== 'inv3d.part') return null;
+          const st = s.asmResult?.parts[o.part];
+          return <>
+            {pd.features.map((f) => (
+              <div key={f.id} className={`tree-row sub ${f.suppressed ? 'supp' : ''}`} style={{ paddingLeft: 34 }} title="Doble clic: editar la pieza en el ensamblaje"
+                onDoubleClick={() => { asmActions.editInPlace(o.id); setTimeout(() => useStore.getState().set({ selFeature: f.id }), 50); }}>
+                <Icon name={f.type === 'pattern' && f.ptype === 'circ' ? 'pcirc' : ICON[f.type]} size={15} /><span className="tree-name">{f.name}</span>
+                {st && st.ok === false && <span className="tree-err"><Icon name="error" size={13} /></span>}
+              </div>
+            ))}
+            {partEPoints(pd).filter((x) => !x.isDefault).map((x) => (
+              <div key={x.id} className="tree-row sub" style={{ paddingLeft: 34 }} title={`ePoint de ${EP_KIND_NAMES[x.kind].toLowerCase()}`}><span className={`ep-dot ep-${x.kind}`} /><span className="tree-name">{x.name}</span></div>
+            ))}
+          </>;
+        })()}
+        {openOcc.has(o.id) && e?.kind === 'assembly' && !o.suppressed && (s.asmResult?.view?.occurrences ?? []).filter((c) => (c as { sub?: string }).sub === o.id).map((c) => (
           <div key={c.id} className="tree-row sub" style={{ paddingLeft: 30 }} onDoubleClick={() => s.activate(c.part)} title="Componente del subensamblaje (doble clic: abrir pieza)">
             <Icon name="part" size={15} /><span className="tree-name">{c.name.slice(o.name.length + 1)}</span>
           </div>

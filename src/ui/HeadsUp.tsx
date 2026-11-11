@@ -1,4 +1,4 @@
-// Barra de vista superpuesta en el área gráfica (como la «Heads-up View Toolbar» de SolidWorks):
+// Barra de vista superpuesta en el área gráfica:
 // zoom ajustar / encuadre, vista anterior, vista de sección, orientación, estilo de visualización, ocultar/mostrar y escena.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useStore, type HudState } from '../core/store';
@@ -29,7 +29,7 @@ const STYLES: [DS, string][] = [['shadedEdges', 'Sombreado con aristas'], ['shad
 const ORIENTS: [string, string][] = [['front', 'Frontal'], ['back', 'Posterior'], ['left', 'Izquierda'], ['right', 'Derecha'], ['top', 'Superior'], ['bottom', 'Inferior'], ['iso', 'Isométrica'], ['dimetric', 'Dimétrica'], ['trimetric', 'Trimétrica'], ['home', 'Inicio']];
 const SCENES: [HudState['scene'], string, string][] = [
   ['grad', 'Degradado claro', 'linear-gradient(180deg,#d6dee7,#f5f7f9)'], ['white', 'Blanco liso', '#ffffff'], ['studio', 'Estudio gris', 'radial-gradient(circle at 50% 35%,#f4f4f4,#a9adb3)'],
-  ['blue', 'Azul SolidWorks', 'linear-gradient(180deg,#a7c3e6,#ffffff)'], ['dark', 'Oscuro', 'linear-gradient(180deg,#232a33,#39424e)'],
+  ['blue', 'Azul cielo', 'linear-gradient(180deg,#a7c3e6,#ffffff)'], ['dark', 'Oscuro', 'linear-gradient(180deg,#232a33,#39424e)'],
 ];
 
 export default function HeadsUp({ kind }: { kind: 'part' | 'asm' }) {

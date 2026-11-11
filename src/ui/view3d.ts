@@ -136,7 +136,7 @@ export class View3D {
     const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).normalize();
     const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1).normalize();
     const back = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 2).normalize();
-    // Modo objeto (como Inventor): el modelo sigue al movimiento de la tapa
+    // Modo objeto: el modelo sigue al movimiento de la tapa
     const viewH = (cam.top - cam.bottom) / cam.zoom;
     const pan = right.clone().multiplyScalar(-tx).add(up.clone().multiplyScalar(tz)).multiplyScalar(viewH * 0.9 * k * dt);
     cam.position.add(pan); tgt.add(pan);
@@ -198,7 +198,7 @@ export class View3D {
     const grp = new THREE.Group();
     grp.add(mesh);
     if (opts.edges !== false && m.lines.length) {
-      // Aristas con grosor real en píxeles (no dependen del supermuestreo), como el estilo «sombreado con aristas» de Inventor
+      // Aristas con grosor real en píxeles (no dependen del supermuestreo)
       const lm = this.lineMat(css('--edge'), op < 1 ? 1 : 1.2);
       if (op < 1) { lm.transparent = true; lm.opacity = Math.max(op, 0.3); }
       const l = this.segs(Array.from(m.lines), lm);
@@ -352,7 +352,7 @@ export class View3D {
       if (o.userData.hidCopy) { dels.push(o); return; }
       if (o.isMesh && o.material && !o.userData.keep && !(o instanceof LineSegments2)) {
         o.material.visible = !wire;
-        // sin líneas ocultas: las caras solo tapan (se ve el fondo), como «Sin líneas ocultas» de SolidWorks
+        // sin líneas ocultas: las caras solo tapan (se ve el fondo)
         if (o.material.transparent !== true || o.material.opacity >= 1) o.material.colorWrite = style === 'shaded' && o.userData.noColor !== true;
       }
       if (style === 'hlv' && o instanceof LineSegments2 && o.userData.edge) {

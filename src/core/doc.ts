@@ -146,6 +146,8 @@ export interface PartDoc {
   features: Feature[];
   /** Pieza de chapa: espesor, radio de plegado interior y factor K */
   sheet?: { t: string; r: string; k: string };
+  /** ePoints: puntos de conexión para ensamblar (coincidencia, inserción, compuesto) */
+  epoints?: import('./epoints').EPoint[];
 }
 
 /** Parámetros del documento: de usuario + parámetros del modelo (cotas de boceto d0, d1…). */
@@ -375,7 +377,7 @@ export function nextName(doc: PartDoc, type: FeatureType): string {
   return `${base}${n}`;
 }
 
-/** Bocetos ya consumidos por alguna operación (se ocultan, como en Inventor). */
+/** Bocetos ya consumidos por alguna operación (se ocultan). */
 export function consumedSketches(doc: PartDoc): Set<string> {
   const s = new Set<string>();
   for (const f of doc.features) {

@@ -1,4 +1,6 @@
 import { normalizeAsm } from '../core/subasm';
+import { autoEPointJoints } from '../core/epoints';
+const partOf = (s: ReturnType<typeof useStore.getState>, id: string): PartDoc | null => { const d = s.docData(id) as PartDoc | null; return d && d.format === 'inv3d.part' ? d : null; };
 import { docGetter } from '../core/store';
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
 import { useStore, type SkOp } from '../core/store';
@@ -88,14 +90,14 @@ export const asmActions = {
     d.iProperties.partNumber = `Pieza${n}`;
     const pid = s.addDocument('part', d, `Pieza${n}.i3p`, false);
     const oid = uid('o');
-    // como en Inventor: la pieza nueva queda fija donde se crea y se edita en contexto
+    // la pieza nueva queda fija donde se crea y se edita en contexto
     s.commitAsm((a) => { a.occurrences.push({ id: oid, name: `Pieza${n}:1`, part: pid, xf: { ...IDENTITY }, grounded: true }); });
     void asmId;
     asmActions.editInPlace(oid);
     S().setTool('pickPlane');
     S().notify('Pieza nueva en contexto: elige una cara de otro componente o un plano para el primer boceto · «Volver» para regresar al ensamblaje');
   },
-  /** Edición en contexto (como Inventor): la pieza se edita viendo el resto del ensamblaje en transparente.
+  /** Edición en contexto: la pieza se edita viendo el resto del ensamblaje en transparente.
    *  Sus caras sirven como plano de boceto y sus aristas se pueden proyectar (sin actualización automática). */
   editInPlace: (occId: string) => {
     const s = S(); const r = s.asmResult;
@@ -133,7 +135,7 @@ export const asmActions = {
       a.occurrences.push({ id: uid('o'), name: `${e.fileName.replace(/\.[^.]+$/, '')}:${count + 1}`, part: partId, xf: { pos: [shift, 0, 0], quat: [0, 0, 0, 1] }, grounded: a.occurrences.length === 0 });
     });
   },
-  /** Colocar como en Inventor: el primer componente queda fijo en el origen; después cada copia sigue al cursor y se suelta con un clic.
+  /** Colocar: el primer componente queda fijo en el origen; después cada copia sigue al cursor y se suelta con un clic.
    *  Esc o clic derecho terminan. X/Y/Z giran 90° la copia pendiente. */
   startPlace: (partId: string, extras: string[] = []) => {
     const s = S();
@@ -160,13 +162,23 @@ export const asmActions = {
     const e = s.docs.find((d) => d.id === p.part);
     const base = (e?.fileName ?? 'Pieza').replace(/\.[^.]+$/, '');
     const occ = uid('o');
+    let nj = 0;
     s.commitAsm((a) => {
       const o = a.occurrences.find((x) => x.id === p.occ); if (o) o.xf = xf;
       for (const x of p.extras ?? []) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { pos: [...xf.pos], quat: [...xf.quat] } });
+      // ePoints del mismo nombre: se conectan solos al soltar la pieza
+      const js = autoEPointJoints(a, (id) => partOf(S(), id), [p.occ], uid); a.joints.push(...js); nj = js.length;
       let k = 1; while (a.occurrences.some((x) => x.name === `${base}:${k}`)) k++;
       a.occurrences.push({ id: occ, name: `${base}:${k}`, part: p.part, xf: { pos: [...xf.pos], quat: [...p.quat] } });
     });
     useStore.setState({ placing: { ...p, occ }, selItem: null });
+    if (nj) s.notify(`${nj} ePoint${nj > 1 ? 's conectados' : ' conectado'} automáticamente`);
+  },
+  /** Conecta todos los ePoints compatibles (mismo nombre y tipo) entre los componentes del ensamblaje */
+  connectEPoints: () => {
+    const s = S(); let n = 0;
+    s.commitAsm((a) => { const js = autoEPointJoints(a, (id) => partOf(S(), id), undefined, uid); a.joints.push(...js); n = js.length; });
+    s.notify(n ? `${n} uniones creadas a partir de ePoints` : 'No hay ePoints libres con el mismo nombre en componentes distintos (créalos en la pieza: Modelo 3D › ePoint)', n ? 'info' : 'error');
   },
   finishPlace: () => { const s = S(); if (s.placing) { s.setTool(null); s.notify('Colocación terminada · Restringir (J) para relacionar los componentes'); } },
   rotatePlace: (axis: 0 | 1 | 2) => {
@@ -257,7 +269,7 @@ export const asmActions = {
     });
     return ids;
   },
-  /** Estados de modelo (como Inventor): supresiones y posiciones guardadas con nombre */
+  /** Estados de modelo: supresiones y posiciones guardadas con nombre */
   saveModelState: (name: string) => S().commitAsm((a) => {
     const sup = [...a.occurrences, ...a.frames, ...a.welds, ...a.bolts].filter((x) => x.suppressed).map((x) => x.id);
     const pos: Record<string, Xform> = {}; for (const o of a.occurrences) if (!o.grounded) pos[o.id] = { pos: [...o.xf.pos], quat: [...o.xf.quat] };
