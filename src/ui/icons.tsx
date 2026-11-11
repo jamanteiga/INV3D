@@ -2,6 +2,8 @@
 import type { ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { ICON_THEMES } from '../core/persist';
+import { KIT, KitIcon, KitDefs } from './iconkit';
+export { KitDefs };
 
 // Trazo según tamaño: 1,5 px a 32 px y 1 px a 16 px (líneas nítidas, sin medios píxeles borrosos)
 const S = ({ children, size = 32 }: { children: ReactNode; size?: number }) => (
@@ -235,7 +237,11 @@ export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
   shaft: (p) => <S {...p}><path d="M3 13h6v-3h10v-2h6v16h-6v-2H9v-3H3z" fill={B} /><path d="M12 13h5" stroke={A} /></S>,
 };
 
-export const Icon = ({ name, size }: { name: string; size?: number }) => (Icons[name] ?? Icons.part)({ size });
+export const Icon = ({ name, size }: { name: string; size?: number }) => {
+  const th = useStore((s) => s.settings.iconTheme ?? 'inv3d');
+  if (th !== 'inv3d' && KIT[name]) return <KitIcon name={name} size={size} theme={th} />;
+  return (Icons[name] ?? Icons.part)({ size });
+};
 
 /** Degradados de los estilos de iconos (Inventor 2027, SolidWorks 2026, CATIA): se referencian desde las variables CSS */
 export const IconDefs = () => (
@@ -259,7 +265,7 @@ export function IconThemePicker() {
     <div className="ico-themes">
       {ICON_THEMES.map(([k, l]) => (
         <button key={k} className={`ico-theme ${cur === k ? 'on' : ''}`} onClick={() => useStore.setState({ settings: { ...useStore.getState().settings, iconTheme: k } })}>
-          <span className="ico-prev row" data-p={k}>{['extrude', 'revolve', 'fillet', 'assembly'].map((n) => <Icon key={n} name={n} size={28} />)}</span>
+          <span className="ico-prev row" data-p={k}>{['extrude', 'revolve', 'fillet', 'assembly'].map((n) => (k === 'inv3d' ? <span key={n}>{Icons[n]({ size: 28 })}</span> : <KitIcon key={n} name={n} size={28} theme={k} />))}</span>
           {l}
         </button>
       ))}

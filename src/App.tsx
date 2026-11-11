@@ -8,7 +8,7 @@ import DrawingView from './ui/DrawingView';
 import { PropertyPanel, Modals } from './ui/Panels';
 import { saveDoc, openFile } from './core/files';
 import { fmt } from './core/expr';
-import { Icon, IconDefs } from './ui/icons';
+import { Icon, IconDefs, KitDefs } from './ui/icons';
 import { asmActions } from './ui/actions';
 import { folderApi } from './ui/session';
 
@@ -226,7 +226,7 @@ export default function App() {
       onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }}
       onDrop={(e) => { e.preventDefault(); setDrag(false); for (const f of e.dataTransfer.files) openFile(f); }}>
-      <IconDefs />
+      <IconDefs /><KitDefs />
       <Ribbon />
       <FolderBanner />
       <main className="work">

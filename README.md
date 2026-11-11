@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador, con el flujo de trabajo de Autodesk Inventor.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.19
+## Versión 0.20
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -29,7 +29,7 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje (como la de SolidWorks): zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
 
-**Estilos de iconos** (Vista › Estilo de iconos, o Archivo › Opciones › General con vista previa): INV3D clásico, **Inventor 2027** (azul con acentos naranja), **SolidWorks 2026** (caras amarillas, gris y azul, con sombra) y **CATIA** (degradado cian brillante con contorno azul marino y acentos naranja); también en tema oscuro y se recuerda.
+**Estilos de iconos** (Vista › Estilo de iconos, o Archivo › Opciones › General con vista previa): INV3D clásico y tres juegos de iconos propios en perspectiva isométrica con el lenguaje visual de cada programa (no son copias): **Inventor 2027** (plano, gris azulado con la operación en azul y acentos naranja), **SolidWorks 2026** (sombreado gris con degradados, operación en amarillo, bocetos en azul y sombra) y **CATIA V5** (brillante: protusiones amarillas, vaciados rojos, superficies verdes, bocetos azules, contorno negro y reflejos). Unos 70 iconos principales redibujados; el resto se adapta en color.
 
 Visualización nítida: supermuestreo en monitores 1x, aristas con grosor real en píxeles, mallado con tolerancia angular de 3,4°, iconos a color y planos con grosor de línea constante en pantalla.
 
