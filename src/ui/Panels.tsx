@@ -22,7 +22,7 @@ import { checkBolts } from '../core/ec3';
 import { CONSTRAINT_NAMES, CONSTRAINT_GLYPH, transformEntities, offsetEntity, refLine, refPoint, makeConstraint, num } from '../core/sketch';
 import { weldFromFaces, q, solveAssembly, ORIGIN_REFS, workPlaneRef, ASM_REF, type AsmDoc, type Joint, type FaceRef } from '../core/asm';
 import { SCALES, scaleLabel, VIEW_NAMES, type ViewDir } from '../core/drawing';
-import { Icon } from './icons';
+import { Icon, IconThemePicker } from './icons';
 import { openFile, newIpj, saveText, pickFile, loadPartForPlace } from '../core/files';
 import { cad, type FlatResult } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
@@ -1476,6 +1476,8 @@ function OptionsDialog({ onClose }: { onClose: () => void }) {
         <Row label="Material por defecto"><select value={st.defaultMaterial} onChange={(e) => setS({ defaultMaterial: e.target.value })}>{MATERIALS.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>
         <label className="check"><input type="checkbox" checked={st.showEdges} onChange={(e) => { setS({ showEdges: e.target.checked }); s.set({ showEdges: e.target.checked }); }} />Mostrar aristas en el modelo</label>
         <p className="phelp">El usuario y la empresa rellenan el diseñador de las piezas nuevas y el cajetín de los planos.</p>
+        <div className="psec-title" style={{ marginTop: 8 }}>Estilo de iconos</div>
+        <IconThemePicker />
       </>)}
       {tab === 'folder' && (<>
         <label className="check"><input type="checkbox" checked={st.restoreSession} onChange={(e) => setS({ restoreSession: e.target.checked })} />Reabrir los documentos de la última sesión al entrar</label>

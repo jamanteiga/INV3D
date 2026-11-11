@@ -3,6 +3,8 @@
 import { MATERIALS } from './doc';
 import type { SheetSize } from './drawing';
 
+export type IconTheme = 'inv3d' | 'inventor' | 'solidworks' | 'catia';
+export const ICON_THEMES: [IconTheme, string][] = [['inv3d', 'INV3D clásico'], ['inventor', 'Inventor 2027'], ['solidworks', 'SolidWorks 2026'], ['catia', 'CATIA']];
 export type DrawStd = 'ISO' | 'DIN' | 'ANSI';
 export interface AppSettings {
   userName: string; company: string;
@@ -14,6 +16,8 @@ export interface AppSettings {
   drawingStd: DrawStd;
   sheetDefault: SheetSize;
   showEdges: boolean;
+  /** Estilo de iconos de la interfaz */
+  iconTheme?: IconTheme;
 }
 export const DEFAULT_SETTINGS: AppSettings = {
   userName: '', company: '', defaultMaterial: 'Acero S275JR', restoreSession: true, autosave: true, autosaveFolder: false,

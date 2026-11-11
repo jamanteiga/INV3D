@@ -8,7 +8,7 @@ import DrawingView from './ui/DrawingView';
 import { PropertyPanel, Modals } from './ui/Panels';
 import { saveDoc, openFile } from './core/files';
 import { fmt } from './core/expr';
-import { Icon } from './ui/icons';
+import { Icon, IconDefs } from './ui/icons';
 import { asmActions } from './ui/actions';
 import { folderApi } from './ui/session';
 
@@ -140,6 +140,8 @@ export default function App() {
   useEffect(() => { startCad(); }, []);
   const kind = useStore((s) => s.kind);
   const active = useStore((s) => s.active);
+  const iconTheme = useStore((s) => s.settings.iconTheme ?? 'inv3d');
+  useEffect(() => { document.documentElement.dataset.icons = iconTheme; }, [iconTheme]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -224,6 +226,7 @@ export default function App() {
       onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }}
       onDrop={(e) => { e.preventDefault(); setDrag(false); for (const f of e.dataTransfer.files) openFile(f); }}>
+      <IconDefs />
       <Ribbon />
       <FolderBanner />
       <main className="work">

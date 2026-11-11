@@ -1,5 +1,7 @@
 // Iconos propios (trazo simple) para la cinta y el navegador.
 import type { ReactNode } from 'react';
+import { useStore } from '../core/store';
+import { ICON_THEMES } from '../core/persist';
 
 // Trazo según tamaño: 1,5 px a 32 px y 1 px a 16 px (líneas nítidas, sin medios píxeles borrosos)
 const S = ({ children, size = 32 }: { children: ReactNode; size?: number }) => (
@@ -234,3 +236,33 @@ export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
 };
 
 export const Icon = ({ name, size }: { name: string; size?: number }) => (Icons[name] ?? Icons.part)({ size });
+
+/** Degradados de los estilos de iconos (Inventor 2027, SolidWorks 2026, CATIA): se referencian desde las variables CSS */
+export const IconDefs = () => (
+  <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden focusable="false">
+    <defs>
+      <linearGradient id="icoF-inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#d4ecfc" /><stop offset="1" stopColor="#4aa6e0" /></linearGradient>
+      <linearGradient id="icoF-sw" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stopColor="#fff6c2" /><stop offset=".55" stopColor="#f7cf2a" /><stop offset="1" stopColor="#d99400" /></linearGradient>
+      <linearGradient id="icoF-cat" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stopColor="#ffffff" /><stop offset=".35" stopColor="#8fdcff" /><stop offset=".7" stopColor="#2a9be0" /><stop offset="1" stopColor="#0b5592" /></linearGradient>
+      <linearGradient id="icoF-catd" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stopColor="#7fd0f4" /><stop offset="1" stopColor="#13527f" /></linearGradient>
+      <linearGradient id="icoF-swd" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stopColor="#f7d64a" /><stop offset="1" stopColor="#a87000" /></linearGradient>
+      <linearGradient id="icoF-invd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#3b78a8" /><stop offset="1" stopColor="#1d4466" /></linearGradient>
+    </defs>
+  </svg>
+);
+
+/** Selector de estilo de iconos con vista previa (Opciones y cinta Vista) */
+export function IconThemePicker() {
+  const s = useStore();
+  const cur = s.settings.iconTheme ?? 'inv3d';
+  return (
+    <div className="ico-themes">
+      {ICON_THEMES.map(([k, l]) => (
+        <button key={k} className={`ico-theme ${cur === k ? 'on' : ''}`} onClick={() => useStore.setState({ settings: { ...useStore.getState().settings, iconTheme: k } })}>
+          <span className="ico-prev row" data-p={k}>{['extrude', 'revolve', 'fillet', 'assembly'].map((n) => <Icon key={n} name={n} size={28} />)}</span>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}

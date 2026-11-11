@@ -579,3 +579,31 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .vprops-scale { display: flex; gap: 6px; align-items: center; }
 .vprops td input[type=checkbox], .vprops td input[type=radio] { width: auto; height: auto; flex: none; margin: 0; }
 .vprops .check { justify-content: flex-start; text-align: left; }
+/* ---- Estilos de iconos (Opciones › General, o Vista › Iconos) ---- */
+:root[data-icons="inventor"] { --ico-ink: #2b3036; --ico-accent: #f08c00; --ico-fill: url(#icoF-inv); --ico-warm: #0696d7; }
+:root[data-icons="inventor"] .ico { stroke-width: 1.7px; }
+:root[data-icons="solidworks"] { --ico-ink: #4b4f55; --ico-accent: #1f5fbf; --ico-fill: url(#icoF-sw); --ico-warm: #d6261c; }
+:root[data-icons="solidworks"] .ico { stroke-width: 1.85px; filter: drop-shadow(0 0.7px 0.5px rgba(0, 0, 0, 0.28)); }
+:root[data-icons="catia"] { --ico-ink: #0e3556; --ico-accent: #f29a00; --ico-fill: url(#icoF-cat); --ico-warm: #e2231a; }
+:root[data-icons="catia"] .ico { stroke-width: 2.15px; filter: drop-shadow(0 1px 0.8px rgba(0, 45, 90, 0.38)); }
+:root[data-theme="dark"][data-icons="inventor"] { --ico-ink: #d5dbe1; --ico-accent: #ffa22e; --ico-fill: url(#icoF-invd); }
+:root[data-theme="dark"][data-icons="solidworks"] { --ico-ink: #d8dadd; --ico-accent: #5b9bf0; --ico-fill: url(#icoF-swd); }
+:root[data-theme="dark"][data-icons="catia"] { --ico-ink: #cfe6f7; --ico-fill: url(#icoF-catd); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-icons="inventor"] { --ico-ink: #d5dbe1; --ico-accent: #ffa22e; --ico-fill: url(#icoF-invd); }
+  :root:not([data-theme="light"])[data-icons="solidworks"] { --ico-ink: #d8dadd; --ico-accent: #5b9bf0; --ico-fill: url(#icoF-swd); }
+  :root:not([data-theme="light"])[data-icons="catia"] { --ico-ink: #cfe6f7; --ico-fill: url(#icoF-catd); }
+}
+.ico-themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ico-theme { border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 6px 6px; background: var(--panel); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg); }
+.ico-theme.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); font-weight: 600; }
+.ico-theme .row { display: flex; gap: 2px; }
+.ico-prev[data-p="inv3d"] { --ico-ink: #34404d; --ico-accent: #1673d0; --ico-fill: #b7d2f2; --ico-warm: #e8890c; }
+.ico-prev[data-p="inv3d"] .ico { stroke-width: 2px; filter: none; }
+.ico-prev[data-p="inventor"] { --ico-ink: #2b3036; --ico-accent: #f08c00; --ico-fill: url(#icoF-inv); --ico-warm: #0696d7; }
+.ico-prev[data-p="inventor"] .ico { stroke-width: 1.7px; filter: none; }
+.ico-prev[data-p="solidworks"] { --ico-ink: #4b4f55; --ico-accent: #1f5fbf; --ico-fill: url(#icoF-sw); --ico-warm: #d6261c; }
+.ico-prev[data-p="solidworks"] .ico { stroke-width: 1.85px; filter: drop-shadow(0 0.7px 0.5px rgba(0, 0, 0, 0.28)); }
+.ico-prev[data-p="catia"] { --ico-ink: #0e3556; --ico-accent: #f29a00; --ico-fill: url(#icoF-cat); --ico-warm: #e2231a; }
+.ico-prev[data-p="catia"] .ico { stroke-width: 2.15px; filter: drop-shadow(0 1px 0.8px rgba(0, 45, 90, 0.38)); }
+.ico-prev { background: #f6f8fa; border-radius: 5px; padding: 4px; }

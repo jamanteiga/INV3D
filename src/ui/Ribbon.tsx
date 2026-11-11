@@ -2,6 +2,7 @@ import { openRecent } from './session';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
+import { ICON_THEMES } from '../core/persist';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS } from '../core/doc';
 import { asmActions, drwActions, partActions } from './actions';
@@ -576,6 +577,14 @@ export default function Ribbon() {
           <Group label="Vista de corte">
             <Col>
               {(['X', 'Y', 'Z'] as const).map((a) => <Small key={a} icon="section" label={`Corte plano ${a === 'X' ? 'YZ' : a === 'Y' ? 'XZ' : 'XY'}`} active={s.clip === a} onClick={() => s.set({ clip: s.clip === a ? '' : a })} />)}
+            </Col>
+          </Group>
+          <Group label="Estilo de iconos">
+            <Col>
+              {ICON_THEMES.slice(0, 2).map(([k, l]) => <Small key={k} icon="extrude" label={l} active={(s.settings.iconTheme ?? 'inv3d') === k} onClick={() => s.set({ settings: { ...s.settings, iconTheme: k } })} />)}
+            </Col>
+            <Col>
+              {ICON_THEMES.slice(2).map(([k, l]) => <Small key={k} icon="extrude" label={l} active={(s.settings.iconTheme ?? 'inv3d') === k} onClick={() => s.set({ settings: { ...s.settings, iconTheme: k } })} />)}
             </Col>
           </Group>
           <Group label="Ratón 3D">
