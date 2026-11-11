@@ -1,24 +1,50 @@
+import FemPanel from './FemPanel';
+import TbTplDialog from './TbDialog';
+import OccPropsDialog from './OccPropsDialog';
+import EPointPanel from './EPointPanel';
+import DrwViewPropsDialog from './DrwViewDialog';
+import { tbTemplate, TB_FIELDS, type SheetSize } from '../core/drawing';
+import { GenDialog } from './MachineDialog';
+import { FrameCalcDialog, JointCalcDialog } from './CalcDialogs';
+import { PipeNetDialog, PressureDialog, VesselDialog } from './PipeDialogs';
+import { DuctNetDialog } from './DuctNetDialog';
+import { normalizeAsm } from '../core/subasm';
+import { docGetter } from '../core/store';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore, activeSketch } from '../core/store';
 import { evaluate, resolveParams, makeEval, fmt, isValidName } from '../core/expr';
 import {
-  docParams, ENTITY_NAMES, OP_NAMES, MATERIALS, planeLabel, FEATURE_NAMES, BODY_FEATURES, v3,
+  docParams, ENTITY_NAMES, OP_NAMES, MATERIALS, planeLabel, FEATURE_NAMES, BODY_FEATURES, SURFACE_FEATURES, v3, uid, type S3Entity, type E3, type Sketch3dF,
   type Feature, type SkEntity, type SketchF, type BoolOp, type EdgeMode, type E2, type PartDoc, type V3, type StdPlane, type PlaneRef,
+  type IProps,
 } from '../core/doc';
 import { PROFILES, profileLabel, BOLTS, BOLT_GRADES, boltLength } from '../core/catalog';
 import { checkBolts } from '../core/ec3';
 import { CONSTRAINT_NAMES, CONSTRAINT_GLYPH, transformEntities, offsetEntity, refLine, refPoint, makeConstraint, num } from '../core/sketch';
-import { weldFromFaces, q, type AsmDoc, type Joint } from '../core/asm';
+import { weldFromFaces, q, solveAssembly, ORIGIN_REFS, workPlaneRef, ASM_REF, type AsmDoc, type Joint, type FaceRef } from '../core/asm';
 import { SCALES, scaleLabel, VIEW_NAMES, type ViewDir } from '../core/drawing';
-import { Icon } from './icons';
-import { openFile, newIpj, saveText } from '../core/files';
+import { Icon, IconThemePicker } from './icons';
+import { openFile, newIpj, saveText, pickFile, loadPartForPlace } from '../core/files';
 import { cad, type FlatResult } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
 import { writeDxf } from '../core/dxf';
 import { asmActions, drwActions } from './actions';
-import { bomRows, bomCsv } from './bom';
+import { bomRows, bomCsv, bomPartsOnly, bomTotal, type BomRow } from './bom';
+import { downloadXlsx, type Sheet } from '../core/xlsx';
 import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
+import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
+import { viewModelDims, viewGeom } from './DrawingView';
+import { makeSpiroPart, SPIRO_KINDS, SPIRO_GROUPS, SPIRO_D, SPIRO_D2, SPIRO_T, SPIRO_ANGLES, SPIRO_L, tubeT, fitT, spigotL, goresFor, type SpiroKind, type SpiroSpec } from '../core/spiro';
+import { makeHvacPart, HVAC_KINDS, HVAC_GROUPS, OVAL_KINDS, spiralPitch, type HvacKind, type HvacSpec, type DuctShape } from '../core/hvac';
+import { EN_RECT, EN_ROUND, SM_RECT, SM_ROUND, INCH, sheetThickness, ductFriction, FITTING_LOSSES } from '../core/hvacdata';
+import { makePipePart, flangeDims, od, wallOf, PIPE_KINDS, ASME_SIZES, type PipeKind, type PipeSpec, type FlangeStd } from '../core/piping';
+import { ASME_PIPE, EN_OD, EN_DN, EN_S, enWalls, enSizes, b165Sizes, B1647_TABLES, B165_CLASSES, EN_PN, EN_TYPES, B169, B1611, FITTING_NPS, REDUCER_H, reducedOptions, NPS_DN, DN_NPS, PIPE_MATERIALS } from '../core/pipedata';
+import { ipartCandidates, currentValue, applyIPartRow, extractIFeature, ifParams, insertIFeature, type IPartTable, type IFeatureDef } from '../core/ifeature';
+import type { ModelDim } from '../core/retrieve';
+import { folderApi, openFromFolder, exportConfig, importConfig } from './session';
+import { listFolder, type FolderEntry } from '../core/persist';
+import { GDT_NAMES, GDT_DATUM, SHEETS, drawStyle, type DrawStyle, type DrawingDoc } from '../core/drawing';
 import { connectSpaceMouse, getSmSettings, setSmSettings, webHidAvailable, type SmSettings } from './spacemouse';
 
 function useEval() {
@@ -27,7 +53,7 @@ function useEval() {
   return (x: string) => evaluate(x, (n) => values[n]);
 }
 
-/** Campo de expresión con validación en vivo, como los cuadros de cota de Inventor. */
+/** Campo de expresión con validación en vivo. */
 export function Expr({ value, onCommit, live, unit = 'mm', autoFocus }: { value: string; onCommit: (v: string) => void; live?: boolean; unit?: string; autoFocus?: boolean }) {
   const ev = useEval();
   const [txt, setTxt] = useState(value);
@@ -47,10 +73,10 @@ export function Expr({ value, onCommit, live, unit = 'mm', autoFocus }: { value:
   );
 }
 
-const Row = ({ label, children }: { label: string; children: ReactNode }) => (
+export const Row = ({ label, children }: { label: string; children: ReactNode }) => (
   <label className="prow"><span className="plabel">{label}</span><span className="pfield">{children}</span></label>
 );
-function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+export function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
     <div className="seg">
       {options.map(([v, l]) => <button key={v} className={value === v ? 'on' : ''} onClick={() => onChange(v)} title={l}>{l}</button>)}
@@ -61,7 +87,7 @@ const Btns = ({ onOk, onCancel, onPlus, okLabel = 'Aceptar', okDisabled }: { onO
   <div className="fdlg-btns">
     <button className="btn primary" disabled={okDisabled} onClick={onOk}>{okLabel}</button>
     <button className="btn" onClick={onCancel}>Cancelar</button>
-    {onPlus && <button className="btn icon" title="Aplicar y crear otra" onClick={onPlus}>+</button>}
+    {onPlus && <button className="btn" title="Aplicar y crear otra" onClick={onPlus}>Aplicar</button>}
   </div>
 );
 const Err = ({ text }: { text?: string }) => (text ? <div className="fdlg-err"><Icon name="error" size={16} />{text}</div> : null);
@@ -74,7 +100,9 @@ const Steps = ({ items, current }: { items: [string, boolean][]; current: number
 
 // =================== PIEZA ===================
 const ICONS: Record<string, string> = { extrude: 'extrude', revolve: 'revolve', fillet: 'fillet', chamfer: 'chamfer', hole: 'hole', pattern: 'prect', mirror: 'mirror', shell: 'shell', workplane: 'workplane', loft: 'loft', sweep: 'sweep', sm_face: 'smface', sm_flange: 'smflange',
-  rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken', thread: 'thread', workaxis: 'axis', workpoint: 'point' };
+  rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken', thread: 'thread', workaxis: 'axis', workpoint: 'point',
+  surf_extrude: 'surfext', surf_revolve: 'surfrev', surf_loft: 'surfloft', surf_patch: 'patch', stitch: 'stitch', sm_loft: 'smloft', sketch3d: 'sketch3d',
+  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch' };
 
 /** Selector de plano (origen o de trabajo) con selección en pantalla. */
 function PlanePick({ value, onChange, exclude }: { value: PlaneRef; onChange: (p: PlaneRef) => void; exclude?: string }) {
@@ -102,7 +130,9 @@ function FeatureDialog() {
   const closedSks = sketches.filter((x) => x.entities.some((e) => e.type !== 'point' && !e.construction));
   const pst = s.preview?.status[f.id];
   const opSeg = (op: BoolOp) => <Seg value={op} onChange={(v) => up({ op: v })} options={[['join', OP_NAMES.join], ['cut', OP_NAMES.cut], ['intersect', 'Intersec.'], ['new', 'Nuevo']]} />;
-  const skSel = (val: string, key: string, list = closedSks) => (
+  const sk3 = s.doc.features.filter((x) => x.type === 'sketch3d');
+  const surfs = s.doc.features.filter((x) => (SURFACE_FEATURES as readonly string[]).includes(x.type) || x.type === 'stitch');
+  const skSel = (val: string, key: string, list: { id: string; name: string }[] = closedSks) => (
     <select value={val} onChange={(e) => up({ [key]: e.target.value })}>
       {!list.length && <option value="">— sin bocetos válidos —</option>}
       {!list.some((k) => k.id === val) && list.length > 0 && <option value="">— elige —</option>}
@@ -172,7 +202,8 @@ function FeatureDialog() {
       </>)}
       {f.type === 'thicken' && (<>
         <Row label="Distancia"><Expr value={f.distance} live autoFocus onCommit={(v) => up({ distance: v })} /></Row>
-        <div className="pick-info"><b>{f.faces.length}</b> cara(s){f.faces.length > 0 && <button className="link" onClick={() => up({ faces: [] })}>Borrar</button>}. Distancia negativa: hacia dentro.</div>
+        <Row label="Origen"><select value={f.surface ?? ''} onChange={(e) => up({ surface: e.target.value || undefined })}><option value="">Caras del sólido</option>{surfs.map((x) => <option key={x.id} value={x.id}>Superficie: {x.name}</option>)}</select></Row>
+        {!f.surface && <div className="pick-info"><b>{f.faces.length}</b> cara(s){f.faces.length > 0 && <button className="link" onClick={() => up({ faces: [] })}>Borrar</button>}. Distancia negativa: hacia dentro.</div>}
         <Row label="Operación">{opSeg(f.op)}</Row>
       </>)}
       {f.type === 'thread' && (<>
@@ -182,6 +213,53 @@ function FeatureDialog() {
         <label className="check"><input type="checkbox" checked={f.full} onChange={(e) => up({ full: e.target.checked })} />Longitud completa</label>
         {!f.full && <Row label="Longitud"><Expr value={f.length} live onCommit={(v) => up({ length: v })} /></Row>}
         <div className="pick-info"><b>{f.faces.length}</b> cara(s) cilíndrica(s). Rosca cosmética: se muestra en el modelo y se acota en el plano.</div>
+      </>)}
+      {f.type === 'combine' && (<>
+        <Row label="Operación"><Seg value={f.op} onChange={(v) => up({ op: v })} options={[['join', 'Unir'], ['cut', 'Cortar'], ['intersect', 'Intersección']]} /></Row>
+        <div className="pick-info">{f.faces.length === 0 ? 'Clic en una cara del cuerpo base' : f.faces.length === 1 ? 'Base elegida · clic en caras de los cuerpos herramienta' : <><b>{f.faces.length - 1}</b> cuerpo(s) herramienta</>}{f.faces.length > 0 && <button className="link" onClick={() => up({ faces: [] })}>Borrar</button>}</div>
+        <label className="check"><input type="checkbox" checked={f.keep} onChange={(e) => up({ keep: e.target.checked })} />Conservar herramientas</label>
+        <p className="phelp">Los cuerpos se crean con la operación «Nuevo sólido» en extrusión, revolución, etc.</p>
+      </>)}
+      {f.type === 'movebody' && (<>
+        <div className="pick-info">{f.faces.length ? <><b>{f.faces.length}</b> cuerpo(s) elegido(s)</> : 'Todos los cuerpos (o clic en una cara para elegir)'}{f.faces.length > 0 && <button className="link" onClick={() => up({ faces: [] })}>Borrar</button>}</div>
+        <div className="prow3"><span className="plabel">Desplazar</span><Expr value={f.dx} live onCommit={(v) => up({ dx: v })} /><Expr value={f.dy} live onCommit={(v) => up({ dy: v })} /><Expr value={f.dz} live onCommit={(v) => up({ dz: v })} /></div>
+        <Row label="Girar eje"><Seg value={f.axis} onChange={(v) => up({ axis: v })} options={[['X', 'X'], ['Y', 'Y'], ['Z', 'Z']]} /></Row>
+        <Row label="Ángulo"><Expr value={f.angle} unit="deg" live onCommit={(v) => up({ angle: v })} /></Row>
+        <label className="check"><input type="checkbox" checked={f.copy} onChange={(e) => up({ copy: e.target.checked })} />Copiar (conservar el original)</label>
+      </>)}
+      {f.type === 'derive' && (() => {
+        const parts = s.docs.filter((x) => x.kind === 'part' && x.id !== s.active);
+        return (<>
+          <Row label="Pieza origen"><select value={f.source} onChange={(e) => { const sd = s.docData(e.target.value) as PartDoc | null; up({ source: e.target.value, sourceName: s.docs.find((x) => x.id === e.target.value)?.fileName ?? '', doc: sd ? structuredClone(sd) : null }); }}>
+            <option value="">—</option>{parts.map((x) => <option key={x.id} value={x.id}>{x.fileName}</option>)}
+          </select></Row>
+          {!parts.length && <Err text="Abre antes la pieza de origen en otra pestaña" />}
+          <Row label="Escala"><Expr value={f.scale} unit="ul" live onCommit={(v) => up({ scale: v })} /></Row>
+          <Row label="Simetría"><Seg value={f.mirror} onChange={(v) => up({ mirror: v })} options={[['', 'No'], ['YZ', 'YZ'], ['XZ', 'XZ'], ['XY', 'XY']]} /></Row>
+          <Row label="Operación">{opSeg(f.op)}</Row>
+          <p className="phelp">Copia la geometría de la pieza origen en este momento. Para actualizarla, edita la operación y vuelve a elegir la pieza.</p>
+        </>);
+      })()}
+      {f.type === 'pathpattern' && (<>
+        <div className="plabel">Operaciones a repetir</div>{featPick(f.features)}
+        <Row label="Trayectoria">{skSel(f.path, 'path', [...sketches.filter((x) => x.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')), ...sk3])}</Row>
+        <Row label="Cantidad"><Expr value={f.count} unit="ul" live onCommit={(v) => up({ count: v })} /></Row>
+        <label className="check"><input type="checkbox" checked={f.align} onChange={(e) => up({ align: e.target.checked })} />Orientar según la trayectoria</label>
+      </>)}
+      {f.type === 'sm_contour' && (<>
+        <Row label="Perfil">{skSel(f.profile, 'profile', sketches.filter((x) => x.entities.some((e) => e.type === 'line' && !e.construction)))}</Row>
+        <Row label="Anchura"><Expr value={f.width} live autoFocus onCommit={(v) => up({ width: v })} /></Row>
+        <Row label="Dirección"><Seg value={f.dir} onChange={(v) => up({ dir: v })} options={[['normal', 'Normal'], ['reverse', 'Inversa'], ['symmetric', 'Simétrica']]} /></Row>
+        <Row label="Material"><Seg value={f.side} onChange={(v) => up({ side: v })} options={[['in', 'Izquierda'], ['out', 'Derecha']]} /></Row>
+        <p className="phelp">Cadena abierta de líneas: los pliegues se redondean con el radio y el espesor del estilo de chapa.</p>
+      </>)}
+      {f.type === 'sm_punch' && (<>
+        <Row label="Centros">{skSel(f.sketch, 'sketch', sketches.filter((x) => x.entities.some((e) => e.type === 'point')))}</Row>
+        <Row label="Forma"><Seg value={f.shape} onChange={(v) => up({ shape: v })} options={[['round', 'Redondo'], ['square', 'Cuadrado'], ['rect', 'Rectángulo'], ['slot', 'Coliso']]} /></Row>
+        {f.shape === 'round' && <Row label="Diámetro"><Expr value={f.d} live onCommit={(v) => up({ d: v })} /></Row>}
+        {f.shape !== 'round' && <Row label={f.shape === 'slot' ? 'Longitud' : 'Ancho'}><Expr value={f.w} live onCommit={(v) => up({ w: v })} /></Row>}
+        {(f.shape === 'rect' || f.shape === 'slot') && <Row label={f.shape === 'slot' ? 'Anchura' : 'Alto'}><Expr value={f.h} live onCommit={(v) => up({ h: v })} /></Row>}
+        {f.shape !== 'round' && <Row label="Giro"><Expr value={f.rot} unit="deg" live onCommit={(v) => up({ rot: v })} /></Row>}
       </>)}
       {(f.type === 'workaxis' || f.type === 'workpoint') && (<>
         <div className="prow3"><span className="plabel">Origen</span>{[0, 1, 2].map((i) => <Expr key={i} value={f.origin[i]} onCommit={(v) => up({ origin: f.origin.map((x, k) => (k === i ? v : x)) })} />)}</div>
@@ -273,9 +351,50 @@ function FeatureDialog() {
       </>)}
       {f.type === 'sweep' && (<>
         <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
-        <Row label="Trayectoria">{skSel(f.path, 'path', sketches.filter((x) => x.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')))}</Row>
+        <Row label="Trayectoria">{skSel(f.path, 'path', [...sketches.filter((x) => x.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')), ...sk3])}</Row>
         <div className="pick-info">Trayectoria: líneas y arcos encadenados de otro boceto, empezando junto al perfil.</div>
         <Row label="Operación">{opSeg(f.op)}</Row>
+      </>)}
+      {f.type === 'surf_extrude' && (<>
+        <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
+        <Row label="Distancia"><Expr value={f.distance} live autoFocus onCommit={(v) => up({ distance: v })} /></Row>
+        <Row label="Dirección"><Seg value={f.dir} onChange={(v) => up({ dir: v })} options={[['normal', 'Normal'], ['reverse', 'Inversa'], ['symmetric', 'Simétrica']]} /></Row>
+        <div className="pick-info">Crea una superficie (sin espesor) a partir del perfil, abierto o cerrado.</div>
+      </>)}
+      {f.type === 'surf_revolve' && (<>
+        <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
+        <Row label="Eje"><select value={f.axis} onChange={(e) => up({ axis: e.target.value })}>
+          <option value="sx">Eje X del boceto</option><option value="sy">Eje Y del boceto</option>
+          {(sketches.find((k) => k.id === f.profile)?.entities ?? []).filter((e) => e.type === 'line').map((e, i) => <option key={e.id} value={e.id}>Línea {i + 1}{e.construction ? ' (construcción)' : ''}</option>)}
+        </select></Row>
+        <Row label="Ángulo"><Expr value={f.angle} unit="deg" live onCommit={(v) => up({ angle: v })} /></Row>
+      </>)}
+      {f.type === 'surf_loft' && (<>
+        <div className="plabel">Secciones (en orden)</div>
+        <div className="chips">
+          {[...closedSks, ...sk3].map((k) => { const on = f.sections.includes(k.id); return <button key={k.id} className={`chip ${on ? 'on' : ''}`} onClick={() => up({ sections: on ? f.sections.filter((i) => i !== k.id) : [...f.sections, k.id] })}>{on ? `${f.sections.indexOf(k.id) + 1}. ` : ''}{k.name}</button>; })}
+        </div>
+        <label className="check"><input type="checkbox" checked={f.ruled} onChange={(e) => up({ ruled: e.target.checked })} />Reglada (superficie reglada entre aristas)</label>
+      </>)}
+      {f.type === 'surf_patch' && (<>
+        <Row label="Contorno">{skSel(f.sketch, 'sketch', [...closedSks, ...sk3])}</Row>
+        <div className="pick-info">Boceto 2D cerrado: parche plano. Boceto 3D cerrado: superficie de contorno (Boundary Patch).</div>
+      </>)}
+      {f.type === 'stitch' && (<>
+        <div className="plabel">Superficies a coser</div>
+        <div className="chips">
+          {surfs.filter((x) => x.id !== f.id).map((k) => { const on = f.surfaces.includes(k.id); return <button key={k.id} className={`chip ${on ? 'on' : ''}`} onClick={() => up({ surfaces: on ? f.surfaces.filter((i) => i !== k.id) : [...f.surfaces, k.id] })}>{k.name}</button>; })}
+        </div>
+        <Row label="Operación">{opSeg(f.op)}</Row>
+        <label className="check"><input type="checkbox" checked={!!f.keep} onChange={(e) => up({ keep: e.target.checked })} />Conservar las superficies</label>
+        <div className="pick-info">Si cierran un volumen se convierte en sólido; si no, queda una superficie cosida.</div>
+      </>)}
+      {f.type === 'sm_loft' && (<>
+        <Row label="Contorno 1">{skSel(f.a, 'a', [...closedSks, ...sk3])}</Row>
+        <Row label="Contorno 2">{skSel(f.b, 'b', [...closedSks, ...sk3])}</Row>
+        <Row label="Espesor hacia"><Seg value={f.side} onChange={(v) => up({ side: v })} options={[['in', 'Dentro'], ['out', 'Fuera']]} /></Row>
+        <Row label="Segmentos (desarrollo)"><Expr value={f.segments} unit="ul" live onCommit={(v) => up({ segments: v })} /></Row>
+        <div className="pick-info">Transiciones de conductos (rectangular a circular, reducciones…). Espesor {s.doc.sheet?.t}. El desarrollo se calcula por triangulación.</div>
       </>)}
       {f.type === 'sm_face' && (<>
         <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
@@ -516,39 +635,126 @@ function JointDialog() {
   const s = useStore();
   const d = s.dialog as { kind: 'joint'; draft: any; step?: number };
   const j = d.draft;
-  const ok = j.a && j.b;
-  const occName = (id?: string) => s.asm.occurrences.find((o) => o.id === id)?.name ?? '—';
-  const kindName = (r: any) => (r?.kind === 'axis' ? `eje Ø${fmt((r.radius ?? 0) * 2, 2)}` : 'cara');
+  const ok = j.a && j.b && (j.type !== 'sym' || j.c);
+  const occName = (id?: string) => (id === ASM_REF ? 'Ensamblaje' : s.asm.occurrences.find((o) => o.id === id)?.name ?? '—');
+  const kindName = (r: any) => (r?.kind === 'axis' ? (r.radius ? `eje Ø${fmt((r.radius ?? 0) * 2, 2)}` : 'eje') : 'cara');
+  const lab = (r: any, l?: string) => (r ? l ?? `${occName(r.occ)} · ${kindName(r)}` : '');
+  // Geometría de referencia elegible de la lista: origen del ensamblaje, planos de trabajo y origen de cada componente
+  const refList: { key: string; group: string; label: string; ref: FaceRef }[] = [
+    ...ORIGIN_REFS.map((o) => ({ key: `asm:${o.key}`, group: 'Ensamblaje', label: o.label, ref: o.ref })),
+    ...(s.asm.workPlanes ?? []).map((w) => ({ key: `wp:${w.id}`, group: 'Ensamblaje', label: w.name, ref: workPlaneRef(w) })),
+    ...s.asm.occurrences.filter((o) => !o.suppressed).flatMap((o) => ORIGIN_REFS.map((r) => ({ key: `${o.id}:${r.key}`, group: o.name, label: `${r.label} (origen)`, ref: { ...r.ref, occ: o.id } }))),
+  ];
+  const groups = [...new Set(refList.map((r) => r.group))];
+  const RefSel = ({ slot, planesOnly }: { slot: 'a' | 'b' | 'c'; planesOnly?: boolean }) => (
+    <select className="ref-sel" value="" onChange={(e) => {
+      const it = refList.find((r) => r.key === e.target.value); if (!it) return;
+      const label = `${it.group} · ${it.label}`;
+      const step = slot === 'a' ? 1 : slot === 'b' ? (j.type === 'sym' ? 2 : 0) : 0;
+      useStore.setState({ dialog: { ...d, draft: { ...j, [slot]: it.ref, [`${slot}L`]: label, [`${slot}W`]: undefined }, step } as any });
+    }}>
+      <option value="">o elegir plano/eje de origen…</option>
+      {groups.map((g) => <optgroup key={g} label={g}>{refList.filter((r) => r.group === g && (!planesOnly || r.ref.kind !== 'axis')).map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</optgroup>)}
+    </select>
+  );
   const help: Record<string, string> = {
     mate: 'Coincidir: caras enfrentadas (normales opuestas) o ejes alineados. Eje con cara: el eje queda sobre el plano.',
     flush: 'Al ras: caras paralelas en el mismo sentido, a la distancia del desfase.',
     angle: 'Ángulo entre las normales de dos caras (o direcciones de dos ejes).',
     tangent: 'Tangente: cara plana y cilíndrica (o dos cilindros) en contacto.',
     insert: 'Insertar: dos ejes (tornillo y taladro) alineados y sus caras extremas coincidentes. Elige cada cilindro cerca del extremo que debe coincidir.',
+    perp: 'Perpendicular: las dos caras (normales) o ejes quedan a 90°.',
+    sym: 'Simetría: la segunda geometría queda simétrica de la primera respecto al plano elegido (cara, plano de origen o plano de trabajo).',
     rigid: 'Rígida: caras enfrentadas y puntos de selección coincidentes.',
+    rot: 'Rotación: el origen es el centro de la cara o el eje del cilindro elegido; B gira alrededor del eje de A (bisagra, eje, rueda).',
+    slider: 'Corredera: B se desplaza a lo largo del eje de A sin girar (guía, carro).',
+    cyl: 'Cilíndrica: B gira y se desplaza a lo largo del eje de A (pistón, eje en casquillo).',
+    planar: 'Planar: B se mueve apoyado en la cara de A (2 traslaciones + giro).',
+    ball: 'Bola: los orígenes coinciden y B gira libremente (rótula).',
+  };
+  const applyJoint = () => {
+    if (j.a.occ === j.b.occ) { s.notify('Elige geometría de dos componentes distintos', 'error'); return false; }
+    if (j.type === 'insert' && (j.a.kind !== 'axis' || j.b.kind !== 'axis')) { s.notify('Insertar necesita dos caras cilíndricas (eje del tornillo y del taladro)', 'error'); return false; }
+    if (j.type === 'tangent' && j.a.kind !== 'axis' && j.b.kind !== 'axis') { s.notify('Tangente necesita al menos una cara cilíndrica', 'error'); return false; }
+    if (j.type === 'flush' && (j.a.kind === 'axis' || j.b.kind === 'axis')) { s.notify('Al ras se aplica a caras planas', 'error'); return false; }
+    const fixed = (id: string) => id === ASM_REF || !!s.asm.occurrences.find((o) => o.id === id)?.grounded;
+    const ga = fixed(j.a.occ), gb = fixed(j.b.occ);
+    if (ga && gb) { s.notify('Las dos geometrías son fijas (componentes fijos u origen del ensamblaje): libera un componente para que pueda moverse', 'error'); return false; }
+    if (j.type === 'sym' && j.c?.kind === 'axis') { s.notify('El plano de simetría debe ser plano', 'error'); return false; }
+    // Se mueve siempre el componente libre: si B está fijo se intercambian A y B
+    const [A, B] = gb && !ga ? [j.b, j.a] : [j.a, j.b];
+    const joint: Joint = { id: j.id, name: j.name, type: j.type, a: A, b: B, c: j.type === 'sym' ? j.c : undefined, offset: j.offset, angle: j.angle, aligned: j.type === 'insert' ? !!j.aligned : undefined, lock: j.lock || undefined, min: j.min || undefined, max: j.max || undefined };
+    s.commitAsm((a) => { a.joints.push(joint); });
+    const err = solveAssembly(normalizeAsm(useStore.getState().asm, docGetter(useStore.getState()), (x) => { try { return makeEval([])(x); } catch { return NaN; } }), (x) => { try { return makeEval([])(x); } catch { return NaN; } }).errors[joint.id];
+    if (err) s.notify(`${joint.name}: ${err}`, 'error'); else s.notify(`${joint.name} (${JOINT_NAMES[joint.type] ?? joint.type}) aplicada`);
+    return true;
   };
   return (
     <div className="fdlg">
       <Head icon="constraint3d" name={j.name} onName={(v) => s.updateDraft({ name: v })} />
       <div className="jt-grid">
-        {([['mate', 'Coincidir', 'constraint3d'], ['flush', 'Al ras', 'joint'], ['angle', 'Ángulo', 'angle3d'], ['tangent', 'Tangente', 'c_tangent'], ['insert', 'Insertar', 'insert3d'], ['rigid', 'Rígida', 'ground']] as const).map(([t, l, ic]) => (
+        {([['mate', 'Coincidir', 'constraint3d'], ['flush', 'Al ras', 'joint'], ['angle', 'Ángulo', 'angle3d'], ['perp', 'Perpendicular', 'c_perpendicular'], ['tangent', 'Tangente', 'c_tangent'], ['insert', 'Insertar', 'insert3d'], ['sym', 'Simetría', 'mirror'], ['rigid', 'Rígida', 'ground']] as const).map(([t, l, ic]) => (
           <button key={t} className={`jt ${j.type === t ? 'on' : ''}`} onClick={() => s.updateDraft({ type: t })}><Icon name={ic} size={20} />{l}</button>
         ))}
       </div>
-      <Steps current={d.step ?? 0} items={[[`A: ${j.a ? `${occName(j.a.occ)} · ${kindName(j.a)}` : 'elegir cara o eje'}`, !!j.a], [`B (se mueve): ${j.b ? `${occName(j.b.occ)} · ${kindName(j.b)}` : 'elegir cara o eje'}`, !!j.b]]} />
-      {j.type !== 'angle' && <Row label="Desfase"><Expr value={j.offset} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>}
+      <div className="plabel">Uniones (origen + eje)</div>
+      <div className="jt-grid">
+        {([['rot', 'Rotación', 'rotate2d'], ['slider', 'Corredera', 'move'], ['cyl', 'Cilíndrica', 'insert3d'], ['planar', 'Planar', 'smface'], ['ball', 'Bola', 'circle']] as const).map(([t, l, ic]) => (
+          <button key={t} className={`jt ${j.type === t ? 'on' : ''}`} onClick={() => s.updateDraft({ type: t })}><Icon name={ic} size={20} />{l}</button>
+        ))}
+      </div>
+      {JOINT_DOF[j.type as keyof typeof JOINT_DOF] && <div className="pick-info">Movimiento libre: <b>{JOINT_DOF[j.type as keyof typeof JOINT_DOF]}</b></div>}
+      <Steps current={d.step ?? 0} items={[
+        [`1: ${j.a ? lab(j.a, j.aL) : 'cara, eje o plano'}`, !!j.a],
+        [`2: ${j.b ? lab(j.b, j.bL) : 'cara, eje o plano'}`, !!j.b],
+        ...(j.type === 'sym' ? [[`Plano de simetría: ${j.c ? lab(j.c, j.cL) : 'elegir'}`, !!j.c] as [string, boolean]] : []),
+      ]} />
+      <div className="ref-row"><RefSel slot={(d.step ?? 0) === 0 ? 'a' : (d.step ?? 0) === 1 ? 'b' : 'c'} planesOnly={(d.step ?? 0) === 2} /></div>
+      {j.type !== 'angle' && j.type !== 'perp' && j.type !== 'sym' && j.type !== 'rot' && j.type !== 'ball' && j.type !== 'cyl' && <Row label="Desfase"><Expr value={j.offset} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>}
+      {(j.type === 'rot' || j.type === 'slider') && (<>
+        <label className="check"><input type="checkbox" checked={!!j.lock} onChange={(e) => s.updateDraft({ lock: e.target.checked })} />Bloquear {j.type === 'rot' ? 'ángulo' : 'posición'}</label>
+        {j.lock && j.type === 'rot' && <Row label="Ángulo"><Expr value={j.angle || '0 deg'} unit="deg" onCommit={(v) => s.updateDraft({ angle: v })} /></Row>}
+        {j.lock && j.type === 'slider' && <Row label="Posición"><Expr value={j.offset || '0 mm'} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>}
+        {!j.lock && (<>
+          <Row label="Límite mín."><input value={j.min ?? ''} placeholder={j.type === 'rot' ? 'p. ej. -90 deg' : 'p. ej. 0 mm'} onChange={(e) => s.updateDraft({ min: e.target.value || undefined })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+          <Row label="Límite máx."><input value={j.max ?? ''} placeholder={j.type === 'rot' ? 'p. ej. 90 deg' : 'p. ej. 100 mm'} onChange={(e) => s.updateDraft({ max: e.target.value || undefined })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        </>)}
+      </>)}
       {j.type === 'angle' && <Row label="Ángulo"><Expr value={j.angle} unit="deg" onCommit={(v) => s.updateDraft({ angle: v })} /></Row>}
       {j.type === 'insert' && <Row label="Solución"><Seg value={j.aligned ? 'al' : 'op'} onChange={(v) => s.updateDraft({ aligned: v === 'al' })} options={[['al', 'Alineada'], ['op', 'Opuesta']]} /></Row>}
       <p className="phelp">{help[j.type]}</p>
-      <Btns okDisabled={!ok} onOk={() => {
-        if (j.a.occ === j.b.occ) { s.notify('Elige geometría de dos componentes distintos', 'error'); return; }
-        if (j.type === 'insert' && (j.a.kind !== 'axis' || j.b.kind !== 'axis')) { s.notify('Insertar necesita dos caras cilíndricas', 'error'); return; }
-        if (j.type === 'tangent' && j.a.kind !== 'axis' && j.b.kind !== 'axis') { s.notify('Tangente necesita al menos una cara cilíndrica', 'error'); return; }
-        if (j.type === 'flush' && (j.a.kind === 'axis' || j.b.kind === 'axis')) { s.notify('Al ras se aplica a caras planas', 'error'); return; }
-        const joint: Joint = { id: j.id, name: j.name, type: j.type, a: j.a, b: j.b, offset: j.offset, angle: j.angle, aligned: j.type === 'insert' ? !!j.aligned : undefined };
-        s.commitAsm((a) => { a.joints.push(joint); });
-        s.closeDialog();
-      }} onCancel={s.closeDialog} />
+      {ok && <p className="phelp">Vista previa en el visor. <b>Aplicar</b> crea la restricción y deja el comando abierto para la siguiente.</p>}
+      <Btns okDisabled={!ok} onOk={() => { if (applyJoint()) s.closeDialog(); }} onPlus={ok ? () => { if (applyJoint()) { const n = useStore.getState().asm.joints.length + 1; useStore.setState({ dialog: { ...d, draft: { ...j, id: uid('j'), name: `Unión${n}`, a: undefined, b: undefined, c: undefined, aW: undefined, bW: undefined, aL: undefined, bL: undefined, cL: undefined }, step: 0 }, tool: 'asmFace' }); } } : undefined} onCancel={s.closeDialog} />
+    </div>
+  );
+}
+
+/** Plano de trabajo (auxiliar) del ensamblaje: desfase de un plano de origen o de una cara, con giro opcional. */
+function AsmWpDialog() {
+  const s = useStore();
+  const d = s.dialog as { kind: 'asmwp'; draft: any };
+  const k = d.draft;
+  const ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+  const base = k.base === 'face' && k.face ? k.face : (() => { const o = ORIGIN_REFS.find((r) => r.key === (k.base === 'face' ? 'XY' : k.base))!.ref; return { origin: o.point, normal: o.normal, xdir: o.xdir! }; })();
+  const off = ev(k.offset || '0'), ang = (ev(k.angle || '0') * Math.PI) / 180;
+  const ok = isFinite(off) && isFinite(ang) && (k.base !== 'face' || k.face);
+  const make = () => {
+    const n = v3.norm(base.normal), x0 = v3.norm(base.xdir), y0 = v3.cross(n, x0);
+    // giro alrededor del eje X del plano base (charnela)
+    const nn = v3.add(v3.mul(n, Math.cos(ang)), v3.mul(y0, -Math.sin(ang)));
+    return { id: k.id, name: k.name, origin: v3.add(base.origin, v3.mul(n, off)), normal: v3.norm(nn), xdir: x0 };
+  };
+  return (
+    <div className="fdlg">
+      <Head icon="workplane" name={k.name} onName={(v) => s.updateDraft({ name: v })} />
+      <Row label="Base"><select value={k.base} onChange={(e) => s.updateDraft({ base: e.target.value })}>
+        <option value="XY">Plano XY del ensamblaje</option><option value="XZ">Plano XZ del ensamblaje</option><option value="YZ">Plano YZ del ensamblaje</option>
+        <option value="face">Cara de un componente (clic en el visor)</option></select></Row>
+      {k.base === 'face' && <div className="pick-info">{k.face ? k.faceLabel : 'Haz clic en una cara plana'}</div>}
+      <Row label="Desfase"><Expr value={k.offset} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>
+      <Row label="Giro (eje X del plano)"><Expr value={k.angle} unit="deg" onCommit={(v) => s.updateDraft({ angle: v })} /></Row>
+      <p className="phelp">Plano auxiliar fijo del ensamblaje para restringir componentes (Al ras, Coincidir, Simetría…).</p>
+      <Btns okDisabled={!ok} onOk={() => { const w = make(); s.commitAsm((a) => { (a.workPlanes ??= []).push(w); }); s.closeDialog(); s.notify(`${w.name} creado`); }} onCancel={s.closeDialog} />
     </div>
   );
 }
@@ -570,11 +776,15 @@ function SkelDialog() {
       <Head icon="skel" name="Línea de esqueleto" />
       <Steps current={d.step ?? 0} items={[['Punto inicial', !!k.a], ['Punto final', !!k.b]]} />
       {coord(k.a, 'a')}{coord(k.b, 'b')}
+      {k.a && <div className="prow3"><span className="plabel">Relativo</span>{[0, 1, 2].map((i) => <input key={i} className="num-in" placeholder={'Δ' + 'XYZ'[i]}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { const v = Number((e.target as HTMLInputElement).value.replace(',', '.')); if (isFinite(v)) { const n: V3 = [...k.a] as V3; n[i] += v; s.updateDraft({ b: n }); } } }} />)}</div>}
+      {k.a && <div className="chips">{([['+X', 0, 1], ['−X', 0, -1], ['+Y', 1, 1], ['−Y', 1, -1], ['+Z', 2, 1], ['−Z', 2, -1]] as const).map(([l, i, sg]) => <button key={l} className="chip" title={`Fin a ${k.len ?? 1000} mm en ${l}`} onClick={() => { const n: V3 = [...k.a] as V3; n[i] += sg * (k.len ?? 1000); s.updateDraft({ b: n }); }}>{l}</button>)}
+        <input className="num-in" style={{ width: 70 }} value={k.len ?? 1000} onChange={(e) => s.updateDraft({ len: Number(e.target.value) || 1000 })} onKeyDown={(e) => e.stopPropagation()} title="Longitud para los botones de dirección (mm)" /></div>}
       {ok && <div className="pick-info">Longitud {fmt(v3.len(v3.sub(k.b, k.a)), 1)} mm</div>}
-      <p className="phelp">Clic en vértices de componentes o extremos de líneas, o escribe las coordenadas (mm). Tras aceptar, la siguiente línea empieza en el punto final.</p>
+      <p className="phelp">Clic en vértices de componentes o extremos de líneas, escribe las coordenadas (mm), un desplazamiento relativo (Intro) o usa los botones de dirección. Tras aceptar, la siguiente línea empieza en el punto final. Para una derivación, empieza la línea en un punto de otra línea.</p>
       <Btns okLabel="Añadir línea" okDisabled={!ok} onOk={() => {
         s.commitAsm((a) => { a.skeleton.push({ id: k.id, a: k.a, b: k.b }); });
-        useStore.setState({ dialog: { kind: 'skel', draft: { id: 'k' + Date.now().toString(36), a: k.b }, step: 1 }, tool: 'skelPoint' });
+        useStore.setState({ dialog: { kind: 'skel', draft: { id: 'k' + Date.now().toString(36), a: k.b, len: k.len }, step: 1 }, tool: 'skelPoint' });
       }} onCancel={s.closeDialog} />
     </div>
   );
@@ -734,6 +944,7 @@ function SelectionPanel() {
         <div className="prow3"><span className="plabel">Posición</span>{[0, 1, 2].map((i) => <NumIn key={i} value={xf.pos[i]} onCommit={(v) => setPos(i, v)} disabled={o.grounded} />)}</div>
         <Row label="Girar 90°"><span className="pair">{(['X', 'Y', 'Z'] as const).map((k, i) => <button key={k} className="btn" disabled={o.grounded} onClick={() => rot([i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0], 90)}>{k}</button>)}</span></Row>
         <label className="check"><input type="checkbox" checked={!!o.grounded} onChange={() => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === id)!; t.grounded = !t.grounded; })} />Fijo</label>
+        <button className="btn wide" onClick={() => s.open({ kind: 'occprops', occ: o.id })}>Propiedades y cotas…</button>
         <button className="btn wide" onClick={() => s.activate(o.part)}>Abrir pieza</button>
       </div>
     );
@@ -792,7 +1003,7 @@ function NumIn({ value, onCommit, disabled }: { value: number; onCommit: (v: num
 function AsmSummary() {
   const s = useStore();
   const rows = bomRows(s, s.asm);
-  const mass = rows.reduce((a, r) => a + r.mass * (r.kind === 'part' ? r.qty : 1), 0);
+  const mass = bomTotal(rows);
   const r = s.asmResult;
   return (
     <div className="psec">
@@ -803,7 +1014,7 @@ function AsmSummary() {
       <Row label="Tornillos"><span className="ro">{r?.bolts.reduce((a, x) => a + x.count, 0) ?? 0}</span></Row>
       <Row label="Masa total"><span className="ro strong">{fmt(mass, 2)} kg</span></Row>
       {r && Object.keys(r.errors).length > 0 && <Err text={`${Object.keys(r.errors).length} elemento(s) con error; pasa el ratón por el icono rojo del navegador`} />}
-      {!s.asm.occurrences.length && !s.asm.frames.length && <p className="phelp">Ensamblaje vacío. <b>Colocar</b> inserta piezas abiertas; <b>Diseño › Insertar perfil</b> crea estructura sobre líneas de esqueleto (<b>Ensamblar › Línea 3D</b>).</p>}
+      {!s.asm.occurrences.length && !s.asm.frames.length && <p className="phelp">Ensamblaje vacío. <b>Colocar (P)</b> inserta piezas abiertas o desde disco (la primera queda fija en el origen); <b>Restringir (J)</b> las relaciona; <b>Diseño › Insertar perfil</b> crea estructura sobre líneas de esqueleto (<b>Ensamblar › Línea 3D</b>).</p>}
     </div>
   );
 }
@@ -836,30 +1047,41 @@ function DrwPanel() {
   const ann = (d.anns ?? []).find((x) => x.id === s.selItem);
   const upV = (p: Record<string, unknown>) => s.commitDrw((dd) => {
     const t = dd.views.find((x) => x.id === v!.id)!; Object.assign(t, p);
-    if ('scale' in p) for (const c of dd.views) if (c.parent === t.id && c.kind !== 'detail') c.scale = t.scale;
+    if ('scale' in p) for (const c of dd.views) if (c.parent === t.id && c.kind !== 'detail' && !c.ownScale) c.scale = t.scale;
     if ('scale' in p && !t.parent) dd.title.scale = scaleLabel(t.scale);
   });
   const upA = (p: Record<string, unknown>) => s.commitDrw((dd) => { Object.assign((dd.anns ?? []).find((x) => x.id === ann!.id)!, p); });
   const t = d.title;
-  const ANN: Record<string, string> = { balloon: 'Globo', leader: 'Nota con directriz', surface: 'Acabado superficial', weld: 'Símbolo de soldadura', centerline: 'Línea de centro', centermark: 'Marca de centro', hole: 'Nota de taladro' };
+  const tab = (d.tables ?? []).find((x) => x.id === s.selItem);
+  const ANN: Record<string, string> = { fcf: 'Tolerancia geométrica', datum: 'Referencia (datum)', balloon: 'Globo', leader: 'Nota con directriz', surface: 'Acabado superficial', weld: 'Símbolo de soldadura', centerline: 'Línea de centro', centermark: 'Marca de centro', hole: 'Nota de taladro' };
   return (<>
     {v && (
       <div className="psec">
         <div className="psec-title">{v.kind === 'section' ? `Sección ${v.label}-${v.label}` : v.kind === 'detail' ? `Detalle ${v.label}` : v.name}</div>
         <Row label="Origen"><span className="ro">{s.docs.find((x) => x.id === v.source)?.fileName ?? 'no abierto'}</span></Row>
         {(!v.kind || v.kind === 'base' || v.kind === 'proj' || v.kind === 'iso') && <Row label="Orientación"><select value={v.dir} onChange={(e) => upV({ dir: e.target.value, name: VIEW_NAMES[e.target.value as ViewDir] })}>{Object.entries(VIEW_NAMES).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></Row>}
-        <Row label="Escala"><select value={v.scale} onChange={(e) => upV({ scale: Number(e.target.value) })} disabled={!!v.parent && v.kind !== 'detail'}>{SCALES.map((x) => <option key={x} value={x}>{scaleLabel(x)}</option>)}</select></Row>
+        <Row label="Escala"><select value={v.scale} onChange={(e) => upV({ scale: Number(e.target.value) })} disabled={!!v.parent && v.kind !== 'detail' && !v.ownScale} title="Doble clic sobre la vista para más opciones">{SCALES.map((x) => <option key={x} value={x}>{scaleLabel(x)}</option>)}</select></Row>
         {v.kind === 'detail' && v.detail && <Row label="Radio zona"><input type="number" value={v.detail.r} onChange={(e) => upV({ detail: { ...v.detail!, r: Math.max(2, Number(e.target.value)) } })} /></Row>}
         <label className="check"><input type="checkbox" checked={v.hidden} onChange={(e) => upV({ hidden: e.target.checked })} />Aristas ocultas</label>
         <label className="check"><input type="checkbox" checked={!!v.centers} onChange={(e) => upV({ centers: e.target.checked })} />Marcas de centro automáticas</label>
         {v.kind === 'section' && <button className="btn wide" onClick={drwActions.flipSection}>Invertir dirección de la sección</button>}
+        {(v.breaks?.length || v.crop) && <button className="btn wide" onClick={drwActions.clearBreaks}>Quitar roturas y recorte</button>}
+        {v.breakout && (<>
+          <Row label="Corte parcial"><input type="number" value={v.breakout.depth} onChange={(e) => s.commitDrw((dd) => { const t = dd.views.find((x) => x.id === v.id)!; t.breakout = { ...t.breakout!, depth: Number(e.target.value) }; })} /><span className="ro" style={{ marginLeft: 6 }}>mm de profundidad</span></Row>
+          <button className="btn wide" onClick={() => s.commitDrw((dd) => { delete dd.views.find((x) => x.id === v.id)!.breakout; })}>Quitar corte parcial</button>
+        </>)}
+        {v.kind === 'flat' && <button className="btn wide" onClick={() => drwActions.addTable('bend')}>Tabla de pliegues</button>}
         <button className="btn danger wide" onClick={() => s.commitDrw((dd) => { const gone = new Set([v.id, ...dd.views.filter((x) => x.parent === v.id).map((x) => x.id)]); dd.views = dd.views.filter((x) => !gone.has(x.id)); dd.dims = dd.dims.filter((x) => !gone.has(x.view)); })}><Icon name="trash" size={16} />Eliminar vista</button>
       </div>
     )}
     {dim && (
       <div className="psec">
-        <div className="psec-title">Cota {dim.kind === 'd' ? 'de diámetro' : dim.kind === 'r' ? 'de radio' : dim.kind === 'ang' ? 'angular' : 'lineal'}</div>
+        {dim.ref && <div className={`pick-info ${dim.orphan ? 'err' : ''}`}>{dim.orphan ? 'La cota del modelo ya no existe' : 'Cota asociada al modelo'}{' '}<button className="btn" onClick={() => s.commitDrw((dd) => { const t = dd.dims.find((x) => x.id === dim.id); if (t) { delete t.ref; delete t.orphan; } })}>Desvincular</button></div>}
+        <div className="psec-title">Cota {dim.kind === 'd' ? 'de diámetro' : dim.kind === 'r' ? 'de radio' : dim.kind === 'ang' ? 'angular' : dim.kind === 'ord' ? `por coordenadas (${dim.axis === 'y' ? 'Y' : 'X'})` : 'lineal'}</div>
         <Row label="Texto"><input value={dim.text ?? ''} placeholder="automático" onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.text = e.target.value || undefined; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        <Row label="Símbolo delante"><div className="sym-row">{DIM_SYMS.map(([sym, tip]) => <button key={sym || 'none'} className={`btn sm ${((dim.prefix ?? '') === sym) ? 'primary' : ''}`} title={tip} onClick={() => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.prefix = sym || undefined; })}>{sym || '—'}</button>)}</div></Row>
+        <Row label="Prefijo libre"><input value={dim.prefix ?? ''} placeholder="p. ej. 4×Ø" onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.prefix = e.target.value || undefined; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        <Row label="Sufijo"><input value={dim.suffix ?? ''} placeholder="p. ej. (REF)" onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.suffix = e.target.value || undefined; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
         <Row label="Tolerancia"><select value={TOLS.includes(dim.tol ?? '') ? dim.tol ?? '' : '*'} onChange={(e) => s.commitDrw((dd) => { dd.dims.find((x) => x.id === dim.id)!.tol = e.target.value === '*' ? '±0.1' : e.target.value || undefined; })}>
           {TOLS.map((x) => <option key={x} value={x}>{x || 'Sin tolerancia'}</option>)}<option value="*">Otra…</option>
         </select></Row>
@@ -872,7 +1094,12 @@ function DrwPanel() {
     {ann && (
       <div className="psec">
         <div className="psec-title">{ANN[ann.kind]}</div>
-        {ann.kind !== 'centerline' && ann.kind !== 'centermark' && <Row label={ann.kind === 'balloon' ? 'Posición' : ann.kind === 'surface' ? 'Rugosidad' : ann.kind === 'weld' ? 'Garganta' : 'Texto'}>
+        {ann.kind === 'fcf' && (<>
+          <Row label="Característica"><select value={ann.sym ?? 'flat'} onChange={(e) => upA({ sym: e.target.value })}>{Object.entries(GDT_NAMES).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></Row>
+          <label className="check"><input type="checkbox" checked={!!ann.dia} onChange={(e) => upA({ dia: e.target.checked })} />Zona cilíndrica (Ø)</label>
+          {GDT_DATUM[ann.sym ?? 'flat'] && <Row label="Referencias"><input value={ann.datums ?? ''} placeholder="A|B|C" onChange={(e) => upA({ datums: e.target.value.toUpperCase() })} onKeyDown={(e) => e.stopPropagation()} /></Row>}
+        </>)}
+        {ann.kind !== 'centerline' && ann.kind !== 'centermark' && <Row label={ann.kind === 'balloon' ? 'Posición' : ann.kind === 'surface' ? 'Rugosidad' : ann.kind === 'weld' ? 'Garganta' : ann.kind === 'fcf' ? 'Tolerancia' : ann.kind === 'datum' ? 'Letra' : 'Texto'}>
           <input value={ann.text ?? ''} onChange={(e) => upA({ text: e.target.value })} onKeyDown={(e) => e.stopPropagation()} />
         </Row>}
         {ann.kind === 'weld' && (<>
@@ -881,6 +1108,23 @@ function DrwPanel() {
         </>)}
         {ann.kind === 'surface' && <Seg value={ann.text ?? ''} onChange={(k) => upA({ text: k })} options={[['Ra 0,8', '0,8'], ['Ra 1,6', '1,6'], ['Ra 3,2', '3,2'], ['Ra 6,3', '6,3'], ['Ra 12,5', '12,5']] as any} />}
         <button className="btn danger wide" onClick={() => s.commitDrw((dd) => { dd.anns = (dd.anns ?? []).filter((x) => x.id !== ann.id); })}><Icon name="trash" size={16} />Eliminar</button>
+      </div>
+    )}
+    {tab && (
+      <div className="psec">
+        <div className="psec-title">{tab.kind === 'hole' ? 'Tabla de taladros' : tab.kind === 'bend' ? 'Tabla de pliegues' : 'Tabla de revisiones'}</div>
+        {tab.kind === 'hole' && <Row label="Vista"><select value={tab.view} onChange={(e) => s.commitDrw((dd) => { dd.tables!.find((x) => x.id === tab.id)!.view = e.target.value; })}>{d.views.filter((x) => x.kind !== 'iso').map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Row>}
+        {tab.kind === 'hole' && <p className="phelp">Origen 0,0 en la esquina inferior izquierda de la vista. Las etiquetas A1, A2… se colocan junto a cada taladro.</p>}
+        {tab.kind === 'rev' && (<>
+          {(d.revisions ?? []).map((r, i) => (
+            <div key={i} className="rev-row">
+              {(['rev', 'desc', 'date', 'by'] as const).map((k) => <input key={k} className={`rev-${k}`} value={r[k]} placeholder={{ rev: 'Rev', desc: 'Descripción', date: 'Fecha', by: 'Aprobado' }[k]} onChange={(e) => s.commitDrw((dd) => { dd.revisions![i][k] = e.target.value; })} onKeyDown={(e) => e.stopPropagation()} />)}
+              <button className="btn icon" onClick={() => s.commitDrw((dd) => { dd.revisions!.splice(i, 1); })}><Icon name="trash" size={14} /></button>
+            </div>
+          ))}
+          <button className="btn wide" onClick={drwActions.addRevision}>Nueva revisión</button>
+        </>)}
+        <button className="btn danger wide" onClick={() => s.commitDrw((dd) => { dd.tables = (dd.tables ?? []).filter((x) => x.id !== tab.id); })}><Icon name="trash" size={16} />Eliminar tabla</button>
       </div>
     )}
     {note && (
@@ -893,12 +1137,22 @@ function DrwPanel() {
     )}
     <div className="psec">
       <div className="psec-title">Cajetín</div>
-      {([['title', 'Título'], ['partNumber', 'Nº de plano'], ['material', 'Material'], ['company', 'Empresa'], ['designer', 'Dibujado'], ['checker', 'Revisado'], ['date', 'Fecha'], ['revision', 'Revisión'], ['scale', 'Escala']] as const).map(([k, l]) => (
-        <Row key={k} label={l}><input value={t[k]} onChange={(e) => s.commitDrw((dd) => { dd.title[k] = e.target.value; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
-      ))}
+      <Row label="Plantilla"><button className="btn" style={{ width: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title="Editar la plantilla de cajetín" onClick={() => s.open({ kind: 'tbtpl' })}>{tbTemplate(s.drw).name}</button></Row>
+      {tbFieldsOf(s.drw).map(([k, l]) => k.startsWith('custom:')
+        ? <Row key={k} label={l}><input value={t.custom?.[k.slice(7)] ?? ''} onChange={(e) => s.commitDrw((dd) => { (dd.title.custom ??= {})[k.slice(7)] = e.target.value; })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        : <Row key={k} label={l}><input value={(t as unknown as Record<string, string | undefined>)[k] ?? ''} onChange={(e) => s.commitDrw((dd) => { (dd.title as unknown as Record<string, string>)[k] = e.target.value; })} onKeyDown={(e) => e.stopPropagation()} /></Row>)}
     </div>
   </>);
 }
+/** Campos editables del cajetín según la plantilla (más los habituales que no estén) */
+function tbFieldsOf(d: DrawingDoc): [string, string][] {
+  const tpl = tbTemplate(d), out: [string, string][] = [], seen = new Set<string>();
+  for (const c of tpl.cells) if (c.field && !c.field.startsWith('#') && !c.field.startsWith('=') && !seen.has(c.field)) { seen.add(c.field); out.push([c.field, c.label || c.field]); }
+  for (const [k, l] of TB_FIELDS) if (!k.startsWith('#') && !seen.has(k) && ['title', 'partNumber', 'material', 'designer', 'date', 'revision', 'scale'].includes(k)) out.push([k, l]);
+  return out;
+}
+/** Símbolos para poner delante del valor de una cota */
+const DIM_SYMS: [string, string][] = [['', 'Sin símbolo'], ['Ø', 'Diámetro'], ['□', 'Cuadrado'], ['R', 'Radio'], ['SØ', 'Diámetro esférico'], ['SR', 'Radio esférico'], ['M', 'Rosca métrica'], ['⌴', 'Refrentado'], ['⌵', 'Avellanado'], ['↧', 'Profundidad'], ['±', 'Más/menos'], ['≈', 'Aproximado'], ['⌒', 'Longitud de arco'], ['t=', 'Espesor']];
 const TOLS = ['', '±0.05', '±0.1', '±0.2', '±0.5', '+0.1/0', '0/-0.1', 'H7', 'h6', 'g6', 'js7'];
 
 export function PropertyPanel() {
@@ -908,7 +1162,7 @@ export function PropertyPanel() {
   let body: ReactNode = null;
   if (s.kind === 'part') body = s.dialog && 'draft' in s.dialog ? <FeatureDialog /> : dk === 'skop' ? <SkOpDialog /> : s.mode === 'sketch' && sk ? <SketchPanel sk={sk} /> : <PartSummary />;
   else if (s.kind === 'assembly') {
-    body = dk === 'joint' ? <JointDialog /> : dk === 'skel' ? <SkelDialog /> : dk === 'frame' ? <FrameDialog /> : dk === 'endtreat' ? <EndDialog /> : dk === 'weld' ? <WeldDialog /> : dk === 'bolt' ? <BoltDialog />
+    body = dk === 'joint' ? <JointDialog /> : dk === 'skel' ? <SkelDialog /> : dk === 'frame' ? <FrameDialog /> : dk === 'endtreat' ? <EndDialog /> : dk === 'weld' ? <WeldDialog /> : dk === 'bolt' ? <BoltDialog /> : dk === 'asmwp' ? <AsmWpDialog />
       : (<>{s.mode === 'present' && <PresentPanel />}<SelectionPanel /><AsmSummary /></>);
   } else body = <DrwPanel />;
   return (
@@ -920,7 +1174,7 @@ export function PropertyPanel() {
 }
 
 // =================== MODALES ===================
-function Modal({ title, onClose, children, wide, xwide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; xwide?: boolean }) {
+export function Modal({ title, onClose, children, wide, xwide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; xwide?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
@@ -976,30 +1230,46 @@ function ParamsDialog({ onClose }: { onClose: () => void }) {
 function IPropsDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const src = s.kind === 'part' ? s.doc.iProperties : s.kind === 'assembly' ? s.asm.iProperties : null;
-  const [ip, setIp] = useState(() => ({ ...(src ?? { partNumber: '', description: '', designer: '', material: '', revision: '' }) }));
+  const [ip, setIp] = useState<IProps>(() => ({ ...(src ?? { partNumber: '', description: '', designer: '', material: '', revision: '' }) }));
+  const [tab, setTab] = useState<'sum' | 'proj' | 'state' | 'custom' | 'phys'>('proj');
   const p = s.kind === 'part' ? s.result?.props : null;
   const dens = MATERIALS.find((m) => m.name === ip.material)?.density ?? 1000;
   if (!src) return <Modal title="iProperties" onClose={onClose}><p className="phelp">Los datos del plano se editan en el cajetín (panel de propiedades).</p></Modal>;
-  const field = (k: keyof typeof ip, label: string) => <Row label={label}><input value={ip[k]} onChange={(e) => setIp({ ...ip, [k]: e.target.value })} /></Row>;
+  type SK = Exclude<keyof IProps, 'custom' | 'status'>;
+  const field = (k: SK, label: string, ph?: string) => <Row label={label}><input value={(ip[k] as string) ?? ''} placeholder={ph} onChange={(e) => setIp({ ...ip, [k]: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></Row>;
+  const custom = ip.custom ?? [];
+  const setCustom = (c: { name: string; value: string }[]) => setIp({ ...ip, custom: c });
   return (
-    <Modal title={`iProperties — ${s.fileName}`} onClose={onClose}>
-      <div className="two">
-        <div>
-          <div className="psec-title">Proyecto</div>
-          {field('partNumber', 'Nº de pieza')}{field('description', 'Descripción')}{field('revision', 'Revisión')}{field('designer', 'Diseñador')}
-          {s.kind === 'part' && <Row label="Material"><select value={ip.material} onChange={(e) => setIp({ ...ip, material: e.target.value })}>{MATERIALS.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>}
-        </div>
-        <div>
-          <div className="psec-title">Físicas</div>
-          {p ? (<>
-            <Row label="Densidad"><span className="ro">{dens} kg/m³</span></Row>
-            <Row label="Masa"><span className="ro strong">{fmt(p.volume * 1e-9 * dens, 4)} kg</span></Row>
-            <Row label="Volumen"><span className="ro">{fmt(p.volume, 1)} mm³</span></Row>
-            <Row label="Área"><span className="ro">{fmt(p.area, 1)} mm²</span></Row>
-            {(['X', 'Y', 'Z'] as const).map((a, i) => <Row key={a} label={`CdG ${a}`}><span className="ro mono">{fmt(p.cog[i], 3)} mm</span></Row>)}
-          </>) : <p className="phelp">{s.kind === 'assembly' ? 'La masa del ensamblaje está en la lista de materiales.' : 'Sin sólido.'}</p>}
-        </div>
-      </div>
+    <Modal title={`iProperties — ${s.fileName}`} onClose={onClose} wide>
+      <div style={{ marginBottom: 10 }}><Seg value={tab} onChange={setTab} options={[['sum', 'Resumen'], ['proj', 'Proyecto'], ['state', 'Estado'], ['custom', 'Personalizadas'], ['phys', 'Físicas']]} /></div>
+      {tab === 'sum' && (<>{field('title', 'Título')}{field('subject', 'Asunto')}{field('author', 'Autor')}{field('manager', 'Responsable')}{field('company', 'Empresa')}{field('keywords', 'Palabras clave')}{field('comments', 'Comentarios')}</>)}
+      {tab === 'proj' && (<>
+        {field('partNumber', 'Nº de pieza')}{field('description', 'Descripción')}{field('revision', 'Revisión')}{field('project', 'Proyecto')}{field('designer', 'Diseñador')}
+        {field('stockNumber', 'Nº de almacén')}{field('vendor', 'Proveedor')}{field('costCenter', 'Centro de coste')}{field('finish', 'Acabado', 'p. ej. Galvanizado en caliente')}{field('webLink', 'Vínculo web')}
+        {s.kind === 'part' && <Row label="Material"><select value={ip.material} onChange={(e) => setIp({ ...ip, material: e.target.value })}>{MATERIALS.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>}
+      </>)}
+      {tab === 'state' && (<>
+        <Row label="Estado"><select value={ip.status ?? 'En curso'} onChange={(e) => setIp({ ...ip, status: e.target.value as IProps['status'] })}>{['En curso', 'Revisión', 'Aprobado', 'Obsoleto'].map((x) => <option key={x}>{x}</option>)}</select></Row>
+        {field('checkedBy', 'Revisado por')}{field('checkedDate', 'Fecha revisión')}{field('approvedBy', 'Aprobado por')}{field('approvedDate', 'Fecha aprobación')}
+        <p className="phelp">Al colocar la pieza en un plano, el cajetín toma Proyecto, Descripción, Acabado y Aprobado.</p>
+      </>)}
+      {tab === 'custom' && (<>
+        {custom.map((c, i) => (
+          <div key={i} className="vr-row">
+            <input placeholder="Nombre" value={c.name} onChange={(e) => setCustom(custom.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} onKeyDown={(e) => e.stopPropagation()} />
+            <input placeholder="Valor" value={c.value} onChange={(e) => setCustom(custom.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} onKeyDown={(e) => e.stopPropagation()} />
+            <button className="btn icon" onClick={() => setCustom(custom.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button>
+          </div>
+        ))}
+        <button className="btn" onClick={() => setCustom([...custom, { name: '', value: '' }])}>Añadir propiedad</button>
+      </>)}
+      {tab === 'phys' && (p ? (<>
+        <Row label="Densidad"><span className="ro">{dens} kg/m³</span></Row>
+        <Row label="Masa"><span className="ro strong">{fmt(p.volume * 1e-9 * dens, 4)} kg</span></Row>
+        <Row label="Volumen"><span className="ro">{fmt(p.volume, 1)} mm³</span></Row>
+        <Row label="Área"><span className="ro">{fmt(p.area, 1)} mm²</span></Row>
+        {(['X', 'Y', 'Z'] as const).map((a, i) => <Row key={a} label={`CdG ${a}`}><span className="ro mono">{fmt(p.cog[i], 3)} mm</span></Row>)}
+      </>) : <p className="phelp">{s.kind === 'assembly' ? 'La masa del ensamblaje está en la lista de materiales.' : 'Sin sólido.'}</p>)}
       <div className="modal-btns"><span className="grow" />
         <button className="btn primary" onClick={() => { if (s.kind === 'part') s.commit((d) => { d.iProperties = ip; }); else s.commitAsm((d) => { d.iProperties = ip; }); onClose(); }}>Aceptar</button>
         <button className="btn" onClick={onClose}>Cancelar</button>
@@ -1016,7 +1286,7 @@ function ProjectDialog({ onClose }: { onClose: () => void }) {
       {p ? (<>
         <div className="proj-head"><Icon name="project" size={26} /><div><b>{p.name}</b><div className="muted">{p.fileName}</div></div></div>
         <table className="ptable kv"><tbody>{p.entries.map((e, i) => <tr key={i}><td>{e.label}</td><td className="mono">{e.value}</td></tr>)}</tbody></table>
-      </>) : <p className="phelp">No hay proyecto activo. Abre un <code>.ipj</code> de Inventor para ver su espacio de trabajo y librerías, o crea uno nuevo compatible.</p>}
+      </>) : <p className="phelp">No hay proyecto activo. Abre un proyecto <code>.ipj</code> para ver su espacio de trabajo y librerías, o crea uno nuevo compatible.</p>}
       <div className="modal-btns">
         <button className="btn" onClick={() => openFile()}>Abrir .ipj…</button>
         <button className="btn" onClick={() => newIpj('Proyecto')}>Crear .ipj nuevo</button><span className="grow" />
@@ -1053,24 +1323,46 @@ function FileInfoDialog({ title, info, onClose }: { title: string; info: import(
 
 function PlaceDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const parts = s.docs.filter((d) => d.kind === 'part');
+  // piezas y otros ensamblajes abiertos (subensamblajes); nunca el propio ensamblaje ni uno que ya lo contenga
+  const contains = (asmId: string, target: string, depth = 0): boolean => depth < 8 && ((s.docData(asmId) as AsmDoc | null)?.occurrences ?? []).some((o) => o.part === target || (s.docs.find((d) => d.id === o.part)?.kind === 'assembly' && contains(o.part, target, depth + 1)));
+  const parts = s.docs.filter((d) => d.kind === 'part' || (d.kind === 'assembly' && d.id !== s.active && !contains(d.id, s.active)));
+  const [files, setFiles] = useState<FolderEntry[]>([]);
+  const [q, setQ] = useState('');
+  useEffect(() => { if (s.folder.state === 'granted') listFolder().then((f) => setFiles(f.filter((x) => /\.(i3p|i3a|step|stp)$/i.test(x.name)))).catch(() => setFiles([])); }, [s.folder.state]);
+  const go = (pid: string | null) => { if (!pid) return; onClose(); asmActions.startPlace(pid); };
+  const browse = async () => { const f = await pickFile('.i3p,.i3a,.json,.step,.stp,.zip'); if (f) go(await loadPartForPlace(f)); };
+  const fromFolder = async (path: string) => { try { const { readFromFolder } = await import('../core/persist'); go(await loadPartForPlace(await readFromFolder(path))); } catch (e) { s.notify((e as Error).message, 'error'); } };
+  const shown = files.filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase())).slice(0, 200);
   return (
     <Modal title="Colocar componente" onClose={onClose}>
+      <p className="phelp">El primer componente queda <b>fijo en el origen</b>. Las demás copias siguen al cursor: <b>clic</b> para soltar (puedes soltar varias), <b>X/Y/Z</b> giran 90°, <b>Esc</b> o clic derecho termina. Después relaciónalas con <b>Restringir (J)</b>.</p>
+      <div className="modal-btns" style={{ marginTop: 0 }}>
+        <button className="btn primary" onClick={browse}>Examinar… (.i3p, .i3a, STEP)</button>
+        <button className="btn" onClick={() => { onClose(); asmActions.createPart(); }}>Crear pieza nueva</button>
+        <button className="btn" onClick={() => s.open({ kind: 'content' })}>Centro de contenido…</button>
+      </div>
+      {!!parts.length && <div className="plabel">Piezas y ensamblajes abiertos</div>}
       <div className="place-list">
         {parts.map((p) => (
-          <button key={p.id} className="place-item" onClick={() => { asmActions.placePart(p.id); onClose(); }}>
-            <Icon name={(s.docData(p.id) as PartDoc).sheet ? 'sheetmetal' : 'part'} size={24} />
-            <span><b>{p.fileName}</b><span className="muted">{(s.docData(p.id) as PartDoc).iProperties.description || (s.docData(p.id) as PartDoc).iProperties.material}</span></span>
+          <button key={p.id} className="place-item" onClick={() => go(p.id)}>
+            <Icon name={p.kind === 'assembly' ? 'assembly' : (s.docData(p.id) as PartDoc).sheet ? 'sheetmetal' : 'part'} size={24} />
+            <span><b>{p.fileName}</b><span className="muted">{p.kind === 'assembly' ? `Subensamblaje · ${(s.docData(p.id) as AsmDoc).occurrences.length} componentes` : (s.docData(p.id) as PartDoc).iProperties.description || (s.docData(p.id) as PartDoc).iProperties.material}</span></span>
           </button>
         ))}
-        {!parts.length && <p className="phelp">No hay piezas abiertas.</p>}
       </div>
-      <div className="modal-btns">
-        <button className="btn" onClick={() => { onClose(); openFile(); }}>Abrir pieza o STEP…</button>
-        <button className="btn" onClick={() => { onClose(); asmActions.createPart(); }}>Crear pieza nueva</button>
-        <button className="btn" onClick={() => s.open({ kind: 'content' })}>Centro de contenido…</button><span className="grow" />
-        <button className="btn" onClick={onClose}>Cancelar</button>
-      </div>
+      {s.folder.state === 'granted' && (<>
+        <div className="plabel">Carpeta de trabajo · {s.folder.name}</div>
+        <div className="vr-row"><input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></div>
+        <div className="place-list">
+          {shown.map((f) => (
+            <button key={f.path} className="place-item" onClick={() => fromFolder(f.path)}>
+              <Icon name="part" size={20} /><span><b>{f.name}</b><span className="muted">{f.path}</span></span>
+            </button>
+          ))}
+          {!shown.length && <p className="phelp">No hay piezas (.i3p / STEP) en la carpeta.</p>}
+        </div>
+      </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button></div>
     </Modal>
   );
 }
@@ -1165,7 +1457,7 @@ function SpaceMouseDialog({ onClose }: { onClose: () => void }) {
       <label className="check"><input type="checkbox" checked={st.invR} onChange={(e) => up({ invR: e.target.checked })} />Invertir giros</label>
       <label className="check"><input type="checkbox" checked={st.lockRot} onChange={(e) => up({ lockRot: e.target.checked })} />Bloquear giros (solo encuadre y zoom)</label>
       <label className="check"><input type="checkbox" checked={st.lockPan} onChange={(e) => up({ lockPan: e.target.checked })} />Bloquear encuadre (solo giros y zoom)</label>
-      <p className="phelp">Modo objeto, como Inventor: el modelo sigue a la tapa. Botón izquierdo: vista de inicio · botón derecho: ajustar. Funciona con 3DxWare instalado; si no responde, cierra otras aplicaciones que usen el ratón 3D en el navegador. En la vista previa incrustada el navegador puede bloquear el acceso: abre la web directamente.</p>
+      <p className="phelp">Modo objeto: el modelo sigue a la tapa. Botón izquierdo: vista de inicio · botón derecho: ajustar. Funciona con 3DxWare instalado; si no responde, cierra otras aplicaciones que usen el ratón 3D en el navegador. En la vista previa incrustada el navegador puede bloquear el acceso: abre la web directamente.</p>
       <div className="modal-btns"><span className="grow" />
         <button className="btn primary" onClick={() => connectSpaceMouse()}>{s.spaceMouse ? 'Cambiar dispositivo…' : 'Conectar…'}</button>
         <button className="btn" onClick={onClose}>Cerrar</button>
@@ -1174,28 +1466,926 @@ function SpaceMouseDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function OptionsDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [tab, setTab] = useState<'gen' | 'folder' | 'libs' | 'drw'>('gen');
+  const st = s.settings;
+  const setS = (p: Partial<typeof st>) => useStore.setState({ settings: { ...st, ...p } });
+  const mats = s.libs.materials;
+  const setM = (m: typeof mats) => useStore.setState({ libs: { ...s.libs, materials: m } });
+  const txt = (k: 'userName' | 'company', label: string) => <Row label={label}><input value={st[k]} onChange={(e) => setS({ [k]: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></Row>;
+  return (
+    <Modal title="Opciones de la aplicación" onClose={onClose} wide>
+      <div style={{ marginBottom: 10 }}><Seg value={tab} onChange={setTab} options={[['gen', 'General'], ['folder', 'Carpeta y sesión'], ['libs', 'Bibliotecas'], ['drw', 'Dibujo']]} /></div>
+      {tab === 'gen' && (<>
+        {txt('userName', 'Usuario (diseñador)')}{txt('company', 'Empresa')}
+        <Row label="Material por defecto"><select value={st.defaultMaterial} onChange={(e) => setS({ defaultMaterial: e.target.value })}>{MATERIALS.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>
+        <label className="check"><input type="checkbox" checked={st.showEdges} onChange={(e) => { setS({ showEdges: e.target.checked }); s.set({ showEdges: e.target.checked }); }} />Mostrar aristas en el modelo</label>
+        <p className="phelp">El usuario y la empresa rellenan el diseñador de las piezas nuevas y el cajetín de los planos.</p>
+        <div className="psec-title" style={{ marginTop: 8 }}>Estilo de iconos</div>
+        <IconThemePicker />
+      </>)}
+      {tab === 'folder' && (<>
+        <label className="check"><input type="checkbox" checked={st.restoreSession} onChange={(e) => setS({ restoreSession: e.target.checked })} />Reabrir los documentos de la última sesión al entrar</label>
+        <label className="check"><input type="checkbox" checked={st.autosave} onChange={(e) => setS({ autosave: e.target.checked })} />Autoguardar la sesión en el navegador (cada cambio)</label>
+        <label className="check"><input type="checkbox" checked={st.autosaveFolder} disabled={s.folder.state !== 'granted'} onChange={(e) => setS({ autosaveFolder: e.target.checked })} />Autoguardar cada minuto en la carpeta los documentos ya guardados allí</label>
+        <div className="psec-title" style={{ marginTop: 12 }}>Carpeta de trabajo</div>
+        {!folderApi.supported() ? <p className="phelp">Este navegador o esta página no permiten acceder a carpetas locales. Abre INV3D directamente en Chrome o Edge (https://jamanteiga.github.io/INV3D/). La configuración se guarda igualmente en el navegador.</p> : (<>
+          <Row label="Carpeta"><span className="ro strong">{s.folder.name || '— sin carpeta —'}</span>{s.folder.state === 'prompt' && <span className="ro" style={{ marginLeft: 6 }}>(pendiente de permiso)</span>}</Row>
+          <div className="modal-btns">
+            <button className="btn" onClick={folderApi.choose}>{s.folder.name ? 'Cambiar carpeta…' : 'Elegir carpeta…'}</button>
+            {s.folder.state === 'prompt' && <button className="btn primary" onClick={folderApi.reconnect}>Reconectar</button>}
+            {s.folder.name && <button className="btn" onClick={folderApi.forget}>Olvidar</button>}
+          </div>
+          <p className="phelp">Elige p. ej. C:\Users\jaman\Documents\PROYECTOS. INV3D la recuerda: al entrar basta un clic en «Reconectar». Ctrl+S guarda directamente en ella y la configuración se copia en <b>inv3d-config.json</b> dentro de la carpeta, así que si la carpeta está en OneDrive tendrás la misma configuración en otro PC.</p>
+        </>)}
+      </>)}
+      {tab === 'libs' && (<>
+        <div className="psec-title">Materiales propios</div>
+        {mats.map((m, i) => (
+          <div key={i} className="vr-row">
+            <input placeholder="Nombre" value={m.name} onChange={(e) => setM(mats.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} onKeyDown={(e) => e.stopPropagation()} />
+            <input type="number" title="Densidad kg/m³" style={{ width: 80, flex: 'none' }} value={m.density} onChange={(e) => setM(mats.map((x, j) => (j === i ? { ...x, density: Number(e.target.value) } : x)))} />
+            <input type="color" style={{ width: 34, flex: 'none' }} value={m.color} onChange={(e) => setM(mats.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)))} />
+            <button className="btn icon" onClick={() => setM(mats.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button>
+          </div>
+        ))}
+        <button className="btn" onClick={() => setM([...mats, { name: 'Material nuevo', density: 7850, color: '#b9bec6' }])}>Añadir material</button>
+        <div className="psec-title" style={{ marginTop: 12 }}>Copiar la configuración</div>
+        <div className="modal-btns">
+          <button className="btn" onClick={() => saveText(exportConfig(), 'inv3d-config.json', 'Configuración INV3D', '.json', 'application/json')}>Exportar…</button>
+          <button className="btn" onClick={async () => { const f = await pickFile('.json'); if (!f) return; try { importConfig(await f.text()); s.notify('Configuración importada'); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Importar…</button>
+        </div>
+        <p className="phelp">Las plantillas propias se añadirán aquí.</p>
+      </>)}
+      {tab === 'drw' && (<>
+        <Row label="Norma de dibujo"><select value={st.drawingStd} onChange={(e) => setS({ drawingStd: e.target.value as typeof st.drawingStd })}><option>ISO</option><option>DIN</option><option>ANSI</option></select></Row>
+        <Row label="Hoja por defecto"><select value={st.sheetDefault} onChange={(e) => setS({ sheetDefault: e.target.value as typeof st.sheetDefault })}>{Object.keys(SHEETS).map((k) => <option key={k}>{k}</option>)}</select></Row>
+        <p className="phelp">Se aplica a los planos nuevos. Cada plano se puede ajustar en Anotar › Estilos.</p>
+      </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
+function DrwStyleDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const d = s.drw, st = drawStyle(d);
+  const up = (p: Partial<DrawStyle>) => s.commitDrw((dd) => { dd.style = { ...(dd.style ?? {}), ...p }; });
+  const num = (k: keyof DrawStyle, label: string, step = 0.1) => <Row label={label}><input type="number" step={step} value={st[k] as number} onChange={(e) => up({ [k]: Number(e.target.value) })} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>;
+  return (
+    <Modal title="Gestor de estilos de dibujo" onClose={onClose} wide>
+      <Row label="Norma"><select value={d.std ?? 'ISO'} onChange={(e) => s.commitDrw((dd) => { dd.std = e.target.value as DrawingDoc['std']; dd.style = {}; })}><option>ISO</option><option>DIN</option><option>ANSI</option></select>
+        <button className="btn" style={{ marginLeft: 8 }} onClick={() => s.commitDrw((dd) => { dd.style = {}; })}>Restablecer</button></Row>
+      <div className="two-col">
+        <div>
+          <div className="psec-title">Cotas</div>
+          {num('dimTextH', 'Altura de texto')}
+          <Row label="Terminación"><select value={st.arrow} onChange={(e) => up({ arrow: e.target.value as DrawStyle['arrow'] })}><option value="closed">Flecha llena</option><option value="open">Flecha abierta</option><option value="tick">Trazo oblicuo</option><option value="dot">Punto</option></select></Row>
+          {num('arrowL', 'Largo de flecha')}{num('arrowW', 'Semiancho de flecha', 0.05)}
+          {num('extGap', 'Separación de la línea auxiliar')}{num('extOver', 'Prolongación de la línea auxiliar')}
+          <Row label="Unidades"><select value={st.units} onChange={(e) => up({ units: e.target.value as 'mm' | 'in' })}><option value="mm">mm</option><option value="in">pulgadas</option></select></Row>
+          <Row label="Decimales"><input type="number" min={0} max={6} value={st.precision} onChange={(e) => up({ precision: Number(e.target.value) })} /></Row>
+          <Row label="Separador"><select value={st.decSep} onChange={(e) => up({ decSep: e.target.value as ',' | '.' })}><option value=",">coma (12,5)</option><option value=".">punto (12.5)</option></select></Row>
+          <label className="check"><input type="checkbox" checked={st.trailingZeros} onChange={(e) => up({ trailingZeros: e.target.checked })} />Ceros finales (12,50)</label>
+        </div>
+        <div>
+          <div className="psec-title">Líneas y vistas</div>
+          {num('thick', 'Línea gruesa (PDF)', 0.05)}{num('thin', 'Línea fina (PDF)', 0.05)}
+          {num('hatchStep', 'Paso del rayado')}
+          <Row label="Proyección"><select value={st.projection} onChange={(e) => up({ projection: e.target.value as 'first' | 'third' })}><option value="first">Primer diedro (europea)</option><option value="third">Tercer diedro (americana)</option></select></Row>
+          <p className="phelp">La proyección decide qué vista se crea al proyectar a cada lado y el símbolo del cajetín. Las vistas ya colocadas no cambian.</p>
+        </div>
+      </div>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
+function RetrieveDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const v = s.drw.views.find((x) => x.id === s.selItem) ?? s.drw.views.find((x) => !x.parent);
+  const list = useMemo(() => (v ? viewModelDims(s, s.drw, v) : []), [v?.id]);
+  const have = (m: ModelDim) => s.drw.dims.some((d) => d.view === v?.id && d.ref && d.ref.sk === m.ref.sk && d.ref.con === m.ref.con && d.ref.feat === m.ref.feat && d.ref.ent === m.ref.ent);
+  const [sel, setSel] = useState<Set<number>>(() => new Set(list.map((m, i) => (have(m) ? -1 : i)).filter((i) => i >= 0)));
+  const create = () => {
+    if (!v) return;
+    const g = viewGeom(s, v); if (!g) return;
+    let kh = 0, kv = 0, ka = 0;
+    s.commitDrw((d) => {
+      list.forEach((m, i) => {
+        if (!sel.has(i)) return;
+        let offset = 0;
+        const A: [number, number] = [m.a[0] + v.x, m.a[1] + v.y], B: [number, number] = [m.b[0] + v.x, m.b[1] + v.y];
+        if (m.kind === 'h') offset = g.rect[3] + 8 + 7 * kh++ - Math.max(A[1], B[1]);
+        else if (m.kind === 'v') offset = g.rect[2] + 8 + 7 * kv++ - Math.max(A[0], B[0]);
+        else if (m.kind === 'a') offset = 8 + 7 * ka++;
+        d.dims.push({ id: uid('dm'), view: v.id, kind: m.kind, a: m.a, b: m.b, r: m.r, offset, ref: m.ref });
+      });
+    });
+    s.notify(`${sel.size} cotas recuperadas`); onClose();
+  };
+  return (
+    <Modal title={`Recuperar cotas del modelo${v ? ` — ${v.name}` : ''}`} onClose={onClose} wide>
+      {!v ? <p className="phelp">Selecciona una vista.</p> : !list.length ? <p className="phelp">No hay cotas del modelo visibles en verdadera magnitud en esta vista. Las cotas de boceto aparecen en vistas paralelas al boceto; las de extrusión, en vistas laterales.</p> : (<>
+        <div className="modal-btns"><button className="btn" onClick={() => setSel(new Set(list.map((_, i) => i)))}>Todas</button><button className="btn" onClick={() => setSel(new Set())}>Ninguna</button></div>
+        <div className="folder-list">
+          {list.map((m, i) => (
+            <label key={i} className="folder-row"><input type="checkbox" checked={sel.has(i)} onChange={(e) => { const n = new Set(sel); if (e.target.checked) n.add(i); else n.delete(i); setSel(n); }} />
+              <span className="fr-path">{m.label}</span><span className="ro">{{ h: 'horizontal', v: 'vertical', a: 'alineada', d: 'diámetro', r: 'radio' }[m.kind as 'h'] ?? m.kind}{have(m) ? ' · ya está' : ''}</span></label>
+          ))}
+        </div>
+        <p className="phelp">Las cotas recuperadas siguen al modelo: si cambias la pieza, se mueven y cambian de valor.</p>
+      </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!sel.size} onClick={create}>Crear</button></div>
+    </Modal>
+  );
+}
+
+function FolderDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [files, setFiles] = useState<FolderEntry[] | null>(null);
+  const [q, setQ] = useState('');
+  useEffect(() => { if (s.folder.state === 'granted') listFolder().then(setFiles).catch(() => setFiles([])); }, [s.folder.state, s.folder.name]);
+  const shown = (files ?? []).filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <Modal title={`Carpeta de trabajo${s.folder.name ? ` — ${s.folder.name}` : ''}`} onClose={onClose} wide>
+      {!folderApi.supported() ? <p className="phelp">Abre INV3D directamente en Chrome o Edge para usar una carpeta local.</p>
+        : s.folder.state === 'none' ? (<><p className="phelp">Elige la carpeta donde guardas tus proyectos. INV3D la recordará cada vez que entres.</p><div className="modal-btns"><button className="btn primary" onClick={folderApi.choose}>Elegir carpeta…</button></div></>)
+        : s.folder.state === 'prompt' ? (<><p className="phelp">El navegador pide confirmar el acceso a <b>{s.folder.name}</b> en cada sesión.</p><div className="modal-btns"><button className="btn primary" onClick={folderApi.reconnect}>Reconectar {s.folder.name}</button><button className="btn" onClick={folderApi.choose}>Otra carpeta…</button></div></>)
+        : (<>
+          <div className="vr-row"><input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /><button className="btn" onClick={() => listFolder().then(setFiles)}>Actualizar</button><button className="btn" onClick={folderApi.choose}>Cambiar…</button></div>
+          <div className="folder-list">
+            {files === null ? <p className="phelp">Leyendo…</p> : !shown.length ? <p className="phelp">No hay ficheros CAD.</p> : shown.map((f) => (
+              <button key={f.path} className="folder-row" onDoubleClick={() => { openFromFolder(f.path); onClose(); }} onClick={(e) => { if (e.detail === 1) (e.currentTarget as HTMLElement).focus(); }} onKeyDown={(e) => { if (e.key === 'Enter') { openFromFolder(f.path); onClose(); } }}>
+                <Icon name={/\.i3a$|\.iam$/i.test(f.name) ? 'assembly' : /\.i3d$|\.idw$|\.dxf$|\.dwg$/i.test(f.name) ? 'drawing' : /\.ipj$/i.test(f.name) ? 'project' : 'part'} size={16} />
+                <span className="fr-path">{f.path}</span><span className="ro">{(f.size / 1024).toFixed(0)} kB · {new Date(f.modified).toLocaleDateString('es-ES')}</span>
+              </button>
+            ))}
+          </div>
+          <p className="phelp">Doble clic para abrir. Ctrl+S guarda en esta carpeta.</p>
+        </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
+function MotionDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [type, setType] = useState<'gear' | 'rack'>('gear');
+  const rots = s.asm.joints.filter((j) => j.type === 'rot' || j.type === 'cyl');
+  const seconds = s.asm.joints.filter((j) => (type === 'gear' ? j.type === 'rot' || j.type === 'cyl' : j.type === 'slider' || j.type === 'cyl'));
+  const [j1, setJ1] = useState(rots[0]?.id ?? '');
+  const [j2, setJ2] = useState('');
+  const [ratio, setRatio] = useState('1');
+  const [rev, setRev] = useState(false);
+  const second = seconds.find((x) => x.id === j2 && x.id !== j1) ?? seconds.find((x) => x.id !== j1);
+  const ok = () => {
+    const J1 = s.asm.joints.find((x) => x.id === j1), J2 = second;
+    if (!J1 || !J2) return;
+    const ev = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+    const k = (ev(ratio) || 1) * (rev ? -1 : 1);
+    const xf = (id: string) => s.asm.occurrences.find((o) => o.id === id)!.xf;
+    const base = motionBase(type, k, J1, J2, xf);
+    s.commitAsm((a) => { (a.motions ??= []).push({ id: uid('mo'), name: `${MOTION_NAMES[type]}${(a.motions?.length ?? 0) + 1}`, type, j1: J1.id, j2: J2.id, ratio, reverse: rev || undefined, base }); });
+    onClose();
+  };
+  return (
+    <Modal title="Restricción de movimiento" onClose={onClose}>
+      <Seg value={type} onChange={setType} options={[['gear', 'Rotación-rotación'], ['rack', 'Rotación-traslación']]} />
+      {!rots.length ? <p className="phelp">Crea antes uniones de rotación (Ensamblar › Unión).</p> : (<>
+        <Row label={type === 'gear' ? 'Unión 1 (motriz)' : 'Unión de giro'}><select value={j1} onChange={(e) => setJ1(e.target.value)}>{rots.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Row>
+        <Row label={type === 'gear' ? 'Unión 2' : 'Unión corredera'}><select value={second?.id ?? ''} onChange={(e) => setJ2(e.target.value)}>{seconds.filter((x) => x.id !== j1).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Row>
+        <Row label={type === 'gear' ? 'Relación (z1/z2)' : 'Avance por vuelta'}><input value={ratio} onChange={(e) => setRatio(e.target.value)} onKeyDown={(e) => e.stopPropagation()} placeholder={type === 'gear' ? '20/40' : 'π·m·z, p. ej. 3.1416*2*20 mm'} /></Row>
+        <label className="check"><input type="checkbox" checked={rev} onChange={(e) => setRev(e.target.checked)} />{type === 'gear' ? 'Sentido inverso (engranaje exterior)' : 'Sentido inverso'}</label>
+        <p className="phelp">{type === 'gear' ? 'Giro 2 = relación × giro 1. Para dos ruedas dentadas exteriores usa z1/z2 y sentido inverso.' : 'Desplazamiento = avance × vueltas del piñón (π·m·z para una cremallera).'} Se mantiene la posición actual como origen. Prueba el mecanismo con Conducir.</p>
+      </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!rots.length || !second} onClick={ok}>Aceptar</button></div>
+    </Modal>
+  );
+}
+
+function Sketch3dDialog({ id, onClose }: { id?: string; onClose: () => void }) {
+  const s = useStore();
+  const orig = id ? (s.doc.features.find((f) => f.id === id) as Sketch3dF | undefined) : undefined;
+  const [ents, setEnts] = useState<S3Entity[]>(() => (orig ? JSON.parse(JSON.stringify(orig.entities)) : [{ id: uid('e'), type: 'line3', a: ['0', '0', '0'], b: ['0', '0', '100'] }]));
+  const [name, setName] = useState(orig?.name ?? `Boceto3D${s.doc.features.filter((f) => f.type === 'sketch3d').length + 1}`);
+  const last = (): E3 => { const e = ents[ents.length - 1]; if (!e) return ['0', '0', '0']; return e.type === 'line3' ? [...e.b] as E3 : e.type === 'spline3' ? [...e.pts[e.pts.length - 1]] as E3 : [...e.origin] as E3; };
+  const upE = (i: number, p: Partial<S3Entity>) => setEnts(ents.map((e, j) => (j === i ? ({ ...e, ...p } as S3Entity) : e)));
+  const pt = (val: E3, on: (v: E3) => void) => (
+    <span className="xyz">{(['X', 'Y', 'Z'] as const).map((k, i) => <input key={k} title={k} value={val[i]} onChange={(e) => { const n = [...val] as E3; n[i] = e.target.value; on(n); }} onKeyDown={(e) => e.stopPropagation()} />)}</span>
+  );
+  const save = () => {
+    s.commit((d) => {
+      const f = id ? (d.features.find((x) => x.id === id) as Sketch3dF) : null;
+      if (f) { f.entities = ents; f.name = name; }
+      else d.features.push({ id: uid('f'), name, type: 'sketch3d', entities: ents });
+    });
+    onClose();
+  };
+  return (
+    <Modal title={id ? `Editar ${name}` : 'Boceto 3D'} onClose={onClose} wide>
+      <Row label="Nombre"><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></Row>
+      <p className="phelp">Coordenadas en mm respecto al origen de la pieza; admiten expresiones y parámetros (p. ej. <code>L/2</code>). Las entidades se encadenan en orden.</p>
+      <div className="s3-list">
+        {ents.map((e, i) => (
+          <div key={e.id} className="s3-row">
+            <b>{i + 1}. {e.type === 'line3' ? 'Línea' : e.type === 'spline3' ? 'Spline' : 'Hélice'}</b>
+            {e.type === 'line3' && <>{pt(e.a, (v) => upE(i, { a: v }))}<span>→</span>{pt(e.b, (v) => upE(i, { b: v }))}</>}
+            {e.type === 'spline3' && (<div className="s3-pts">
+              {e.pts.map((q, k) => <div key={k}>{pt(q, (v) => upE(i, { pts: e.pts.map((x, j) => (j === k ? v : x)) }))}{e.pts.length > 2 && <button className="link" onClick={() => upE(i, { pts: e.pts.filter((_, j) => j !== k) })}>quitar</button>}</div>)}
+              <button className="link" onClick={() => upE(i, { pts: [...e.pts, [...e.pts[e.pts.length - 1]] as E3] })}>+ punto</button>
+            </div>)}
+            {e.type === 'helix3' && (<>
+              <span>Centro</span>{pt(e.origin, (v) => upE(i, { origin: v }))}
+              <select value={e.axis} onChange={(ev) => upE(i, { axis: ev.target.value as 'X' })}><option>X</option><option>Y</option><option>Z</option></select>
+              {(['radius', 'pitch', 'height'] as const).map((k) => <label key={k} className="s3-f">{{ radius: 'R', pitch: 'Paso', height: 'Altura' }[k]}<input value={e[k]} onChange={(ev) => upE(i, { [k]: ev.target.value })} onKeyDown={(ev) => ev.stopPropagation()} /></label>)}
+              <label className="check"><input type="checkbox" checked={!!e.left} onChange={(ev) => upE(i, { left: ev.target.checked })} />Izquierdas</label>
+            </>)}
+            <button className="btn icon" title="Eliminar" onClick={() => setEnts(ents.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button>
+          </div>
+        ))}
+      </div>
+      <div className="modal-btns">
+        <button className="btn" onClick={() => { const a = last(); setEnts([...ents, { id: uid('e'), type: 'line3', a, b: [a[0], a[1], `${a[2]} + 50`] }]); }}>+ Línea</button>
+        <button className="btn" onClick={() => { const a = last(); setEnts([...ents, { id: uid('e'), type: 'spline3', pts: [a, [`${a[0]} + 30`, a[1], `${a[2]} + 30`], [`${a[0]} + 60`, a[1], a[2]]] }]); }}>+ Spline</button>
+        <button className="btn" onClick={() => setEnts([...ents, { id: uid('e'), type: 'helix3', origin: ['0', '0', '0'], axis: 'Z', radius: '20', pitch: '10', height: '60' }])}>+ Hélice</button>
+        <span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!ents.length} onClick={save}>Aceptar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function IPartDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [t, setT] = useState<IPartTable>(() => (s.doc.ipart ? JSON.parse(JSON.stringify(s.doc.ipart)) : { cols: [], rows: [{ name: s.doc.iProperties.partNumber || s.fileName.replace(/\.[^.]+$/, ''), values: [] }], active: 0 }));
+  const cands = ipartCandidates(s.doc).filter((c) => !t.cols.includes(c));
+  const [addCol, setAddCol] = useState(cands[0] ?? '');
+  const commit = (apply?: number) => s.commit((d) => { const tt = JSON.parse(JSON.stringify(t)) as IPartTable; d.ipart = tt; if (apply !== undefined) applyIPartRow(d, tt, apply); });
+  const setCell = (r: number, c: number, v: string) => setT({ ...t, rows: t.rows.map((row, i) => (i === r ? { ...row, values: Object.assign([...row.values], { [c]: v }) } : row)) });
+  const member = (r: number) => {
+    const d = JSON.parse(JSON.stringify(s.doc)) as PartDoc; const tt = JSON.parse(JSON.stringify(t)) as IPartTable;
+    applyIPartRow(d, tt, r); delete d.ipart;
+    saveText(JSON.stringify(d, null, 1), `${t.rows[r].name}.i3p`, 'Pieza INV3D', '.i3p', 'application/json');
+  };
+  return (
+    <Modal title="Tabla iPart (familia de piezas)" onClose={onClose} wide>
+      <p className="phelp">Cada fila es un miembro de la familia. Las columnas son parámetros de usuario o cotas de boceto. «Activar» aplica la fila a la pieza; «Generar» guarda el miembro como pieza independiente.</p>
+      <div className="vr-row">
+        <select value={addCol} onChange={(e) => setAddCol(e.target.value)}>{cands.map((c) => <option key={c}>{c}</option>)}</select>
+        <button className="btn" disabled={!addCol} onClick={() => { setT({ ...t, cols: [...t.cols, addCol], rows: t.rows.map((r) => ({ ...r, values: [...r.values, currentValue(s.doc, addCol)] })) }); setAddCol(cands.filter((c) => c !== addCol)[0] ?? ''); }}>Añadir columna</button>
+        <button className="btn" onClick={() => setT({ ...t, rows: [...t.rows, { name: `${t.rows[t.rows.length - 1]?.name ?? 'Miembro'}-${t.rows.length + 1}`, values: [...(t.rows[t.rows.length - 1]?.values ?? t.cols.map((c) => currentValue(s.doc, c)))] }] })}>Añadir fila</button>
+      </div>
+      <div className="ipart-wrap">
+        <table className="ipart">
+          <thead><tr><th></th><th>Nº de pieza</th>{t.cols.map((c, i) => <th key={c}>{c}<button className="link" title="Quitar columna" onClick={() => setT({ cols: t.cols.filter((_, j) => j !== i), rows: t.rows.map((r) => ({ ...r, values: r.values.filter((_, j) => j !== i) })), active: t.active })}>×</button></th>)}<th></th></tr></thead>
+          <tbody>
+            {t.rows.map((r, ri) => (
+              <tr key={ri} className={ri === t.active ? 'on' : ''}>
+                <td>{ri === t.active ? '✓' : ''}</td>
+                <td><input value={r.name} onChange={(e) => setT({ ...t, rows: t.rows.map((x, i) => (i === ri ? { ...x, name: e.target.value } : x)) })} onKeyDown={(e) => e.stopPropagation()} /></td>
+                {t.cols.map((_, ci) => <td key={ci}><input value={r.values[ci] ?? ''} onChange={(e) => setCell(ri, ci, e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></td>)}
+                <td className="nowrap"><button className="btn" onClick={() => { setT({ ...t, active: ri }); commit(ri); }}>Activar</button><button className="btn" onClick={() => member(ri)}>Generar</button>{t.rows.length > 1 && <button className="btn icon" onClick={() => setT({ ...t, rows: t.rows.filter((_, i) => i !== ri), active: Math.min(t.active, t.rows.length - 2) })}><Icon name="trash" size={14} /></button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="modal-btns">
+        {s.doc.ipart && <button className="btn" onClick={() => { s.commit((d) => { delete d.ipart; }); onClose(); }}>Quitar tabla</button>}
+        <span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" onClick={() => { commit(t.active); onClose(); }}>Aceptar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function IFeatureDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const lib = s.libs.ifeatures ?? [];
+  const [tab, setTab] = useState<'insert' | 'extract'>(lib.length ? 'insert' : 'extract');
+  const sks = s.doc.features.filter((f) => f.type === 'sketch');
+  const [sk, setSk] = useState(sks[sks.length - 1]?.id ?? '');
+  const [name, setName] = useState('iFeature1');
+  const [sel, setSel] = useState(0);
+  const def = lib[sel];
+  const params = useMemo(() => (def ? ifParams(def) : []), [def]);
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [plane, setPlane] = useState<PlaneRef>({ kind: 'std', name: 'XY', offset: '0' });
+  const saveLib = (l: IFeatureDef[]) => useStore.setState({ libs: { ...s.libs, ifeatures: l } });
+  return (
+    <Modal title="iFeature" onClose={onClose} wide>
+      <div style={{ marginBottom: 10 }}><Seg value={tab} onChange={setTab} options={[['insert', 'Insertar'], ['extract', 'Extraer']]} /></div>
+      {tab === 'extract' && (<>
+        <Row label="Boceto"><select value={sk} onChange={(e) => setSk(e.target.value)}>{sks.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></Row>
+        <Row label="Nombre"><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></Row>
+        <p className="phelp">Se guardan el boceto y las operaciones que lo usan (extrusión, agujero, revolución…) con sus cotas como parámetros. Queda en tu biblioteca (Opciones › Bibliotecas) y se puede exportar como fichero .i3f.</p>
+        <div className="modal-btns"><span className="grow" />
+          <button className="btn" disabled={!sk} onClick={() => { try { const d = extractIFeature(s.doc, sk, name); saveText(JSON.stringify(d, null, 1), `${name}.i3f`, 'iFeature INV3D', '.i3f', 'application/json'); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Exportar .i3f…</button>
+          <button className="btn primary" disabled={!sk} onClick={() => { try { const d = extractIFeature(s.doc, sk, name); saveLib([...lib.filter((x) => x.name !== name), d]); s.notify(`iFeature «${name}» guardada en la biblioteca (${d.features.length} operaciones)`); setTab('insert'); setSel(lib.filter((x) => x.name !== name).length); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Guardar en la biblioteca</button>
+        </div>
+      </>)}
+      {tab === 'insert' && (<>
+        <div className="vr-row">
+          <select value={sel} onChange={(e) => { setSel(Number(e.target.value)); setVals({}); }}>{lib.map((d, i) => <option key={i} value={i}>{d.name} ({d.features.length})</option>)}</select>
+          <button className="btn" onClick={async () => { const f = await pickFile('.i3f,.json'); if (!f) return; try { const d = JSON.parse(await f.text()) as IFeatureDef; if (!Array.isArray(d.features)) throw new Error('No es una iFeature'); saveLib([...lib, d]); setSel(lib.length); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Abrir .i3f…</button>
+          {def && <button className="btn icon" title="Quitar de la biblioteca" onClick={() => { saveLib(lib.filter((_, i) => i !== sel)); setSel(0); }}><Icon name="trash" size={14} /></button>}
+        </div>
+        {!def ? <p className="phelp">La biblioteca está vacía: extrae antes una iFeature.</p> : (<>
+          <Row label="Plano de colocación"><PlanePick value={plane} onChange={setPlane} /></Row>
+          {params.map((p) => <Row key={p.key} label={p.label}><input value={vals[p.key] ?? p.expr} onChange={(e) => setVals({ ...vals, [p.key]: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></Row>)}
+        </>)}
+        <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn primary" disabled={!def} onClick={() => { s.commit((d) => insertIFeature(d, def, plane, vals)); onClose(); }}>Insertar</button></div>
+      </>)}
+    </Modal>
+  );
+}
+
+const HVAC_DUCT_MATS = ['Acero galvanizado DX51D+Z275', 'Acero inoxidable 1.4301 (conducto)', 'Aluminio EN AW-3003'];
+const HVAC_INS_MATS = ['Lana mineral 40 kg/m³', 'Lana mineral 70 kg/m³ (panel)', 'Espuma elastomérica'];
+/** Campo de medida de conducto: mm (EN) o pulgadas (SMACNA), con lista de medidas normalizadas. */
+function DimIn({ label, mm, std, list, onChange }: { label: string; mm: number; std: 'EN' | 'SMACNA'; list: number[]; onChange: (mm: number) => void }) {
+  const k = std === 'SMACNA' ? INCH : 1;
+  const lid = `dl-${label.replace(/\W/g, '')}-${std}`;
+  return (
+    <Row label={label}>
+      <span className="unit-in"><input type="number" list={lid} value={+(mm / k).toFixed(std === 'SMACNA' ? 2 : 0)} min={1} step={std === 'SMACNA' ? 1 : 10} onChange={(e) => onChange(Number(e.target.value) * k)} onKeyDown={(e) => e.stopPropagation()} />
+      <span className="ro">{std === 'SMACNA' ? 'in' : 'mm'}</span></span>
+      <datalist id={lid}>{list.map((v) => <option key={v} value={v} />)}</datalist>
+    </Row>
+  );
+}
+
+function HvacDialog({ hk, shape0, onClose }: { hk: string; shape0?: DuctShape; onClose: () => void }) {
+  const s = useStore();
+  const [kind, setKind] = useState<HvacKind>(hk as HvacKind);
+  const [std, setStd] = useState<'EN' | 'SMACNA'>(s.settings.drawingStd === 'ANSI' ? 'SMACNA' : 'EN');
+  const [shape, setShape] = useState<DuctShape>(shape0 ?? (['flex'].includes(hk) ? 'round' : 'rect'));
+  const [spiral, setSpiral] = useState(true), [seamGeo, setSeamGeo] = useState(false);
+  const [W, setW] = useState(600), [H, setH] = useState(400), [D, setD] = useState(400);
+  const [shape2, setShape2] = useState<DuctShape>('round');
+  const [W2, setW2] = useState(400), [H2, setH2] = useState(300), [D2, setD2] = useState(250);
+  const [ex, setEx] = useState(0), [ey, setEy] = useState(0);
+  const [L, setL] = useState(1200);
+  const [tOv, setTOv] = useState(0);
+  const [angle, setAngle] = useState(90);
+  const [elType, setElType] = useState<'radius' | 'square' | 'smooth' | 'segmented'>('radius');
+  const [rw, setRw] = useState(1), [vanes, setVanes] = useState(true), [gores, setGores] = useState(5);
+  const [branch, setBranch] = useState<'tee' | 'shoe' | 'collar' | 'y'>('tee'), [bAng, setBAng] = useState(90);
+  const [ends, setEnds] = useState<'none' | 'tdc' | 'angle' | 'socket'>('none');
+  const [blAng, setBlAng] = useState(30), [plate, setPlate] = useState(595), [neck, setNeck] = useState(250), [split, setSplit] = useState(100), [spig, setSpig] = useState<'top' | 'side'>('top');
+  const [ins, setIns] = useState(25), [withIns, setWithIns] = useState(false), [insMat, setInsMat] = useState(HVAC_INS_MATS[0]);
+  const [rod, setRod] = useState('');
+  const [mat, setMat] = useState(HVAC_DUCT_MATS[0]);
+  const sm = std === 'SMACNA';
+  const RL = sm ? SM_RECT : EN_RECT, RD = sm ? SM_ROUND : EN_ROUND;
+  const roundOnly = kind === 'flex' || (kind === 'branch' && branch === 'y');
+  const rectOnly = ['grille', 'plenum', 'ahu', 'fancoil'].includes(kind) || (kind === 'branch' && branch === 'shoe');
+  const ovalOk = OVAL_KINDS.includes(kind);
+  const sh: DuctShape = roundOnly ? 'round' : rectOnly ? 'rect' : shape === 'oval' && !ovalOk ? 'rect' : shape;
+  const elT = sh !== 'round' ? (elType === 'square' ? 'square' : 'radius') : elType === 'segmented' ? 'segmented' : 'smooth';
+  const material = kind === 'insulation' ? insMat : kind === 'ahu' ? 'Panel sándwich UTA 50 mm (equivalente)' : kind === 'flex' ? 'Lona flexible / aluminio' : mat;
+  const defL: Partial<Record<HvacKind, number>> = { coupling: 0, transition: 400, branch: Math.max(sh === 'rect' ? W : D, 400) + 200, plenum: 300, damper: 0, firedamper: 0, silencer: 1500, flex: 1500, ahu: 4000, fancoil: 600, support: 500 };
+  const Lv = kind === 'duct' || kind === 'insulation' || !(kind in defL) ? L : (L === 1200 ? defL[kind]! : L);
+  const spec: HvacSpec = {
+    kind, std, shape: sh, seam: kind === 'duct' && sh !== 'rect' && spiral ? 'spiral' : undefined, seamGeo, W, H, D, shape2: kind === 'transition' ? shape2 : kind === 'branch' ? (shape2 === 'oval' ? 'rect' : shape2) : undefined, W2, H2, D2, ex, ey, L: Lv, t: tOv || undefined,
+    angle, elbowType: elT, rw, vanes, gores, branch, branchAngle: branch === 'y' ? (bAng === 90 ? 30 : bAng) : bAng, ends,
+    bladeAngle: blAng, plate, neck, splitter: split, spigot: spig, ins, rod: rod || undefined, material,
+  };
+  if (kind === 'ahu') Object.assign(spec, { W: W < 900 ? 1400 : W, H: H < 900 ? 1600 : H });
+  const tInfo = sheetThickness(std, sh, sh === 'rect' ? Math.max(W, H) : sh === 'oval' ? W : D);
+  let err = '', info = '';
+  try {
+    const dd = makeHvacPart(spec);
+    info = dd.iProperties.description;
+  } catch (e) { err = (e as Error).message; }
+  const put = (doc: PartDoc, place: boolean) => {
+    const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_') + '.i3p';
+    if (place && s.kind === 'assembly') {
+      const ex2 = s.docs.find((d) => d.fileName === fn);
+      return ex2?.id ?? s.addDocument('part', doc, fn, false);
+    }
+    s.addDocument('part', doc, fn); return '';
+  };
+  const create = (place: boolean) => {
+    try {
+      const pid = put(makeHvacPart(spec), place);
+      const pins = withIns && kind === 'duct' ? put(makeHvacPart({ ...spec, kind: 'insulation', material: insMat, ins }), place) : '';
+      onClose();
+      if (place && s.kind === 'assembly') asmActions.startPlace(pid, pins ? [pins] : []);
+      else s.notify(`${info} creado`);
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
+  const SHAPES: [DuctShape, string][] = ovalOk ? [['rect', 'Rectangular'], ['round', 'Circular'], ['oval', 'Oval plano']] : [['rect', 'Rectangular'], ['round', 'Circular']];
+  const spk = HVAC_TO_SPIRO[kind];
+  const ShapeSel = <Row label="Sección"><Seg value={sh as string} onChange={(v) => (v === 'spiro' ? s.open({ kind: 'spiro', sk: spk! }) : setShape(v as DuctShape))} options={spk ? [...SHAPES, ['spiro', 'Espirotubo']] : SHAPES} /></Row>;
+  const DimsOf = (shp: DuctShape, w: number, h: number, d: number, sw: (v: number) => void, shh: (v: number) => void, sd: (v: number) => void, suf = '') => (
+    shp === 'rect' ? (<><DimIn label={`Anchura${suf} (interior)`} mm={w} std={std} list={RL} onChange={sw} /><DimIn label={`Altura${suf} (interior)`} mm={h} std={std} list={RL} onChange={shh} /></>)
+      : shp === 'oval' ? (<><DimIn label={`Eje mayor${suf}`} mm={w} std={std} list={RL} onChange={sw} /><DimIn label={`Eje menor${suf}`} mm={h} std={std} list={RL} onChange={shh} /></>)
+      : <DimIn label={`Diámetro${suf}`} mm={d} std={std} list={RD} onChange={sd} />);
+  const Dims = DimsOf(sh, W, H, D, setW, setH, setD);
+  const LenRow = (label = 'Longitud') => <Row label={label}><input type="number" value={Lv} min={0} step={50} onChange={(e) => setL(Number(e.target.value))} onKeyDown={(e) => e.stopPropagation()} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>;
+  const Thick = (
+    <Row label="Chapa"><select value={tOv} onChange={(e) => setTOv(Number(e.target.value))}>
+      <option value={0}>Automático: {tInfo.label}</option>
+      {[0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0].map((t) => <option key={t} value={t}>{String(t).replace('.', ',')} mm</option>)}
+    </select></Row>
+  );
+  const EndsRow = <Row label="Uniones"><select value={ends} onChange={(e) => setEnds(e.target.value as 'none')}><option value="none">Sin bridas</option><option value="tdc">{sh === 'rect' ? 'Brida TDC (marco de perfil)' : 'Brida de perfil'}</option><option value="angle">Marco de angular L30×3</option>{sh !== 'rect' && <option value="socket">Unión por enchufe (manguito)</option>}</select></Row>;
+  const groups: [string, HvacKind[]][] = HVAC_GROUPS;
+  return (
+    <Modal title="HVAC · Centro de contenido" onClose={onClose} wide>
+      <div className="cc">
+        <div className="cc-tree">
+          <div style={{ padding: '4px 6px 8px' }}><Seg value={std} onChange={setStd} options={[['EN', 'EN / UNE'], ['SMACNA', 'SMACNA']]} /></div>
+          {groups.map(([g, ks]) => (<div key={g}><div className="cc-cat">{g}</div>{ks.map((k) => <button key={k} className={`cc-item ${k === kind ? 'on' : ''}`} onClick={() => setKind(k)}><span>{HVAC_KINDS[k]}</span></button>)}</div>))}
+          <div className="cc-cat">Espirotubo comercial</div>
+          {(Object.keys(SPIRO_KINDS) as SpiroKind[]).map((k) => <button key={k} className="cc-item" onClick={() => s.open({ kind: 'spiro', sk: k })}><span>{SPIRO_KINDS[k]}</span></button>)}
+        </div>
+        <div className="cc-form">
+          <div className="psec-title">{HVAC_KINDS[kind]} · {sm ? 'SMACNA' : 'EN 1505 / EN 1506'}</div>
+          {!roundOnly && !rectOnly && kind !== 'ahu' && ShapeSel}
+          {kind === 'diffuser' && sh === 'rect' ? (<>
+            <Row label="Placa"><select value={plate} onChange={(e) => setPlate(Number(e.target.value))}><option value={595}>595 × 595 (techo 600)</option><option value={495}>495 × 495</option><option value={395}>395 × 395</option></select></Row>
+            <DimIn label="Cuello" mm={neck} std={std} list={RD} onChange={setNeck} />
+          </>) : kind === 'diffuser' ? <DimIn label="Cuello" mm={neck} std={std} list={RD} onChange={setNeck} /> : kind === 'ahu' || kind === 'fancoil' ? (<>
+            <DimIn label="Anchura" mm={kind === 'ahu' && W < 900 ? 1400 : W} std={std} list={RL} onChange={setW} /><DimIn label="Altura" mm={kind === 'ahu' && H < 900 ? 1600 : H} std={std} list={RL} onChange={setH} />
+            {LenRow('Longitud')}
+            <DimIn label="Bocas: anchura" mm={W2} std={std} list={RL} onChange={setW2} /><DimIn label="Bocas: altura" mm={H2} std={std} list={RL} onChange={setH2} />
+          </>) : Dims}
+          {kind === 'duct' && (<>{LenRow()}
+            {sh !== 'rect' && <label className="check"><input type="checkbox" checked={spiral} onChange={(e) => setSpiral(e.target.checked)} />Helicoidal (espiral){sh === 'round' ? ` · grapa con paso ${spiralPitch(D)} mm` : ' · oval conformado de tubo espiral'}</label>}
+            {sh === 'round' && spiral && <label className="check"><input type="checkbox" checked={seamGeo} onChange={(e) => setSeamGeo(e.target.checked)} />Modelar la grapa en relieve (lento: unos 5 s por metro)</label>}
+            {EndsRow}
+            <label className="check"><input type="checkbox" checked={withIns} onChange={(e) => setWithIns(e.target.checked)} />Añadir aislamiento</label>
+            {withIns && <Row label="Aislamiento"><input type="number" value={ins} onChange={(e) => setIns(Number(e.target.value))} style={{ width: 70 }} /><span className="ro" style={{ margin: '0 6px' }}>mm</span><select value={insMat} onChange={(e) => setInsMat(e.target.value)}>{HVAC_INS_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row>}
+          </>)}
+          {kind === 'elbow' && (<>
+            {sh !== 'oval' && <Row label="Tipo"><select value={elT} onChange={(e) => setElType(e.target.value as 'radius')}>{sh === 'rect' ? (<><option value="radius">Con radio</option><option value="square">Recto (inglete) con álabes</option></>) : (<><option value="smooth">Prensado (liso)</option><option value="segmented">Por gajos</option></>)}</select></Row>}
+            {elT !== 'square' && <Row label="Ángulo"><Seg value={String(angle)} onChange={(v) => setAngle(Number(v))} options={[['30', '30°'], ['45', '45°'], ['60', '60°'], ['90', '90°']]} /></Row>}
+            {elT !== 'square' && <Row label={sh !== 'round' ? 'R/W (eje)' : 'R/D (eje)'}><Seg value={String(rw)} onChange={(v) => setRw(Number(v))} options={[['0.75', '0,75'], ['1', '1'], ['1.5', '1,5'], ['2', '2']]} /></Row>}
+            {elT === 'square' && <label className="check"><input type="checkbox" checked={vanes} onChange={(e) => setVanes(e.target.checked)} />Álabes directrices</label>}
+            {elT === 'segmented' && <Row label="Gajos"><Seg value={String(gores)} onChange={(v) => setGores(Number(v))} options={[['3', '3'], ['4', '4'], ['5', '5'], ['7', '7']]} /></Row>}
+            {sh !== 'round' && <p className="phelp">El codo gira en el plano de la anchura. Para girar en el lado de la altura, intercambia anchura y altura.</p>}
+          </>)}
+          {kind === 'transition' && (<>
+            <Row label="Boca 2"><Seg value={shape2} onChange={setShape2} options={[['rect', 'Rectangular'], ['round', 'Circular'], ['oval', 'Oval plano']]} /></Row>
+            {DimsOf(shape2, W2, H2, D2, setW2, setH2, setD2, ' 2')}
+            {LenRow()}
+            <Row label="Desplazamiento X / Y"><input type="number" value={ex} step={10} onChange={(e) => setEx(Number(e.target.value))} style={{ width: 80 }} /><input type="number" value={ey} step={10} onChange={(e) => setEy(Number(e.target.value))} style={{ width: 80, marginLeft: 4 }} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>
+            <p className="phelp">Igual tamaño con desplazamiento = desvío. Se crea como chapa: el desarrollo y el DXF para corte están en Chapa › Desarrollo.</p>
+          </>)}
+          {kind === 'branch' && (<>
+            <Row label="Tipo"><select value={branch} onChange={(e) => setBranch(e.target.value as 'tee')}><option value="tee">Te (derivación a 90°)</option><option value="shoe">Toma de zapato (45°)</option><option value="collar">Collarín</option><option value="y">Pantalón (circular)</option></select></Row>
+            {LenRow('Longitud principal')}
+            {branch !== 'y' && <Row label="Derivación"><Seg value={shape2 === 'oval' ? 'rect' : shape2} onChange={setShape2} options={[['rect', 'Rectangular'], ['round', 'Circular']]} /></Row>}
+            {branch !== 'y' && shape2 !== 'round' ? (<><DimIn label="Anchura deriv." mm={W2} std={std} list={RL} onChange={setW2} /><DimIn label="Altura deriv." mm={H2} std={std} list={RL} onChange={setH2} /></>) : <DimIn label={branch === 'y' ? 'Ø brazos' : 'Ø derivación'} mm={D2} std={std} list={RD} onChange={setD2} />}
+            {sh === 'round' && (branch === 'tee' || branch === 'y') && <Row label="Ángulo"><Seg value={String(branch === 'y' ? (bAng === 90 ? 30 : bAng) : bAng)} onChange={(v) => setBAng(Number(v))} options={branch === 'y' ? [['22.5', '22,5°'], ['30', '30°'], ['45', '45°']] : [['90', '90°'], ['45', '45°']]} /></Row>}
+          </>)}
+          {kind === 'plenum' && (<>{LenRow('Altura del plenum')}<DimIn label="Ø boca" mm={D2} std={std} list={RD} onChange={setD2} /><Row label="Boca"><Seg value={spig} onChange={setSpig} options={[['top', 'Superior'], ['side', 'Lateral']]} /></Row></>)}
+          {(kind === 'grille' || kind === 'damper' || kind === 'firedamper') && <Row label={kind === 'firedamper' ? 'Clapeta (0° abierta)' : kind === 'damper' ? 'Apertura de lamas' : 'Ángulo de lamas'}><input type="range" min={0} max={90} value={blAng} onChange={(e) => setBlAng(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>{blAng}°</span></Row>}
+          {(kind === 'damper' || kind === 'firedamper' || kind === 'silencer') && (<>{kind === 'silencer' ? LenRow() : <Row label="Longitud"><input type="number" value={L === 1200 ? 0 : L} min={0} step={50} onChange={(e) => setL(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm (0 = estándar)</span></Row>}{EndsRow}</>)}
+          {kind === 'silencer' && <Row label="Celdas"><Seg value={String(split)} onChange={(v) => setSplit(Number(v))} options={[['100', '100 mm'], ['200', '200 mm']]} /></Row>}
+          {kind === 'flex' && LenRow()}
+          {kind === 'coupling' && <Row label="Longitud"><input type="number" value={L === 1200 ? 0 : L} min={0} step={10} onChange={(e) => setL(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm (0 = estándar 100/150)</span></Row>}
+          {kind === 'flange' && <Row label="Tipo"><Seg value={ends === 'none' || ends === 'socket' ? 'angle' : ends} onChange={(v) => setEnds(v as 'tdc')} options={[['tdc', 'TDC / perfil'], ['angle', 'Angular L30×3']]} /></Row>}
+          {kind === 'support' && (<>{LenRow('Longitud de varilla')}<Row label="Varilla"><select value={rod} onChange={(e) => setRod(e.target.value)}><option value="">Automática</option>{['M6', 'M8', 'M10', 'M12', 'M16'].map((r) => <option key={r}>{r}</option>)}</select></Row></>)}
+          {kind === 'insulation' && (<>{LenRow()}<Row label="Espesor"><input type="number" value={ins} min={5} step={5} onChange={(e) => setIns(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>
+            <Row label="Material"><select value={insMat} onChange={(e) => setInsMat(e.target.value)}>{HVAC_INS_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row></>)}
+          {!['grille', 'diffuser', 'flex', 'ahu', 'insulation'].includes(kind) && Thick}
+          {!['insulation', 'ahu', 'flex'].includes(kind) && <Row label="Material"><select value={mat} onChange={(e) => setMat(e.target.value)}>{HVAC_DUCT_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row>}
+          {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
+          <p className="phelp">Medidas interiores. Pieza paramétrica con descripción y material para la lista de materiales; en un ensamblaje se restringe con Insertar en las bocas.</p>
+          <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
+            <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
+            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Espirotubo comercial: tubo y accesorios con extremos macho, diámetros y espesores de catálogo. */
+/** Equivalencias entre el centro de contenido HVAC y el catálogo de espirotubo */
+const HVAC_TO_SPIRO: Partial<Record<HvacKind, SpiroKind>> = { duct: 'tube', elbow: 'elbow', transition: 'reducer', branch: 'tee', coupling: 'nipple', cap: 'capM', damper: 'damper', support: 'clamp' };
+const SPIRO_TO_HVAC: Partial<Record<SpiroKind, HvacKind>> = { tube: 'duct', elbow: 'elbow', tee: 'branch', tee45: 'branch', cross: 'branch', saddle: 'branch', reducer: 'transition', reducerEcc: 'transition', nipple: 'coupling', capM: 'cap', capF: 'cap', damper: 'damper', clamp: 'support' };
+function SpiroDialog({ sk, onClose }: { sk: string; onClose: () => void }) {
+  const s = useStore();
+  const [kind, setKind] = useState<SpiroKind>((sk in SPIRO_KINDS ? sk : 'tube') as SpiroKind);
+  const [D, setD] = useState(200), [D2, setD2] = useState(160);
+  const [angle, setAngle] = useState(90), [rd, setRd] = useState(1), [build, setBuild] = useState<'auto' | 'pressed' | 'segmented'>('auto');
+  const [L, setL] = useState(3000), [Lx, setLx] = useState(0);
+  const [gasket, setGasket] = useState(true), [tOv, setTOv] = useState(0), [mat, setMat] = useState(HVAC_DUCT_MATS[0]);
+  const need2 = SPIRO_D2.includes(kind);
+  const list2 = SPIRO_D.filter((d) => (kind === 'saddle' ? d <= D * 0.8 : kind.startsWith('reducer') ? d < D : d <= D));
+  const d2 = list2.includes(D2) ? D2 : list2[list2.length - 1] ?? D;
+  const spec: SpiroSpec = { kind, D, D2: need2 ? d2 : undefined, angle, rd, build, gasket, t: tOv || undefined, L: kind === 'tube' ? L : Lx || undefined, material: mat };
+  const tAuto = kind === 'tube' ? tubeT(D) : fitT(D);
+  let err = '', info = '';
+  try { info = makeSpiroPart(spec).iProperties.description; } catch (e) { err = (e as Error).message; }
+  const create = (place: boolean) => {
+    try {
+      const doc = makeSpiroPart(spec);
+      const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_') + '.i3p';
+      onClose();
+      if (place && s.kind === 'assembly') { const pid = s.docs.find((d) => d.fileName === fn)?.id ?? s.addDocument('part', doc, fn, false); asmActions.startPlace(pid); }
+      else { s.addDocument('part', doc, fn); s.notify(`${doc.iProperties.description} creado`); }
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
+  const fitting = kind !== 'tube' && kind !== 'clamp' && kind !== 'sleeve' && kind !== 'capF';
+  return (
+    <Modal title="Espirotubo · tubo y accesorios comerciales" onClose={onClose} wide>
+      <div className="cc">
+        <div className="cc-tree">
+          {SPIRO_GROUPS.map(([g, ks]) => (<div key={g}><div className="cc-cat">{g}</div>{ks.map((k) => <button key={k} className={`cc-item ${k === kind ? 'on' : ''}`} onClick={() => setKind(k)}><span>{SPIRO_KINDS[k]}</span></button>)}</div>))}
+        </div>
+        <div className="cc-form">
+          <div className="psec-title">{SPIRO_KINDS[kind]} · EN 1506 / EN 12237</div>
+          {SPIRO_TO_HVAC[kind] && <Row label="Sección"><Seg value="spiro" onChange={(v) => { if (v !== 'spiro') s.open({ kind: 'hvac', hk: SPIRO_TO_HVAC[kind]!, shape: v as DuctShape }); }} options={[['rect', 'Rectangular'], ['round', 'Circular'], ['oval', 'Oval plano'], ['spiro', 'Espirotubo']]} /></Row>}
+          <Row label={need2 ? (kind === 'saddle' ? 'Ø tubo' : 'Ø principal') : 'Diámetro'}><select value={D} onChange={(e) => setD(Number(e.target.value))}>{SPIRO_D.map((d) => <option key={d} value={d}>Ø {d}</option>)}</select></Row>
+          {need2 && <Row label={kind.startsWith('reducer') ? 'Ø menor' : kind === 'saddle' ? 'Ø toma' : 'Ø derivación'}><select value={d2} onChange={(e) => setD2(Number(e.target.value))}>{list2.map((d) => <option key={d} value={d}>Ø {d}</option>)}</select></Row>}
+          {kind === 'tube' && <Row label="Longitud"><select value={L} onChange={(e) => setL(Number(e.target.value))}>{SPIRO_L.map((l) => <option key={l} value={l}>{l} mm{l === 3000 ? ' (estándar)' : ''}</option>)}</select></Row>}
+          {kind === 'elbow' && (<>
+            <Row label="Ángulo"><Seg value={String(angle)} onChange={(v) => setAngle(Number(v))} options={SPIRO_ANGLES.map((a) => [String(a), `${a}°`] as [string, string])} /></Row>
+            <Row label="Radio"><Seg value={String(rd)} onChange={(v) => setRd(Number(v))} options={[['1', 'R = 1·D'], ['1.5', 'R = 1,5·D']]} /></Row>
+            <Row label="Construcción"><select value={build} onChange={(e) => setBuild(e.target.value as 'auto')}><option value="auto">Automática (prensado hasta Ø315, gajos por encima)</option><option value="pressed">Prensado (liso)</option><option value="segmented">Por gajos ({goresFor(angle)} piezas)</option></select></Row>
+          </>)}
+          {['tee', 'tee45', 'cross', 'reducer', 'reducerEcc', 'damper'].includes(kind) && <Row label={kind.startsWith('reducer') ? 'Long. cono' : 'Longitud'}><input type="number" value={Lx} min={0} step={10} onChange={(e) => setLx(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm (0 = de catálogo)</span></Row>}
+          {fitting && <Row label="Unión"><Seg value={gasket ? 'g' : 'n'} onChange={(v) => setGasket(v === 'g')} options={[['g', 'Macho con junta EPDM'], ['n', 'Macho sin junta']]} /></Row>}
+          {kind !== 'clamp' && <Row label="Chapa"><select value={tOv} onChange={(e) => setTOv(Number(e.target.value))}>
+            <option value={0}>Comercial: {String(tAuto).replace('.', ',')} mm</option>
+            {SPIRO_T.map((t) => <option key={t} value={t}>{String(t).replace('.', ',')} mm</option>)}
+          </select></Row>}
+          <Row label="Material"><select value={mat} onChange={(e) => setMat(e.target.value)}>{HVAC_DUCT_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row>
+          {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
+          <p className="phelp">El tubo se designa por su Ø interior; los accesorios por el Ø exterior del macho (Ø − 1 mm), que entra en el tubo {`(inserción ${spigotL(D)} mm)`}. Espesores comerciales orientativos en acero galvanizado. En el ensamblaje, restringe con <b>Insertar</b> la cara cilíndrica del macho con la del tubo.</p>
+          <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
+            <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
+            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface CalcRow { name: string; q: number; len: number; shape: 'rect' | 'round'; auto: boolean; W: number; H: number; D: number; fits: string[]; extra: number }
+function DuctCalcDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [std, setStd] = useState<'EN' | 'SMACNA'>('EN');
+  const [method, setMethod] = useState<'friction' | 'velocity'>('friction');
+  const [rTarget, setRTarget] = useState(1.0), [vTarget, setVTarget] = useState(5);
+  const [hMax, setHMax] = useState(400), [ar, setAr] = useState(4), [rough, setRough] = useState(0.15), [temp, setTemp] = useState(20);
+  const [rows, setRows] = useState<CalcRow[]>([
+    { name: 'Tramo 1', q: 6000, len: 10, shape: 'rect', auto: true, W: 600, H: 400, D: 400, fits: ['elbow_r'], extra: 0 },
+    { name: 'Tramo 2', q: 3000, len: 8, shape: 'rect', auto: true, W: 400, H: 300, D: 315, fits: ['tee_run', 'trans'], extra: 0 },
+    { name: 'Tramo 3', q: 1000, len: 5, shape: 'round', auto: true, W: 300, H: 200, D: 250, fits: ['tee_branch', 'damper', 'diffuser'], extra: 0 },
+  ]);
+  const rho = 353 / (273.15 + temp), nu = 1.5e-5 * Math.pow((273.15 + temp) / 293.15, 1.75);
+  const sm = std === 'SMACNA';
+  const RL = sm ? SM_RECT.map((x) => x * INCH) : EN_RECT, RD = sm ? SM_ROUND.map((x) => x * INCH) : EN_ROUND;
+  const ok = (c: { v: number; R: number }) => (method === 'friction' ? c.R <= rTarget : c.v <= vTarget);
+  const size = (r: CalcRow): { W: number; H: number; D: number } => {
+    if (!r.auto) return r;
+    if (r.shape === 'round') return { ...r, D: RD.find((d) => ok(ductFriction('round', d, d, r.q, rough, rho, nu))) ?? RD[RD.length - 1] };
+    let best: { W: number; H: number; P: number } | null = null;
+    for (const h of RL.filter((x) => x <= hMax)) for (const w of RL.filter((x) => x >= h && x / h <= ar)) {
+      if (ok(ductFriction('rect', w, h, r.q, rough, rho, nu)) && (!best || w + h < best.P)) best = { W: w, H: h, P: w + h };
+    }
+    return best ? { ...r, W: best.W, H: best.H } : { ...r, W: RL[RL.length - 1], H: Math.min(hMax, RL[RL.length - 1]) };
+  };
+  const res = rows.map((r) => {
+    const z = size(r);
+    const c = ductFriction(r.shape, r.shape === 'rect' ? z.W : z.D, r.shape === 'rect' ? z.H : z.D, r.q, rough, rho, nu);
+    const pd = (rho * c.v * c.v) / 2;
+    const zeta = r.fits.reduce((t, f) => t + (FITTING_LOSSES.find((x) => x.id === f)?.zeta ?? 0), 0);
+    const fixed = r.fits.reduce((t, f) => t + (FITTING_LOSSES.find((x) => x.id === f)?.dp ?? 0), 0) + r.extra;
+    const dpf = c.R * r.len, dps = zeta * pd + fixed;
+    return { r, z, c, pd, zeta, dpf, dps, dp: dpf + dps };
+  });
+  const total = res.reduce((t, x) => t + x.dp, 0);
+  const up = (i: number, p: Partial<CalcRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  const fmtN = (v: number, d = 1) => v.toFixed(d).replace('.', ',');
+  const Qd = (q: number) => (sm ? `${Math.round(q / 1.699)} cfm` : `${q} m³/h`);
+  const Vd = (v: number) => (sm ? `${Math.round(v * 196.85)} fpm` : `${fmtN(v, 2)} m/s`);
+  const Rd = (R: number) => (sm ? `${(R * 0.1224).toFixed(3)} in.wg/100ft` : `${fmtN(R, 2)} Pa/m`);
+  const Sz = (r: CalcRow, z: { W: number; H: number; D: number }) => (r.shape === 'rect' ? (sm ? `${Math.round(z.W / INCH)}×${Math.round(z.H / INCH)}"` : `${Math.round(z.W)}×${Math.round(z.H)}`) : sm ? `Ø${Math.round(z.D / INCH)}"` : `Ø${Math.round(z.D)}`);
+  const createDuct = (x: (typeof res)[number]) => {
+    const doc = makeHvacPart({ kind: 'duct', std, shape: x.r.shape, W: x.z.W, H: x.z.H, D: x.z.D, L: Math.round(x.r.len * 1000), material: HVAC_DUCT_MATS[0] });
+    const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_') + '.i3p';
+    if (s.kind === 'assembly') { const pid = s.docs.find((d) => d.fileName === fn)?.id ?? s.addDocument('part', doc, fn, false); onClose(); asmActions.startPlace(pid); }
+    else { s.addDocument('part', doc, fn); onClose(); }
+  };
+  const exportCsv = () => {
+    const head = 'Tramo;Caudal m3/h;Longitud m;Sección;Medida;Velocidad m/s;Dh mm;De mm;Re;lambda;R Pa/m;Fricción Pa;zeta;Singulares Pa;Total Pa';
+    const lines = res.map((x) => [x.r.name, x.r.q, x.r.len, x.r.shape === 'rect' ? 'Rectangular' : 'Circular', Sz(x.r, x.z), fmtN(x.c.v, 2), Math.round(x.c.dh), Math.round(x.c.de), Math.round(x.c.Re), x.c.lambda.toFixed(4).replace('.', ','), fmtN(x.c.R, 3), fmtN(x.dpf), fmtN(x.zeta, 2), fmtN(x.dps), fmtN(x.dp)].join(';'));
+    saveText([head, ...lines, `TOTAL;;;;;;;;;;;;;;${fmtN(total)}`].join('\n'), 'calculo-conductos.csv', 'CSV', '.csv', 'text/csv');
+  };
+  return (
+    <Modal title="Dimensionado de conductos" onClose={onClose} wide>
+      <div className="calc-top">
+        <Seg value={std} onChange={setStd} options={[['EN', 'SI (EN)'], ['SMACNA', 'Imperial (SMACNA)']]} />
+        <Seg value={method} onChange={setMethod} options={[['friction', 'Pérdida de carga constante'], ['velocity', 'Velocidad']]} />
+        {method === 'friction' ? <label>R máx. <input type="number" step={0.1} value={rTarget} onChange={(e) => setRTarget(Number(e.target.value))} style={{ width: 60 }} /> Pa/m</label>
+          : <label>v máx. <input type="number" step={0.5} value={vTarget} onChange={(e) => setVTarget(Number(e.target.value))} style={{ width: 60 }} /> m/s</label>}
+        <label>Altura máx. <input type="number" step={50} value={hMax} onChange={(e) => setHMax(Number(e.target.value))} style={{ width: 70 }} /> mm</label>
+        <label>Relación máx. <input type="number" step={0.5} value={ar} onChange={(e) => setAr(Number(e.target.value))} style={{ width: 50 }} /></label>
+        <label>ε <input type="number" step={0.01} value={rough} onChange={(e) => setRough(Number(e.target.value))} style={{ width: 60 }} /> mm</label>
+        <label>Aire <input type="number" value={temp} onChange={(e) => setTemp(Number(e.target.value))} style={{ width: 50 }} /> °C (ρ {fmtN(rho, 3)})</label>
+      </div>
+      <div className="ipart-wrap">
+        <table className="ipart calc">
+          <thead><tr><th>Tramo</th><th>Caudal (m³/h)</th><th>L (m)</th><th>Sección</th><th>Medida</th><th>v</th><th>R</th><th>Accesorios</th><th>Δp fricción</th><th>Δp singular</th><th>Total</th><th></th></tr></thead>
+          <tbody>
+            {res.map((x, i) => (
+              <tr key={i}>
+                <td><input value={x.r.name} onChange={(e) => up(i, { name: e.target.value })} onKeyDown={(e) => e.stopPropagation()} style={{ width: 80 }} /></td>
+                <td><input type="number" value={x.r.q} step={100} onChange={(e) => up(i, { q: Number(e.target.value) })} style={{ width: 70 }} /><div className="ro small">{sm ? Qd(x.r.q) : ''}</div></td>
+                <td><input type="number" value={x.r.len} step={0.5} onChange={(e) => up(i, { len: Number(e.target.value) })} style={{ width: 55 }} /></td>
+                <td><select value={x.r.shape} onChange={(e) => up(i, { shape: e.target.value as 'rect' })}><option value="rect">Rect.</option><option value="round">Circ.</option></select></td>
+                <td>
+                  <label className="check"><input type="checkbox" checked={x.r.auto} onChange={(e) => up(i, { auto: e.target.checked, ...x.z })} />auto</label>
+                  {x.r.auto ? <b>{Sz(x.r, x.z)}</b> : x.r.shape === 'rect'
+                    ? <><input type="number" value={x.r.W} step={50} onChange={(e) => up(i, { W: Number(e.target.value) })} style={{ width: 55 }} />×<input type="number" value={x.r.H} step={50} onChange={(e) => up(i, { H: Number(e.target.value) })} style={{ width: 55 }} /></>
+                    : <input type="number" value={x.r.D} step={25} onChange={(e) => up(i, { D: Number(e.target.value) })} style={{ width: 60 }} />}
+                </td>
+                <td>{Vd(x.c.v)}</td>
+                <td className={method === 'friction' && x.c.R > rTarget * 1.001 ? 'warn' : ''}>{Rd(x.c.R)}</td>
+                <td className="calc-fits">
+                  <select value="" onChange={(e) => e.target.value && up(i, { fits: [...x.r.fits, e.target.value] })}><option value="">+ añadir…</option>{FITTING_LOSSES.map((f) => <option key={f.id} value={f.id}>{f.name}{f.zeta !== undefined ? ` (ζ ${String(f.zeta).replace('.', ',')})` : ` (${f.dp} Pa)`}</option>)}</select>
+                  <div className="fit-chips">{x.r.fits.map((f, k) => <button key={k} className="chip" title="Quitar" onClick={() => up(i, { fits: x.r.fits.filter((_, j) => j !== k) })}>{FITTING_LOSSES.find((y) => y.id === f)?.name ?? f} ×</button>)}</div>
+                  <label className="small">Otros <input type="number" value={x.r.extra} onChange={(e) => up(i, { extra: Number(e.target.value) })} style={{ width: 50 }} /> Pa</label>
+                </td>
+                <td>{fmtN(x.dpf)} Pa</td>
+                <td>{fmtN(x.dps)} Pa<div className="ro small">ζ {fmtN(x.zeta, 2)} · pd {fmtN(x.pd)}</div></td>
+                <td><b>{fmtN(x.dp)} Pa</b></td>
+                <td className="nowrap"><button className="btn" title="Crear el conducto de este tramo" onClick={() => createDuct(x)}>Crear</button><button className="btn icon" onClick={() => setRows(rows.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="modal-btns">
+        <button className="btn" onClick={() => setRows([...rows, { ...rows[rows.length - 1], name: `Tramo ${rows.length + 1}`, fits: [] }])}>Añadir tramo</button>
+        <button className="btn" onClick={exportCsv}>Exportar CSV</button>
+        <span className="grow" />
+        <span className="calc-total">Pérdida total del recorrido: <b>{fmtN(total)} Pa</b>{sm ? ` (${(total / 249.09).toFixed(2)} in.wg)` : ''}</span>
+        <button className="btn primary" onClick={onClose}>Cerrar</button>
+      </div>
+      <p className="phelp">Darcy-Weisbach con λ de Colebrook-White sobre el diámetro hidráulico; medida rectangular elegida con el menor perímetro que cumple el criterio (altura y relación de lados limitadas). Diámetro equivalente de Huebscher en el CSV. Introduce los tramos del recorrido más desfavorable para obtener la presión disponible necesaria en el ventilador.</p>
+    </Modal>
+  );
+}
+
+function PipingDialog({ pk: pk0, norm: norm0, onClose }: { pk: string; norm: 'ASME' | 'EN'; onClose: () => void }) {
+  const s = useStore();
+  const [kind, setKind] = useState<PipeKind>(pk0 as PipeKind);
+  const [norm, setNorm] = useState<'ASME' | 'EN'>(norm0);
+  const [flStd, setFlStd] = useState<FlangeStd>(norm0 === 'EN' ? 'EN1092' : 'B16.5');
+  const [rating, setRating] = useState<number>(norm0 === 'EN' ? 16 : 150);
+  const [flType, setFlType] = useState<string>(norm0 === 'EN' ? '11' : 'WN');
+  const sizeList = (): string[] => {
+    if (kind === 'flange') {
+      if (flStd === 'EN1092') return enSizes(rating).map(String);
+      if (flStd === 'B16.5') return b165Sizes(rating);
+      return (B1647_TABLES[flStd === 'B16.47A' ? 'A' : 'B'][rating] ?? []).map((r) => r[0]);
+    }
+    if (kind === 'coupling') return norm === 'ASME' ? Object.keys(B1611) : Object.keys(B1611).map((n) => String(NPS_DN[n]));
+    if (kind === 'pipe') return norm === 'ASME' ? ASME_SIZES : EN_DN.map(String);
+    const fitSizes = FITTING_NPS.filter((n) => kind !== 'reducer' || REDUCER_H[n]).filter((n) => kind !== 'rtee' || reducedOptions(n).length).filter((n) => kind !== 'stub' || B169[n][5]);
+    return norm === 'ASME' ? fitSizes : fitSizes.map((n) => NPS_DN[n]).filter((dn) => EN_OD[dn]).map(String);
+  };
+  const sizes = sizeList();
+  const defSize = sizes.find((x) => x === '4' || x === '100') ?? sizes[Math.min(8, sizes.length - 1)] ?? '';
+  const [size, setSize] = useState<string>(defSize);
+  const sz = sizes.includes(size) ? size : defSize;
+  const npsBig = norm === 'ASME' ? sz : DN_NPS[Number(sz)] ?? '';
+  const size2List = (kind === 'rtee' || kind === 'reducer') ? reducedOptions(npsBig).map((n) => (norm === 'ASME' ? n : String(NPS_DN[n]))).filter((x) => norm === 'ASME' || EN_OD[Number(x)]) : [];
+  const [size2, setSize2] = useState('');
+  const sz2 = size2List.includes(size2) ? size2 : size2List[0] ?? '';
+  const schs = norm === 'ASME' && ASME_PIPE[norm === 'ASME' ? sz : npsBig] ? Object.keys(ASME_PIPE[sz]?.[1] ?? {}) : [];
+  const [sch, setSch] = useState('STD');
+  const schV = schs.includes(sch) ? sch : schs.includes('STD') ? 'STD' : schs[0] ?? 'STD';
+  const enW = norm === 'EN' ? enWalls(EN_OD[Number(sz)] ?? 0) : [];
+  const [wall, setWall] = useState(0);
+  const wallV = enW.includes(wall) ? wall : (EN_S[Number(sz)] ?? enW[0] ?? 0);
+  const [len, setLen] = useState(6000);
+  const [elbow, setElbow] = useState<'LR' | 'SR' | '3D' | '5D'>(norm0 === 'EN' ? '3D' : 'LR');
+  const [angle, setAngle] = useState<45 | 90 | 180>(90);
+  const [ecc, setEcc] = useState(false);
+  const [cls, setCls] = useState<3000 | 6000>(3000);
+  const [sw, setSw] = useState(false);
+  const [half, setHalf] = useState(false);
+  const [facing, setFacing] = useState<'RF' | 'FF'>('RF');
+  const [stubShort, setStubShort] = useState(false);
+  const use = kind === 'pipe' ? 'pipe' : kind === 'flange' ? 'flange' : 'fitting';
+  const mats = PIPE_MATERIALS.filter((m) => m.std === norm && m.use.includes(use));
+  const [mat, setMat] = useState('');
+  const matV = mats.some((m) => m.name === mat) ? mat : mats[0]?.name ?? 'Acero S275JR';
+  const ratings = flStd === 'EN1092' ? Object.keys(EN_PN).map(Number) : flStd === 'B16.5' ? B165_CLASSES : Object.keys(B1647_TABLES[flStd === 'B16.47A' ? 'A' : 'B']).map(Number);
+  const types: [string, string][] = flStd === 'EN1092' ? Object.entries(EN_TYPES) : [['WN', 'Cuello para soldar (WN)'], ['SO', 'Deslizante (SO)'], ['BL', 'Ciega (BL)'], ...(flStd === 'B16.5' ? [['LJ', 'Loca (LJ)'], ['SW', 'Socket weld (SW)'], ['TH', 'Roscada (TH)']] as [string, string][] : [])];
+  const spec: PipeSpec = {
+    kind, norm, size: sz, size2: sz2, sch: schV, wall: wallV, length: kind === 'stub' ? (stubShort ? 1 : 0) : len, flStd, rating, flType, facing,
+    elbow, angle, ecc, cls, sw, half, material: matV,
+  };
+  let info = '', err = '';
+  try {
+    const D = od(spec, sz), t = wallOf(spec, sz);
+    if (kind === 'flange') { const fd = flangeDims(spec); if (!fd) throw new Error('No existe en la norma'); info = `Ø${fd.D} · espesor ${fd.tf} · ${fd.n} × ${fd.bolt} en Ø${fd.bc} (taladros Ø${fd.hole}) · cara Ø${fd.rf}`; }
+    else if (kind === 'coupling') info = `Para tubo Ø${od({ norm: 'ASME' }, npsBig)}`;
+    else info = `Ø${D} × ${t} mm`;
+  } catch (e) { err = (e as Error).message; }
+  const create = (place: boolean) => {
+    try {
+      const doc = makePipePart(spec);
+      const FR: Record<string, string> = { '1/2': '½', '1/4': '¼', '3/4': '¾', '1/8': '⅛', '3/8': '⅜' };
+      const fn = doc.iProperties.partNumber.replace(/(\d)\/(\d)/g, (m) => FR[m] ?? m.replace('/', '-')).replace(/-(?=[½¼¾⅛⅜])/g, '').replace(/"/g, 'in').replace(/[\\/:*?<>|]+/g, '_') + '.i3p';
+      if (place && s.kind === 'assembly') {
+        const existing = s.docs.find((d) => d.fileName === fn);
+        const pid = existing?.id ?? s.addDocument('part', doc, fn, false);
+        onClose(); asmActions.startPlace(pid);
+      } else { s.addDocument('part', doc, fn); onClose(); }
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
+  const kinds: [PipeKind, string][] = Object.entries(PIPE_KINDS).filter(([k]) => norm === 'ASME' || k !== 'stub') as [PipeKind, string][];
+  return (
+    <Modal title="Tubería · Centro de contenido" onClose={onClose} wide>
+      <div className="cc">
+        <div className="cc-tree">
+          <div style={{ padding: '4px 6px 8px' }}><Seg value={norm} onChange={(v) => { setNorm(v); setFlStd(v === 'EN' ? 'EN1092' : 'B16.5'); setRating(v === 'EN' ? 16 : 150); setFlType(v === 'EN' ? '11' : 'WN'); setElbow(v === 'EN' ? '3D' : 'LR'); }} options={[['ASME', 'ASME'], ['EN', 'EN']]} /></div>
+          {kinds.map(([k, n]) => <button key={k} className={`cc-item ${k === kind ? 'on' : ''}`} onClick={() => setKind(k)}><span>{n}</span></button>)}
+        </div>
+        <div className="cc-form">
+          <div className="psec-title">{PIPE_KINDS[kind]} · {kind === 'pipe' ? (norm === 'ASME' ? 'ASME B36.10M / B36.19M' : 'EN 10220 / EN 10216') : kind === 'flange' ? (flStd === 'EN1092' ? 'EN 1092-1' : ({ 'B16.5': 'ASME B16.5', 'B16.47A': 'ASME B16.47 Serie A', 'B16.47B': 'ASME B16.47 Serie B' } as Record<string, string>)[flStd]) : kind === 'coupling' ? 'ASME B16.11' : norm === 'ASME' ? 'ASME B16.9' : 'EN 10253'}</div>
+          {kind === 'flange' && (<>
+            {norm === 'ASME' && <Row label="Norma"><select value={flStd} onChange={(e) => { const v = e.target.value as FlangeStd; setFlStd(v); setRating(v === 'B16.47B' ? 150 : 150); if (v !== 'B16.5' && !['WN', 'BL'].includes(flType)) setFlType('WN'); }}><option value="B16.5">B16.5 (½"–24")</option><option value="B16.47A">B16.47 Serie A (26"–60")</option><option value="B16.47B">B16.47 Serie B (26"–60")</option></select></Row>}
+            <Row label={flStd === 'EN1092' ? 'PN' : 'Clase'}><select value={rating} onChange={(e) => setRating(Number(e.target.value))}>{ratings.map((r) => <option key={r} value={r}>{flStd === 'EN1092' ? `PN ${r}` : `${r} lb`}</option>)}</select></Row>
+            <Row label="Tipo"><select value={flType} onChange={(e) => setFlType(e.target.value)}>{types.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></Row>
+            <Row label="Cara"><Seg value={facing} onChange={setFacing} options={[['RF', flStd === 'EN1092' ? 'Realzada (B1)' : 'Realzada (RF)'], ['FF', 'Plana (FF / A)']]} /></Row>
+          </>)}
+          <Row label={norm === 'ASME' ? 'NPS' : 'DN'}><select value={sz} onChange={(e) => setSize(e.target.value)}>{sizes.map((x) => <option key={x} value={x}>{norm === 'ASME' ? `${x}"` : `DN ${x}`}</option>)}</select></Row>
+          {size2List.length > 0 && <Row label={kind === 'rtee' ? 'Derivación' : 'Extremo pequeño'}><select value={sz2} onChange={(e) => setSize2(e.target.value)}>{size2List.map((x) => <option key={x} value={x}>{norm === 'ASME' ? `${x}"` : `DN ${x}`}</option>)}</select></Row>}
+          {kind !== 'coupling' && !(kind === 'flange' && flType !== 'WN' && flType !== '11' && flType !== 'SW') && (norm === 'ASME'
+            ? <Row label="Schedule"><select value={schV} onChange={(e) => setSch(e.target.value)}>{schs.map((x) => <option key={x} value={x}>{x} · {ASME_PIPE[sz]?.[1][x as 'STD']} mm</option>)}</select></Row>
+            : <Row label="Espesor"><select value={wallV} onChange={(e) => setWall(Number(e.target.value))}>{enW.map((x) => <option key={x} value={x}>{String(x).replace('.', ',')} mm</option>)}</select></Row>)}
+          {kind === 'pipe' && <Row label="Longitud"><input type="number" value={len} min={1} onChange={(e) => setLen(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>mm</span></Row>}
+          {kind === 'elbow' && (<>
+            <Row label="Radio"><select value={elbow} onChange={(e) => setElbow(e.target.value as 'LR')}><option value="LR">Radio largo 1,5D (LR)</option><option value="SR">Radio corto 1D (SR)</option>{norm === 'EN' && <option value="3D">EN 10253 tipo 3D</option>}<option value="5D">Curva 5D</option></select></Row>
+            <Row label="Ángulo"><Seg value={String(angle)} onChange={(v) => setAngle(Number(v) as 90)} options={[['45', '45°'], ['90', '90°'], ['180', '180° (retorno)']]} /></Row>
+          </>)}
+          {kind === 'reducer' && <Row label="Tipo"><Seg value={ecc ? 'e' : 'c'} onChange={(v) => setEcc(v === 'e')} options={[['c', 'Concéntrica'], ['e', 'Excéntrica']]} /></Row>}
+          {kind === 'stub' && <Row label="Longitud"><Seg value={stubShort ? 's' : 'l'} onChange={(v) => setStubShort(v === 's')} options={[['l', 'Larga (ASME)'], ['s', 'Corta (MSS)']]} /></Row>}
+          {kind === 'coupling' && (<>
+            <Row label="Clase"><Seg value={String(cls)} onChange={(v) => setCls(Number(v) as 3000)} options={[['3000', '3000'], ['6000', '6000']]} /></Row>
+            <Row label="Unión"><Seg value={sw ? 'sw' : 'th'} onChange={(v) => setSw(v === 'sw')} options={[['th', 'Roscado NPT'], ['sw', 'Socket weld']]} /></Row>
+            <Row label="Forma"><Seg value={half ? 'h' : 'f'} onChange={(v) => setHalf(v === 'h')} options={[['f', 'Manguito'], ['h', 'Medio manguito']]} /></Row>
+          </>)}
+          <Row label="Material"><select value={matV} onChange={(e) => setMat(e.target.value)}>{mats.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>
+          {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
+          <p className="phelp">Se crea una pieza paramétrica con sus iProperties (designación, norma y material) para la lista de materiales. En un ensamblaje se coloca y se restringe con Insertar en las caras de los extremos.</p>
+          <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
+            <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
+            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DriveDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const joints = s.asm.joints.filter((j) => j.type === 'rot' || j.type === 'slider');
+  const [jid, setJid] = useState(joints.find((j) => j.id === s.selItem)?.id ?? joints[0]?.id ?? '');
+  const j = joints.find((x) => x.id === jid);
+  const [from, setFrom] = useState(0), [to, setTo] = useState(j?.type === 'slider' ? 50 : 360), [steps, setSteps] = useState(60);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal title="Conducir unión" onClose={onClose}>
+      {!joints.length ? <p className="phelp">Crea antes una unión de rotación o corredera (Ensamblar › Unión).</p> : (<>
+        <Row label="Unión"><select value={jid} onChange={(e) => setJid(e.target.value)}>{joints.map((x) => <option key={x.id} value={x.id}>{x.name} ({JOINT_NAMES[x.type]})</option>)}</select></Row>
+        <Row label="Desde"><input type="number" value={from} onChange={(e) => setFrom(Number(e.target.value))} /><span className="ro" style={{ marginLeft: 6 }}>{j?.type === 'rot' ? '°' : 'mm'}</span></Row>
+        <Row label="Hasta"><input type="number" value={to} onChange={(e) => setTo(Number(e.target.value))} /></Row>
+        <Row label="Pasos"><input type="number" value={steps} min={2} max={720} onChange={(e) => setSteps(Math.max(2, Number(e.target.value)))} /></Row>
+        <p className="phelp">Mueve el mecanismo resolviendo todas las restricciones en cada paso. Al terminar vuelve a la posición inicial.</p>
+      </>)}
+      <div className="modal-btns"><span className="grow" />
+        <button className="btn primary" disabled={!j || busy} onClick={async () => { setBusy(true); const base = s.asm; await asmActions.drive(jid, from, to, steps, 30); useStore.setState({ asm: base }); setBusy(false); }}>{busy ? 'Reproduciendo…' : 'Reproducir'}</button>
+        <button className="btn" onClick={onClose}>Cerrar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function ReplaceDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const o = s.asm.occurrences.find((x) => x.id === s.selItem);
+  const parts = s.docs.filter((d) => d.kind === 'part' && d.id !== o?.part);
+  const [pid, setPid] = useState(parts[0]?.id ?? '');
+  const [all, setAll] = useState(false);
+  return (
+    <Modal title="Sustituir componente" onClose={onClose}>
+      {!o ? <p className="phelp">Selecciona antes un componente.</p> : (<>
+        <Row label="Componente"><span className="ro">{o.name}</span></Row>
+        <Row label="Sustituir por"><select value={pid} onChange={(e) => setPid(e.target.value)}>{parts.map((d) => <option key={d.id} value={d.id}>{d.fileName}</option>)}</select></Row>
+        {!parts.length && <Err text="Abre antes la pieza nueva (Archivo › Abrir) o créala" />}
+        <label className="check"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />Sustituir todas las apariciones</label>
+      </>)}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button>
+        <button className="btn primary" disabled={!o || !pid} onClick={() => { asmActions.replaceComponent(o!.id, pid, all); onClose(); }}>Aceptar</button></div>
+    </Modal>
+  );
+}
+
+function ViewRepDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [name, setName] = useState(`Vista${(s.asm.viewReps?.length ?? 0) + 1}`);
+  return (
+    <Modal title="Representaciones de vista" onClose={onClose}>
+      <p className="phelp">Guarda qué componentes están ocultos (clic derecho › Ocultar en el navegador) y recupéralo después.</p>
+      <div className="vr-list">
+        <button className="btn wide" onClick={() => s.commitAsm((a) => { for (const o of a.occurrences) o.hidden = false; })}>Principal (mostrar todo)</button>
+        {(s.asm.viewReps ?? []).map((r) => (
+          <div key={r.id} className="vr-row">
+            <button className="btn wide" onClick={() => asmActions.applyViewRep(r.id)}>{r.name} <span className="ro">· {r.hidden.length} ocultos</span></button>
+            <button className="btn icon" title="Eliminar" onClick={() => s.commitAsm((a) => { a.viewReps = (a.viewReps ?? []).filter((x) => x.id !== r.id); })}><Icon name="trash" size={14} /></button>
+          </div>
+        ))}
+      </div>
+      <Row label="Nueva"><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></Row>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={() => { asmActions.saveViewRep(name); setName(`Vista${(s.asm.viewReps?.length ?? 0) + 2}`); }}>Guardar la actual</button><button className="btn" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
+function ModelStateDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [name, setName] = useState(`Estado${(s.asm.modelStates?.length ?? 0) + 1}`);
+  const act = s.asm.activeState;
+  const nSup = [...s.asm.occurrences, ...s.asm.frames, ...s.asm.welds, ...s.asm.bolts].filter((x) => x.suppressed).length;
+  return (
+    <Modal title="Estados de modelo" onClose={onClose}>
+      <p className="phelp">Variantes del ensamblaje: componentes, barras, cordones y tornillos suprimidos (clic derecho › Suprimir) y posición de los componentes libres. Ahora hay {nSup} elementos suprimidos.</p>
+      <div className="vr-list">
+        <button className={`btn wide ${!act ? 'primary' : ''}`} onClick={() => asmActions.applyModelState(null)}>Principal (todo activo)</button>
+        {(s.asm.modelStates ?? []).map((r) => (
+          <div key={r.id} className="vr-row">
+            <button className={`btn wide ${act === r.id ? 'primary' : ''}`} onClick={() => asmActions.applyModelState(r.id)}>{r.name} <span className="ro">· {r.suppressed.length} suprimidos</span></button>
+            <button className="btn icon" title="Actualizar con lo actual" onClick={() => s.commitAsm((a) => { const t = a.modelStates!.find((x) => x.id === r.id)!; t.suppressed = [...a.occurrences, ...a.frames, ...a.welds, ...a.bolts].filter((x) => x.suppressed).map((x) => x.id); })}><Icon name="save" size={14} /></button>
+            <button className="btn icon" title="Eliminar" onClick={() => s.commitAsm((a) => { a.modelStates = (a.modelStates ?? []).filter((x) => x.id !== r.id); if (a.activeState === r.id) a.activeState = undefined; })}><Icon name="trash" size={14} /></button>
+          </div>
+        ))}
+      </div>
+      <Row label="Nuevo"><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></Row>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={() => { asmActions.saveModelState(name); setName(`Estado${(s.asm.modelStates?.length ?? 0) + 2}`); }}>Guardar el actual</button><button className="btn" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
 function BomDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const rows = bomRows(s, s.asm);
-  const total = rows.reduce((a, r) => a + r.mass * (r.kind === 'part' ? r.qty : 1), 0);
+  const [view, setView] = useState<'struct' | 'parts'>('struct');
+  const all = bomRows(s, s.asm);
+  const rows = view === 'parts' ? bomPartsOnly(all) : all;
+  const total = bomTotal(all);
   const cut = rows.filter((r) => r.kind === 'member');
+  const unitMass = (r: BomRow) => (r.kind === 'part' || r.kind === 'asm' ? r.mass : r.qty ? r.mass / r.qty : r.mass);
+  const totMass = (r: BomRow) => (r.kind === 'part' || r.kind === 'asm' ? r.mass * r.qty : r.mass);
+  const posOf = (r: BomRow, i: number) => (view === 'struct' && r.pos ? r.pos : String(i + 1));
+  const toXls = () => {
+    const head = ['Pos.', 'Nivel', 'Cant.', 'Nº de pieza / designación', 'Descripción', 'Material', 'Masa unit. (kg)', 'Masa total (kg)', 'Longitud (mm)'];
+    const data = rows.map((r, i) => [posOf(r, i), r.level ?? '', r.qty, `${'   '.repeat(r.level ?? 0)}${r.pn}`, r.desc, r.material, r.mass ? +unitMass(r).toFixed(3) : '', r.mass ? +totMass(r).toFixed(3) : '', r.length ? +r.length.toFixed(1) : '']);
+    const sheets: Sheet[] = [{ name: view === 'parts' ? 'Solo piezas' : 'Estructurada', rows: [head, ...data, ['', '', '', 'TOTAL', '', '', '', +total.toFixed(2), '']], bold: [0, data.length + 1] }];
+    if (cut.length) sheets.push({ name: 'Lista de corte', rows: [['Perfil', 'Cant.', 'Longitud (mm)', 'Corte', 'Material', 'Masa (kg)'], ...cut.map((r) => [r.pn, r.qty, r.length ?? '', r.desc.replace(/^L = [^·]*·?\s*/, ''), r.material, +r.mass.toFixed(2)])] });
+    downloadXlsx(sheets, `${s.asm.iProperties.partNumber}-LM`);
+  };
   return (
     <Modal title={`Lista de materiales — ${s.asm.iProperties.partNumber}`} onClose={onClose} xwide>
+      <Row label="Vista"><Seg value={view} onChange={setView} options={[['struct', 'Estructurada (por niveles)'], ['parts', 'Solo piezas']]} /></Row>
       <table className="ptable bom">
         <thead><tr><th>Pos.</th><th>Cant.</th><th>Nº de pieza / designación</th><th>Descripción</th><th>Material</th><th className="num">Masa (kg)</th></tr></thead>
         <tbody>{rows.map((r, i) => (
-          <tr key={i} className={`k-${r.kind}`}><td>{i + 1}</td><td>{r.qty}</td><td>{r.pn}</td><td>{r.desc}</td><td>{r.material}</td><td className="num">{r.mass ? fmt(r.kind === 'part' ? r.mass * r.qty : r.mass, 2) : ''}</td></tr>
+          <tr key={i} className={`k-${r.kind}`}><td>{posOf(r, i)}</td><td>{r.qty}</td><td style={{ paddingLeft: 6 + 16 * (view === 'struct' ? r.level ?? 0 : 0) }}>{r.kind === 'asm' ? <b>{r.pn}</b> : r.pn}</td><td>{r.desc}</td><td>{r.material}</td><td className="num">{r.mass ? fmt(totMass(r), 2) : ''}</td></tr>
         ))}</tbody>
         <tfoot><tr><td colSpan={5}>Total</td><td className="num"><b>{fmt(total, 2)}</b></td></tr></tfoot>
       </table>
       {cut.length > 0 && <p className="phelp">Barras de estructura: {cut.reduce((a, r) => a + r.qty, 0)} cortes · {fmt(cut.reduce((a, r) => a + (r.length ?? 0) * r.qty, 0) / 1000, 2)} m de perfil.</p>}
       <div className="modal-btns"><span className="grow" />
-        <button className="btn" onClick={() => saveText('﻿' + bomCsv(rows), `${s.asm.iProperties.partNumber}-LM.csv`, 'CSV', '.csv', 'text/csv')}>Exportar CSV</button>
+        <button className="btn" onClick={() => saveText('\ufeff' + bomCsv(rows), `${s.asm.iProperties.partNumber}-LM.csv`, 'CSV', '.csv', 'text/csv')}>Exportar CSV</button>
+        <button className="btn" onClick={toXls}>Exportar Excel</button>
         <button className="btn primary" onClick={onClose}>Cerrar</button>
       </div>
     </Modal>
   );
 }
+
+const SHEET_STYLES = [
+  { name: 'Galvanizado 0,6', t: '0.6 mm', r: '0.6 mm', k: '0.35' }, { name: 'Galvanizado 0,8', t: '0.8 mm', r: '0.8 mm', k: '0.35' },
+  { name: 'Galvanizado 1', t: '1 mm', r: '1 mm', k: '0.38' }, { name: 'Galvanizado 1,2', t: '1.2 mm', r: '1.2 mm', k: '0.4' },
+  { name: 'Acero 2', t: '2 mm', r: '2 mm', k: '0.44' }, { name: 'Acero 3', t: '3 mm', r: '4 mm', k: '0.44' }, { name: 'Acero 5', t: '5 mm', r: '6 mm', k: '0.45' },
+  { name: 'Inox 1,5', t: '1.5 mm', r: '1.5 mm', k: '0.42' }, { name: 'Aluminio 2', t: '2 mm', r: '3 mm', k: '0.43' },
+];
 
 function SheetStyleDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
@@ -1206,7 +2396,13 @@ function SheetStyleDialog({ onClose }: { onClose: () => void }) {
       <Row label="Radio plegado"><Expr value={st.r} live onCommit={(v) => setSt({ ...st, r: v })} /></Row>
       <Row label="Factor K"><Expr value={st.k} unit="ul" live onCommit={(v) => setSt({ ...st, k: v })} /></Row>
       <p className="phelp">Desarrollo con tolerancia de pliegue BA = θ·(R + K·t). Valores típicos de K: 0,33 (R &lt; t) a 0,50 (R &gt; 3t).</p>
-      <div className="modal-btns"><span className="grow" />
+      <div className="psec-title">Biblioteca de estilos</div>
+      <div className="chips">
+        {[...SHEET_STYLES, ...(s.libs.sheetStyles ?? [])].map((x) => <button key={x.name} className="chip" title={`t ${x.t} · R ${x.r} · K ${x.k}`} onClick={() => setSt({ t: x.t, r: x.r, k: x.k })}>{x.name}</button>)}
+      </div>
+      <div className="modal-btns">
+        <button className="btn" onClick={() => { const n = prompt('Nombre del estilo (p. ej. Galvanizado 1 mm):', `Chapa ${st.t}`); if (n) useStore.setState({ libs: { ...s.libs, sheetStyles: [...(s.libs.sheetStyles ?? []).filter((x) => x.name !== n), { name: n, ...st }] } }); }}>Guardar en la biblioteca</button>
+        <span className="grow" />
         <button className="btn primary" onClick={() => { s.commit((d) => { d.sheet = st; }); onClose(); }}>Aceptar</button><button className="btn" onClick={onClose}>Cancelar</button>
       </div>
     </Modal>
@@ -1218,7 +2414,8 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
   const [res, setRes] = useState<FlatResult | null>(null);
   const [err, setErr] = useState('');
   useEffect(() => { cad.flat(s.doc).then(setRes).catch((e) => setErr((e as Error).message)); }, [s.doc]);
-  const polys: P2[][] = res ? res.paths.flatMap((d) => flattenPath(d)) : [];
+  // toSVGPaths devuelve Y hacia abajo: se invierte para coincidir con las líneas de pliegue
+  const polys: P2[][] = res ? res.paths.flatMap((d) => flattenPath(d)).map((pl) => pl.map(([x, y]) => [x, -y] as P2)) : [];
   const bb = bboxOf(polys);
   const pad = 10, W = bb[2] - bb[0] + pad * 2, H = bb[3] - bb[1] + pad * 2;
   const tr = (p: P2) => `${(p[0] - bb[0] + pad).toFixed(2)},${(bb[3] - p[1] + pad).toFixed(2)}`;
@@ -1247,9 +2444,9 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
 
 function NewDocDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const go = (k: Parameters<typeof s.newDocument>[0]) => { onClose(); s.newDocument(k); };
-  const T = ({ icon, name, desc, k }: { icon: string; name: string; desc: string; k: Parameters<typeof s.newDocument>[0] }) => (
-    <button className="tpl" onClick={() => go(k)}><Icon name={icon} size={40} /><b>{name}</b><span>{desc}</span></button>
+  const go = (k: Parameters<typeof s.newDocument>[0], sheet?: SheetSize) => { onClose(); s.newDocument(k, sheet); };
+  const T = ({ icon, name, desc, k, sheet }: { icon: string; name: string; desc: string; k: Parameters<typeof s.newDocument>[0]; sheet?: SheetSize }) => (
+    <button className="tpl" onClick={() => go(k, sheet)}><Icon name={icon} size={34} /><b>{name}</b><span>{desc}</span></button>
   );
   return (
     <Modal title="Crear archivo nuevo" onClose={onClose} wide>
@@ -1258,7 +2455,7 @@ function NewDocDialog({ onClose }: { onClose: () => void }) {
       <div className="tpl-sec">Ensamblaje — ensamblar componentes 2D y 3D</div>
       <div className="tpl-row"><T icon="assembly" name="Normal (mm).i3a" desc="Componentes, uniones, estructura, tornillería" k="assembly" /><T icon="weldment" name="Soldadura (ISO).i3a" desc="Construcción soldada" k="weldment" /></div>
       <div className="tpl-sec">Dibujo — crear un documento anotado</div>
-      <div className="tpl-row"><T icon="drawing" name="ISO A3.i3d" desc="Plano con cajetín y proyección europea" k="drawing" /></div>
+      <div className="tpl-row tpl-row5">{(['A4', 'A3', 'A2', 'A1', 'A0'] as SheetSize[]).map((z) => <T key={z} icon="drawing" name={`ISO ${z}.i3d`} desc={`${SHEETS[z][0]} × ${SHEETS[z][1]} mm, cajetín y proyección europea`} k="drawing" sheet={z} />)}</div>
       <p className="phelp">La presentación (explosionado y animación) es un modo del ensamblaje: pestaña Presentación.</p>
     </Modal>
   );
@@ -1293,9 +2490,9 @@ function DrwViewDialog({ onClose }: { onClose: () => void }) {
 function ILogicDialog({ onClose }: { onClose: () => void }) {
   const copy = () => { navigator.clipboard?.writeText(ILOGIC_RULE).catch(() => {}); useStore.getState().notify('Regla copiada al portapapeles'); };
   return (
-    <Modal title="Exportar un proyecto de Inventor a STEP y DWG" onClose={onClose} xwide>
+    <Modal title="Exportar un proyecto .ipj a STEP y DWG" onClose={onClose} xwide>
       <ol className="howto">
-        <li>En Inventor, abre cualquier documento del proyecto y ve a <b>Administrar › iLogic › Agregar regla</b> (o crea una regla externa en el <b>Explorador de iLogic</b>).</li>
+        <li>En el programa de origen, abre cualquier documento del proyecto y ve a <b>Administrar › iLogic › Agregar regla</b> (o crea una regla externa en el <b>Explorador de iLogic</b>).</li>
         <li>Pega la regla y ejecútala. Recorre el espacio de trabajo del proyecto activo (.ipj) y crea <code>_EXPORT_INV3D</code> con un .stp por pieza y ensamblaje y un .dwg por plano.</li>
         <li>Abre los .stp en INV3D (los ensamblajes se convierten en componentes) y los .dwg con el visor.</li>
       </ol>
@@ -1312,7 +2509,7 @@ const SHORTCUTS: [string, string][] = [
   ['S', 'Iniciar boceto 2D'], ['L · C · A · R · P · T', 'Línea, círculo, arco, rectángulo, polígono, texto (en boceto)'], ['D · X', 'Cota y recortar (en boceto)'], ['F8', 'Mostrar u ocultar restricciones'],
   ['Arrastrar', 'En boceto: mueve puntos y curvas respetando las restricciones'], ['Ctrl+clic', 'Selección múltiple en boceto'], ['E · R · H · F', 'Extrusión, revolución, agujero, empalme'],
   ['Esc', 'Cancelar herramienta / terminar boceto'], ['Supr', 'Eliminar selección'], ['Ctrl+Z / Ctrl+Y', 'Deshacer / Rehacer'], ['Ctrl+S · Ctrl+O · Ctrl+N', 'Guardar, abrir, nuevo'],
-  ['F6 · Inicio', 'Vista de inicio, ajustar'], ['Ensamblaje: P · J', 'Colocar, restringir'], ['Plano: D', 'Cota'], ['Ratón', 'Izq.: órbita · Central: encuadre · Rueda: zoom · Doble clic en componente: abrir pieza'],
+  ['F6 · Inicio', 'Vista de inicio, ajustar'], ['Ensamblaje: P · J', 'Colocar, restringir'], ['Plano: D', 'Cota'], ['Ratón', 'Izq.: órbita · Central: encuadre · Rueda: zoom · Doble clic en componente: abrir pieza'], ['Ensamblaje · ratón', 'Arrastrar componente libre: moverlo · Der.: órbita'], ['Colocar', 'Clic: soltar · X/Y/Z: girar 90° · Esc: terminar'],
 ];
 
 export function Modals() {
@@ -1328,6 +2525,34 @@ export function Modals() {
     case 'place': return <PlaceDialog onClose={close} />;
     case 'content': return <ContentDialog onClose={close} />;
     case 'cpattern': return <CompPatternDialog onClose={close} />;
+    case 'drive': return <DriveDialog onClose={close} />;
+    case 'motion': return <MotionDialog onClose={close} />;
+    case 'hvac': return <HvacDialog key={`${(d as { hk: string }).hk}${(d as { shape?: string }).shape ?? ''}`} hk={(d as { hk: string }).hk} shape0={(d as { shape?: DuctShape }).shape} onClose={close} />;
+    case 'spiro': return <SpiroDialog key={(d as { sk: string }).sk} sk={(d as { sk: string }).sk} onClose={close} />;
+    case 'ductcalc': return <DuctCalcDialog onClose={close} />;
+    case 'piping': return <PipingDialog pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} onClose={close} />;
+    case 'ipart': return <IPartDialog onClose={close} />;
+    case 'ifeature': return <IFeatureDialog onClose={close} />;
+    case 'sketch3d': return <Sketch3dDialog id={(d as { id?: string }).id} onClose={close} />;
+    case 'options': return <OptionsDialog onClose={close} />;
+    case 'drwstyle': return <DrwStyleDialog onClose={close} />;
+    case 'retrieve': return <RetrieveDialog onClose={close} />;
+    case 'folder': return <FolderDialog onClose={close} />;
+    case 'replace': return <ReplaceDialog onClose={close} />;
+    case 'viewreps': return <ViewRepDialog onClose={close} />;
+    case 'mstates': return <ModelStateDialog onClose={close} />;
+    case 'ductnet': return <DuctNetDialog onClose={close} />;
+    case 'pipenet': return <PipeNetDialog onClose={close} />;
+    case 'pressure': return <PressureDialog onClose={close} />;
+    case 'vessel': return <VesselDialog onClose={close} />;
+    case 'framecalc': return <FrameCalcDialog onClose={close} />;
+    case 'jointcalc': return <JointCalcDialog onClose={close} />;
+    case 'gen': return <GenDialog onClose={close} />;
+    case 'fem': return <FemPanel onClose={close} />;
+    case 'tbtpl': return <TbTplDialog onClose={close} />;
+    case 'epoint': return <EPointPanel onClose={close} />;
+    case 'drwviewprops': return <DrwViewPropsDialog key={(d as { view: string }).view} id={(d as { view: string }).view} onClose={close} />;
+    case 'occprops': return <OccPropsDialog key={(d as { occ: string }).occ} occ={(d as { occ: string }).occ} onClose={close} />;
     case 'spacemouse': return <SpaceMouseDialog onClose={close} />;
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;
     case 'bom': return <BomDialog onClose={close} />;
@@ -1339,7 +2564,7 @@ export function Modals() {
     case 'shortcuts': return <Modal title="Atajos de teclado y ratón" onClose={close}><table className="ptable kv"><tbody>{SHORTCUTS.map(([k, v]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{v}</td></tr>)}</tbody></table></Modal>;
     default: return (
       <Modal title="Acerca de INV3D" onClose={close}>
-        <p><b>INV3D 0.3</b> · CAD paramétrico libre en el navegador, con el flujo de trabajo de Inventor.</p>
+        <p><b>INV3D 0.8</b> · CAD paramétrico libre en el navegador.</p>
         <p className="phelp">Boceto con restricciones geométricas y cotas, pieza y chapa, ensamblaje con restricciones (solver simultáneo), Centro de contenido, estructura (perfiles EN), soldadura (ISO 2553), tornillería (ISO, cálculo EN 1993-1-8), planos con secciones y detalles (ISO, proyección europea) y presentación.</p>
         <p className="phelp">Núcleo OpenCascade (LGPL) vía replicad · visor Three.js · visor DWG LibreDWG (GPL-3.0).</p>
         <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={close}>Cerrar</button></div>

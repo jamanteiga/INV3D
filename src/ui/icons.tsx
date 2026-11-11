@@ -1,5 +1,9 @@
 // Iconos propios (trazo simple) para la cinta y el navegador.
 import type { ReactNode } from 'react';
+import { useStore } from '../core/store';
+import { ICON_THEMES, iconThemeOf } from '../core/persist';
+import { KIT, KitIcon, KitDefs } from './iconkit';
+export { KitDefs };
 
 // Trazo según tamaño: 1,5 px a 32 px y 1 px a 16 px (líneas nítidas, sin medios píxeles borrosos)
 const S = ({ children, size = 32 }: { children: ReactNode; size?: number }) => (
@@ -163,11 +167,111 @@ export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
   holenote: (p) => <S {...p}><circle cx="9" cy="22" r="5" /><path d="M13 18l7-7h9" stroke={A} /><text x="18" y="9" fontSize="7" fill="currentColor" stroke="none">Ø8</text></S>,
   tolerance: (p) => <S {...p}><rect x="3" y="10" width="26" height="12" /><path d="M11 10v12M19 10v12" /><circle cx="7" cy="16" r="2.5" stroke={A} /></S>,
   sheetadd: (p) => <S {...p}><rect x="5" y="4" width="18" height="24" fill={B} /><path d="M24 20v8M20 24h8" stroke={A} strokeWidth="2" /></S>,
-  breakview: (p) => <S {...p}><rect x="3" y="10" width="26" height="12" /><path d="M13 6c-2 4 2 6 0 10s2 6 0 10M19 6c-2 4 2 6 0 10s2 6 0 10" stroke={W} /></S>,
   hatch: (p) => <S {...p}><rect x="5" y="5" width="22" height="22" /><path d="M5 13l8-8M5 21l16-16M9 27l18-18M17 27l10-10" stroke={A} /></S>,
   dof: (p) => <S {...p}><path d="M16 4v24M4 16h24M7 7l18 18" stroke={A} /><circle cx="16" cy="16" r="3" fill={W} stroke="none" /></S>,
   spacemouse: (p) => <S {...p}><path d="M5 25c0-4 4-6 11-6s11 2 11 6v1H5z" fill={B} /><ellipse cx="16" cy="14" rx="7" ry="3" fill="var(--panel)" stroke={A} /><path d="M9 14v5M23 14v5" stroke={A} /><path d="M16 4v4M13 6l3-2 3 2" stroke={W} /></S>,
+  smcontour: (p) => <S {...p}><path d="M4 26V12a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v8" fill="none" stroke={A} strokeWidth="2.6" /><path d="M24 20l4 4" /></S>,
+  hem: (p) => <S {...p}><path d="M4 22h18a4 4 0 0 0 0-8H12" fill="none" stroke={A} strokeWidth="2.6" /></S>,
+  punch: (p) => <S {...p}><rect x="4" y="12" width="24" height="12" fill={B} /><circle cx="11" cy="18" r="3" fill="var(--panel)" stroke={A} /><rect x="17" y="15" width="7" height="6" fill="var(--panel)" stroke={A} /><path d="M11 4v6M9 8l2 2 2-2" stroke={W} /></S>,
+  combine: (p) => <S {...p}><rect x="4" y="10" width="14" height="14" fill={B} /><circle cx="20" cy="13" r="8" fill={B} stroke={A} /></S>,
+  derive: (p) => <S {...p}><rect x="4" y="4" width="12" height="12" fill={B} /><rect x="14" y="14" width="14" height="14" stroke={A} strokeDasharray="3 2" /><path d="M14 10h6v4M18 12l2 2 2-2" stroke={W} /></S>,
+  pathpattern: (p) => <S {...p}><path d="M3 26C10 26 10 6 29 6" fill="none" strokeDasharray="3 2" /><rect x="3" y="22" width="5" height="5" fill={B} /><rect x="12" y="13" width="5" height="5" fill={B} stroke={A} /><rect x="23" y="4" width="5" height="5" fill={B} stroke={A} /></S>,
+  joint2: (p) => <S {...p}><rect x="4" y="18" width="14" height="8" fill={B} /><rect x="14" y="6" width="14" height="8" /><circle cx="16" cy="16" r="3" fill={W} stroke="none" /><path d="M16 4v24" strokeDasharray="2 2" stroke={A} /></S>,
+  drive: (p) => <S {...p}><circle cx="16" cy="16" r="10" /><path d="M13 11l7 5-7 5z" fill={A} stroke="none" /></S>,
+  replace: (p) => <S {...p}><rect x="4" y="4" width="11" height="11" fill={B} /><rect x="17" y="17" width="11" height="11" stroke={A} /><path d="M20 8h4v4M24 8l-6 6M12 24H8v-4M8 24l6-6" stroke={W} /></S>,
+  eye: (p) => <S {...p}><path d="M3 16s5-8 13-8 13 8 13 8-5 8-13 8S3 16 3 16z" fill={B} /><circle cx="16" cy="16" r="4" stroke={A} /></S>,
+  sheets: (p) => <S {...p}><rect x="8" y="4" width="18" height="22" fill={B} /><rect x="4" y="8" width="18" height="22" fill="var(--panel)" /></S>,
+  auxview: (p) => <S {...p}><rect x="3" y="14" width="12" height="12" fill={B} /><path d="M15 14l6-10 8 5-6 10z" stroke={A} /><path d="M15 20l8-3" strokeDasharray="2 2" /></S>,
+  breakview: (p) => <S {...p}><rect x="3" y="10" width="26" height="12" fill={B} /><path d="M13 6c-2 4 2 6 0 10s2 6 0 10M19 6c-2 4 2 6 0 10s2 6 0 10" stroke={W} strokeWidth="2" /></S>,
+  cropview: (p) => <S {...p}><rect x="4" y="4" width="24" height="24" strokeDasharray="3 2" /><rect x="9" y="9" width="14" height="14" fill={B} stroke={A} /></S>,
+  holetable: (p) => <S {...p}><rect x="3" y="5" width="26" height="22" /><path d="M3 11h26M3 17h26M3 23h26M11 5v22M20 5v22" /><circle cx="7" cy="14" r="1.6" fill={A} stroke="none" /></S>,
+  revtable: (p) => <S {...p}><rect x="3" y="8" width="26" height="16" /><path d="M3 14h26M3 19h26M9 8v16" /><text x="4.5" y="13" fontSize="5" fill="currentColor" stroke="none">A</text></S>,
+  fcf: (p) => <S {...p}><rect x="3" y="10" width="26" height="10" /><path d="M11 10v10M22 10v10" /><path d="M5 17h4.5l1-4H6z" stroke={A} /><text x="16.5" y="18" fontSize="6" textAnchor="middle" fill="currentColor" stroke="none">.1</text><text x="25.5" y="18" fontSize="6" textAnchor="middle" fill="currentColor" stroke="none">A</text></S>,
+  settings: (p) => <S {...p}><circle cx="16" cy="16" r="4.5" stroke={A} /><path d="M16 3v4M16 25v4M3 16h4M25 16h4M6.8 6.8l2.8 2.8M22.4 22.4l2.8 2.8M6.8 25.2l2.8-2.8M22.4 9.6l2.8-2.8" /><circle cx="16" cy="16" r="9" /></S>,
+  folder: (p) => <S {...p}><path d="M3 9h9l3 3h14v14H3z" /><path d="M3 14h26" stroke={A} /></S>,
+  retrieve: (p) => <S {...p}><path d="M6 24h20M6 20v8M26 20v8" /><path d="M10 6h12l-3 5h-6z" stroke={A} /><path d="M16 11v8M13 16l3 3 3-3" stroke={A} /></S>,
+  breakout: (p) => <S {...p}><rect x="4" y="6" width="24" height="20" /><path d="M10 11h12v10H10z" stroke={A} strokeDasharray="2 1.5" /><path d="M11 20l4-4M14 20l6-6M18 20l3-3" stroke={A} /></S>,
+  sketch3d: (p) => <S {...p}><path d="M6 26l8-6 4 4 8-14" stroke={A} /><path d="M4 28h22M4 28V8M4 28l8-8" strokeDasharray="2 2" /></S>,
+  surfext: (p) => <S {...p}><path d="M5 22c4-6 8-6 12 0s8 6 10 0" /><path d="M5 12c4-6 8-6 12 0s8 6 10 0" stroke={A} /><path d="M5 12v10M27 12v10" /></S>,
+  surfrev: (p) => <S {...p}><ellipse cx="16" cy="8" rx="9" ry="3" stroke={A} /><path d="M7 8c-2 8 2 14 9 16 7-2 11-8 9-16" /><path d="M16 3v26" strokeDasharray="2 2" /></S>,
+  surfloft: (p) => <S {...p}><rect x="5" y="20" width="12" height="7" /><ellipse cx="20" cy="7" rx="6" ry="3" stroke={A} /><path d="M5 20l9-13M17 20l9-13" /></S>,
+  patch: (p) => <S {...p}><path d="M5 22c3-10 8-14 13-12s8 6 9 12c-6 3-16 3-22 0z" stroke={A} /><path d="M9 18c4-1 10-1 14 0" /></S>,
+  stitch: (p) => <S {...p}><path d="M4 8h11v16H4zM17 8h11v16H17z" /><path d="M14 11l4 2M14 15l4 2M14 19l4 2" stroke={A} /></S>,
+  smloft: (p) => <S {...p}><rect x="4" y="20" width="14" height="8" /><ellipse cx="20" cy="7" rx="7" ry="3" stroke={A} /><path d="M4 20L13 7M18 20l9-13M18 28l9-13" /></S>,
+  ipart: (p) => <S {...p}><rect x="4" y="5" width="24" height="22" /><path d="M4 11h24M4 17h24M4 22h24M12 5v22" /><path d="M14 13h12" stroke={A} strokeWidth="3" /></S>,
+  ifeature: (p) => <S {...p}><path d="M5 20l8 5 14-8-8-5z" /><path d="M13 25v-6l14-8M5 20v-6l8 5" /><circle cx="22" cy="9" r="4" stroke={A} /></S>,
+  hduct: (p) => <S {...p}><path d="M4 12l6-5h18l-6 5zM4 12v13h18V12M22 25l6-5V7" /><path d="M8 18h10" stroke={A} /></S>,
+  helbow: (p) => <S {...p}><path d="M4 28V14a10 10 0 0 1 10-10h14v9H14a1 1 0 0 0-1 1v14z" /><path d="M8 26v-9a8 8 0 0 1 8-8h10" stroke={A} strokeDasharray="2 2" /></S>,
+  htrans: (p) => <S {...p}><rect x="3" y="8" width="7" height="16" /><path d="M10 8l12 4v8l-12 4" /><ellipse cx="24" cy="16" rx="2.5" ry="4" stroke={A} /></S>,
+  hbranch: (p) => <S {...p}><path d="M3 18h26M3 26h26M12 18V6h8v12" /><path d="M14 10h4" stroke={A} /></S>,
+  hcap: (p) => <S {...p}><rect x="6" y="8" width="14" height="16" /><path d="M20 6v20" stroke={A} strokeWidth="3" /></S>,
+  hplenum: (p) => <S {...p}><rect x="4" y="12" width="24" height="12" /><path d="M12 12V6h8v6" stroke={A} /><path d="M6 24h20" strokeDasharray="2 2" /></S>,
+  hgrille: (p) => <S {...p}><rect x="4" y="6" width="24" height="20" /><path d="M7 11h18M7 16h18M7 21h18" stroke={A} /></S>,
+  hdiff: (p) => <S {...p}><rect x="4" y="4" width="24" height="24" /><rect x="9" y="9" width="14" height="14" stroke={A} /><rect x="13" y="13" width="6" height="6" /></S>,
+  hflex: (p) => <S {...p}><path d="M4 10c2 0 2 12 4 12s2-12 4-12 2 12 4 12 2-12 4-12 2 12 4 12 2-12 4-12" stroke={A} /></S>,
+  hdamper: (p) => <S {...p}><rect x="4" y="6" width="24" height="20" /><path d="M9 9l6 5M17 18l6 5M9 18l6 5M17 9l6 5" stroke={A} /></S>,
+  hfire: (p) => <S {...p}><rect x="4" y="6" width="20" height="20" /><path d="M14 22c-4 0-5-3-4-6 1 2 2 2 2 0 0-3 2-5 4-6 0 3 3 4 3 7 0 3-2 5-5 5z" stroke="#d9480f" /><rect x="24" y="12" width="5" height="8" /></S>,
+  hsil: (p) => <S {...p}><rect x="3" y="7" width="26" height="18" /><path d="M8 7v18M14 7v18M20 7v18M26 7v18" stroke={A} strokeDasharray="1.5 1.5" /></S>,
+  hahu: (p) => <S {...p}><rect x="3" y="9" width="26" height="15" /><path d="M10 9v15M17 9v15" /><circle cx="23" cy="16" r="4" stroke={A} /><path d="M3 27h26" /></S>,
+  hfc: (p) => <S {...p}><rect x="4" y="10" width="24" height="10" /><path d="M8 15h6" stroke={A} /><circle cx="21" cy="15" r="3" stroke={A} /><path d="M6 22h20" /></S>,
+  hflange: (p) => <S {...p}><rect x="5" y="5" width="22" height="22" /><rect x="9" y="9" width="14" height="14" stroke={A} /></S>,
+  hsupport: (p) => <S {...p}><path d="M8 3v22M24 3v22" /><rect x="5" y="25" width="22" height="3" stroke={A} /><rect x="10" y="14" width="12" height="10" /></S>,
+  hins: (p) => <S {...p}><rect x="4" y="6" width="24" height="20" stroke={A} strokeDasharray="2 1.5" /><rect x="9" y="11" width="14" height="10" /></S>,
+  hcalc: (p) => <S {...p}><rect x="6" y="3" width="20" height="26" rx="2" /><rect x="9" y="6" width="14" height="6" stroke={A} /><path d="M10 16h2M15 16h2M20 16h2M10 21h2M15 21h2M20 21h2M10 25h2M15 25h7" /></S>,
+  pipe: (p) => <S {...p}><ellipse cx="7" cy="16" rx="3" ry="8" stroke={A} /><path d="M7 8h18M7 24h18" /><ellipse cx="25" cy="16" rx="3" ry="8" /></S>,
+  pflange: (p) => <S {...p}><ellipse cx="11" cy="16" rx="4" ry="12" /><path d="M11 4h3M11 28h3" /><ellipse cx="14" cy="16" rx="4" ry="12" stroke={A} /><path d="M17 11h11M17 21h11" /><circle cx="14" cy="8" r="1" /><circle cx="14" cy="24" r="1" /></S>,
+  pelbow: (p) => <S {...p}><path d="M4 12h6a12 12 0 0 1 12 12v4" /><path d="M4 22h6a2 2 0 0 1 2 2v4" stroke={A} /><path d="M4 12v10M12 28h10" /></S>,
+  ptee: (p) => <S {...p}><path d="M3 10h26M3 20h9v9h8v-9h9" /><path d="M3 10v10M29 10v10M12 29h8" stroke={A} /></S>,
+  pcross: (p) => <S {...p}><path d="M12 3v9H3v8h9v9h8v-9h9v-8h-9V3z" /><path d="M12 3h8" stroke={A} /></S>,
+  preducer: (p) => <S {...p}><path d="M4 7h7l10 5h7v8h-7l-10 5H4z" /><path d="M11 7v18M21 12v8" stroke={A} /></S>,
+  pcap: (p) => <S {...p}><path d="M5 9h10c8 0 12 3 12 7s-4 7-12 7H5z" /><path d="M5 9v14" stroke={A} /></S>,
+  pcoupling: (p) => <S {...p}><rect x="8" y="8" width="16" height="16" /><path d="M3 12h5M3 20h5M24 12h5M24 20h5" stroke={A} /><path d="M10 8v16M22 8v16" /></S>,
+  pstub: (p) => <S {...p}><path d="M6 5v22h4V19h18v-6H10V5z" /><path d="M10 13h18" stroke={A} /></S>,
+  dimord: (p) => <S {...p}><path d="M5 27V5M5 27h22" /><path d="M12 27v-6M19 27v-12M26 27v-18" stroke={A} /><text x="10" y="18" fontSize="5" fill="currentColor" stroke="none">0</text></S>,
+  datum: (p) => <S {...p}><rect x="10" y="4" width="12" height="12" /><text x="16" y="13.5" fontSize="9" textAnchor="middle" fill="currentColor" stroke="none">A</text><path d="M16 16v6M11 28l5-6 5 6z" fill={A} stroke={A} /></S>,
   axisfill: (p) => <S {...p}><path d="M4 28L28 4" stroke={A} strokeDasharray="4 2" /></S>,
+  gear: (p) => <S {...p}><path d="M16 4l2 3 3.5-1 .5 3.5 3.5.5-1 3.5 3 2-3 2 1 3.5-3.5.5-.5 3.5-3.5-1-2 3-2-3-3.5 1-.5-3.5L6 21.5 7 18l-3-2 3-2-1-3.5 3.5-.5.5-3.5 3.5 1z" fill={B} /><circle cx="16" cy="16" r="4" stroke={A} /></S>,
+  fem: (p) => <S {...p}><path d="M4 26L14 6l14 20z" fill={B} /><path d="M9 26l5-10 5 10M14 16l9 10" stroke={A} /><path d="M4 26h24" /></S>,
+  spring: (p) => <S {...p}><path d="M8 4h16M8 28h16M10 4l12 4-12 4 12 4-12 4 12 4-12 4" stroke={A} /></S>,
+  bearing: (p) => <S {...p}><circle cx="16" cy="16" r="12" fill={B} /><circle cx="16" cy="16" r="5" /><circle cx="16" cy="7.5" r="2.3" stroke={A} /><circle cx="24.5" cy="16" r="2.3" stroke={A} /><circle cx="16" cy="24.5" r="2.3" stroke={A} /><circle cx="7.5" cy="16" r="2.3" stroke={A} /></S>,
+  epoint: (p) => <S {...p}><circle cx="13" cy="19" r="4.5" fill={A} stroke="none" /><path d="M13 19L25 7" stroke={A} strokeWidth="2.2" /><path d="M25 7l-6 1.2M25 7l-1.2 6" stroke={A} strokeWidth="2.2" /><path d="M4 27h18" /><path d="M13 23.5V27" /></S>,
+  shaft: (p) => <S {...p}><path d="M3 13h6v-3h10v-2h6v16h-6v-2H9v-3H3z" fill={B} /><path d="M12 13h5" stroke={A} /></S>,
 };
 
-export const Icon = ({ name, size }: { name: string; size?: number }) => (Icons[name] ?? Icons.part)({ size });
+export const Icon = ({ name, size: size0 }: { name: string; size?: number }) => {
+  // iconos un 20 % mayores en toda la interfaz
+  const size = Math.round((size0 ?? 32) * 1.2);
+  const th = useStore((s) => iconThemeOf(s.settings.iconTheme));
+  if (th !== 'e1' && KIT[name]) return <KitIcon name={name} size={size} theme={th} />;
+  return (Icons[name] ?? Icons.part)({ size });
+};
+
+/** Degradados de los estilos de iconos (estilos 2, 3 y 4): se referencian desde las variables CSS */
+export const IconDefs = () => (
+  <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden focusable="false">
+    <defs>
+      <linearGradient id="icoF-inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#d4ecfc" /><stop offset="1" stopColor="#4aa6e0" /></linearGradient>
+      <linearGradient id="icoF-sw" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stopColor="#fff6c2" /><stop offset=".55" stopColor="#f7cf2a" /><stop offset="1" stopColor="#d99400" /></linearGradient>
+      <linearGradient id="icoF-cat" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stopColor="#ffffff" /><stop offset=".35" stopColor="#8fdcff" /><stop offset=".7" stopColor="#2a9be0" /><stop offset="1" stopColor="#0b5592" /></linearGradient>
+      <linearGradient id="icoF-catd" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stopColor="#7fd0f4" /><stop offset="1" stopColor="#13527f" /></linearGradient>
+      <linearGradient id="icoF-swd" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stopColor="#f7d64a" /><stop offset="1" stopColor="#a87000" /></linearGradient>
+      <linearGradient id="icoF-invd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#3b78a8" /><stop offset="1" stopColor="#1d4466" /></linearGradient>
+    </defs>
+  </svg>
+);
+
+/** Selector de estilo de iconos con vista previa (Opciones y cinta Vista) */
+export function IconThemePicker() {
+  const s = useStore();
+  const cur = iconThemeOf(s.settings.iconTheme);
+  return (
+    <div className="ico-themes">
+      {ICON_THEMES.map(([k, l]) => (
+        <button key={k} className={`ico-theme ${cur === k ? 'on' : ''}`} onClick={() => useStore.setState({ settings: { ...useStore.getState().settings, iconTheme: k } })}>
+          <span className="ico-prev row" data-p={k}>{['extrude', 'revolve', 'fillet', 'assembly'].map((n) => (k === 'e1' ? <span key={n}>{Icons[n]({ size: 28 })}</span> : <KitIcon key={n} name={n} size={28} theme={k} />))}</span>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}

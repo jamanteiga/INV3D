@@ -2,7 +2,7 @@
 // Núcleo geométrico: OpenCascade (vía replicad) ejecutándose fuera del hilo de la interfaz.
 import opencascade from 'replicad-opencascadejs';
 import {
-  setOC, importSTEP, exportSTEP, compoundShapes, drawProjection, ProjectionCamera, drawRectangle, Plane,
+  setOC, draw, importSTEP, exportSTEP, compoundShapes, drawProjection, ProjectionCamera, drawRectangle, Plane,
   measureShapeVolumeProperties, measureShapeSurfaceProperties,
 } from 'replicad';
 import type { Shape3D } from 'replicad';
@@ -14,6 +14,7 @@ import { buildAsmGeometry, xfShape, cutHolesLocal } from './asm';
 let ready: Promise<void> | null = null;
 let ocBase = '';
 let lastPart: Shape3D | null = null;
+let lastSurf: Shape3D | null = null;
 let lastAsm: { shape: Shape3D; name: string; id?: string }[] = [];
 
 async function loadWasm(): Promise<ArrayBuffer> {
@@ -77,14 +78,14 @@ function props(shape: Shape3D) {
 }
 
 // ---- Caché de piezas por contenido ----
-interface PartEntry { shape: Shape3D | null; status: Record<string, FeatStatus>; props: ReturnType<typeof props> }
+interface PartEntry { shape: Shape3D | null; status: Record<string, FeatStatus>; props: ReturnType<typeof props>; surfaces?: Shape3D | null }
 const partCache = new Map<string, PartEntry>();
 async function getPart(doc: PartDoc): Promise<{ key: string; entry: PartEntry }> {
   const key = hashStr(JSON.stringify(doc));
   let entry = partCache.get(key);
   if (!entry) {
     const b = await buildPart(doc);
-    entry = { shape: b.shape, status: b.status, props: b.shape ? props(b.shape) : null };
+    entry = { shape: b.shape, status: b.status, props: b.shape ? props(b.shape) : null, surfaces: b.surfaces };
     partCache.set(key, entry);
     if (partCache.size > 60) partCache.delete(partCache.keys().next().value!);
   }
@@ -168,7 +169,7 @@ async function sourceShape(src: { kind: 'part'; doc: PartDoc } | { kind: 'asm'; 
   }
   await regenAsm(src.asm, src.parts, []);
   if (!lastAsm.length) throw new Error('El ensamblaje está vacío');
-  return compoundShapes(lastAsm.map((x) => x.shape)) as unknown as Shape3D;
+  return compoundShapes(lastAsm.map((x) => x.shape.clone() as Shape3D)) as unknown as Shape3D;
 }
 
 const projCache = new Map<string, unknown>();
@@ -185,13 +186,15 @@ self.onmessage = async (ev: MessageEvent) => {
     if (type === 'regen') {
       const t0 = performance.now();
       const doc = ev.data.doc as PartDoc;
-      let shape: Shape3D | null, status: Record<string, FeatStatus>;
-      if (ev.data.upTo !== undefined) { const b = await buildPart(doc, ev.data.upTo); shape = b.shape; status = b.status; }
-      else { const { entry } = await getPart(doc); shape = entry.shape; status = entry.status; }
-      if (!ev.data.preview) lastPart = shape;
-      if (!shape) return post({ id, ok: true, result: { mesh: null, status, props: null, ms: performance.now() - t0 } });
-      const { mesh, transfer } = meshShape(shape);
-      return post({ id, ok: true, result: { mesh, status, props: props(shape), ms: performance.now() - t0 } }, transfer);
+      let shape: Shape3D | null, status: Record<string, FeatStatus>, surfaces: Shape3D | null;
+      if (ev.data.upTo !== undefined) { const b = await buildPart(doc, ev.data.upTo); shape = b.shape; status = b.status; surfaces = b.surfaces; }
+      else { const { entry } = await getPart(doc); shape = entry.shape; status = entry.status; surfaces = entry.surfaces ?? null; }
+      if (!ev.data.preview) { lastPart = shape; lastSurf = surfaces; }
+      let surfMesh: unknown = null; const transfer: Transferable[] = [];
+      if (surfaces) { try { const sm = meshShape(surfaces); surfMesh = sm.mesh; transfer.push(...sm.transfer); } catch { /* sin malla */ } }
+      if (!shape) return post({ id, ok: true, result: { mesh: null, surfMesh, status, props: null, ms: performance.now() - t0 } }, transfer);
+      const { mesh, transfer: tr } = meshShape(shape);
+      return post({ id, ok: true, result: { mesh, surfMesh, status, props: props(shape), ms: performance.now() - t0 } }, [...transfer, ...tr]);
     }
     if (type === 'asm') {
       const { result, transfer } = await regenAsm(ev.data.asm, ev.data.parts, ev.data.have ?? []);
@@ -202,14 +205,29 @@ self.onmessage = async (ev: MessageEvent) => {
       if (ev.data.target === 'asm') {
         if (!lastAsm.length) throw new Error('El ensamblaje está vacío');
         if (type === 'exportSTEP') return post({ id, ok: true, result: await exportSTEP(lastAsm.map((x) => ({ shape: x.shape, name: x.name }))).text() });
-        shape = compoundShapes(lastAsm.map((x) => x.shape)) as unknown as Shape3D;
+        shape = compoundShapes(lastAsm.map((x) => x.shape.clone() as Shape3D)) as unknown as Shape3D;
       } else {
-        if (!lastPart) throw new Error('No hay sólido que exportar');
-        shape = lastPart;
+        if (!lastPart && !lastSurf) throw new Error('No hay sólido que exportar');
+        shape = lastPart && lastSurf ? compoundShapes([lastPart, lastSurf]) as unknown as Shape3D : (lastPart ?? lastSurf)!;
       }
       if (type === 'exportSTEP') return post({ id, ok: true, result: await shape.blobSTEP().text() });
       const buf = await shape.blobSTL({ binary: true, tolerance: 0.02, angularTolerance: 5 } as any).arrayBuffer();
       return post({ id, ok: true, result: buf }, [buf]);
+    }
+    if (type === 'meshItems') {
+      // Mallas por elemento (coordenadas globales) para exportar a IFC
+      const items = ev.data.target === 'asm' ? lastAsm : (lastPart ? [{ shape: lastPart, name: 'Pieza', id: 'part' }] : []);
+      if (!items.length) throw new Error('No hay sólidos que exportar');
+      const out: { name: string; id?: string; vertices: Float32Array; triangles: Uint32Array }[] = [];
+      const tr: Transferable[] = [];
+      for (const it of items) {
+        try {
+          const f = it.shape.mesh({ tolerance: 0.1, angularTolerance: 0.2 });
+          const vertices = new Float32Array(f.vertices), triangles = new Uint32Array(f.triangles);
+          out.push({ name: it.name, id: it.id, vertices, triangles }); tr.push(vertices.buffer, triangles.buffer);
+        } catch { /* elemento sin malla */ }
+      }
+      return post({ id, ok: true, result: out }, tr);
     }
     if (type === 'checkSTEP') {
       const s = await importSTEP(new Blob([ev.data.text])) as Shape3D;
@@ -224,31 +242,96 @@ self.onmessage = async (ev: MessageEvent) => {
       return post({ id, ok: true, result: out });
     }
     if (type === 'project') {
-      const key = hashStr(JSON.stringify([ev.data.source, ev.data.dir, ev.data.x, ev.data.section ?? null]));
+      const key = hashStr(JSON.stringify([ev.data.source, ev.data.dir, ev.data.x, ev.data.section ?? null, ev.data.breakout ?? null]));
       if (projCache.has(key)) return post({ id, ok: true, result: projCache.get(key) });
       let shape = await sourceShape(ev.data.source);
       const dir = v3.norm(ev.data.dir as V3), x = v3.norm(ev.data.x as V3);
       const up = v3.cross(dir, x);
-      let cutSegs: number[] = [];
+      const cutSegs: number[] = [];
       let secC: V3 | null = null;
-      if (ev.data.section) {
+      const secEdges = (sh: Shape3D, face: unknown) => {
+        try { const sec = sh.intersect(face as Shape3D) as any; const em = sec.meshEdges({ tolerance: 0.01, angularTolerance: 0.05 }); cutSegs.push(...Array.from(em.lines as number[])); } catch { /* sin caras */ }
+      };
+      if (ev.data.breakout) {
+        // Corte parcial: se elimina el prisma del contorno desde la cara más cercana hasta la profundidad
+        const T = v3.norm(dir.map((v: number) => -v) as V3);
+        const b0 = shape.boundingBox.bounds as [V3, V3];
+        const L = v3.len(v3.sub(b0[1], b0[0])) * 2 + 50;
+        let front = -Infinity;
+        for (const cx of [0, 1]) for (const cy of [0, 1]) for (const cz of [0, 1]) front = Math.max(front, v3.dot([b0[cx][0], b0[cy][1], b0[cz][2]], T));
+        const loop = ev.data.breakout.loop as V3[];
+        const depthPlane = front - Math.max(0.01, Number(ev.data.breakout.depth) || 0);
+        const o0 = v3.add(loop[0], v3.mul(T, depthPlane - v3.dot(loop[0], T)));
+        const ux = v3.norm(v3.sub(loop[1], loop[0])), uy = v3.cross(T, ux);
+        const pts2 = loop.map((P) => { const d = v3.sub(P, o0); return [v3.dot(d, ux), v3.dot(d, uy)] as [number, number]; });
+        const pl = new Plane(o0, ux, T);
+        const region = (draw(pts2[0]) as any);
+        for (const q of pts2.slice(1)) region.lineTo(q);
+        const dr = region.close();
+        const prism = (dr.sketchOnPlane(pl) as any).extrude(L) as Shape3D;
+        const kept = shape.cut(prism);
+        secEdges(shape, (dr.sketchOnPlane(pl) as any).face());
+        shape = kept;
+      } else if (ev.data.section?.path?.length > 2) {
+        // Sección escalonada/alineada: línea de corte quebrada, extruida según el eje de la vista padre
+        const P3 = ev.data.section.path as V3[], T = v3.norm(ev.data.section.toward as V3), nUser = v3.norm(ev.data.section.normal as V3);
+        const b0 = shape.boundingBox.bounds as [V3, V3];
+        const L = v3.len(v3.sub(b0[1], b0[0])) * 3 + 100;
+        const c0 = v3.mul(v3.add(b0[0], b0[1]), 0.5);
+        const ux = v3.norm(v3.sub(P3[P3.length - 1], P3[0])), uy = v3.cross(T, ux);
+        const o0 = v3.add(P3[0], v3.mul(T, v3.dot(v3.sub(c0, P3[0]), T) - L / 2));
+        const to2 = (P: V3): [number, number] => { const d = v3.sub(P, o0); return [v3.dot(d, ux), v3.dot(d, uy)]; };
+        const q = P3.map(to2);
+        const nr: [number, number] = [-v3.dot(nUser, ux), -v3.dot(nUser, uy)];
+        const dir0 = [q[1][0] - q[0][0], q[1][1] - q[0][1]], dl0 = Math.hypot(dir0[0], dir0[1]);
+        const k = q.length - 1, dirK = [q[k][0] - q[k - 1][0], q[k][1] - q[k - 1][1]], dlK = Math.hypot(dirK[0], dirK[1]);
+        const first: [number, number] = [q[0][0] - (dir0[0] / dl0) * L, q[0][1] - (dir0[1] / dl0) * L];
+        const last: [number, number] = [q[k][0] + (dirK[0] / dlK) * L, q[k][1] + (dirK[1] / dlK) * L];
+        const poly: [number, number][] = [first, ...q.slice(1, k), last, [last[0] + nr[0] * L, last[1] + nr[1] * L], [first[0] + nr[0] * L, first[1] + nr[1] * L]];
+        const d0 = (draw(poly[0]) as any); for (const pnt of poly.slice(1)) d0.lineTo(pnt);
+        const prism = (d0.close().sketchOnPlane(new Plane(o0, ux, T)) as any).extrude(L) as Shape3D;
+        const kept = shape.cut(prism);
+        // caras de sección: un rectángulo por tramo (los extremos se prolongan)
+        for (let i = 0; i < k; i++) {
+          let A = P3[i], B = P3[i + 1];
+          const dseg = v3.norm(v3.sub(B, A));
+          if (i === 0) A = v3.sub(A, v3.mul(dseg, L));
+          if (i === k - 1) B = v3.add(B, v3.mul(dseg, L));
+          const len = v3.len(v3.sub(B, A)), mid = v3.mul(v3.add(A, B), 0.5);
+          const nseg = v3.norm(v3.cross(dseg, T));
+          const midC = v3.add(mid, v3.mul(T, v3.dot(v3.sub(c0, mid), T)));
+          secEdges(shape, (drawRectangle(len + 0.02, L).sketchOnPlane(new Plane(midC, dseg, nseg)) as any).face());
+        }
+        shape = kept;
+        secC = shape.boundingBox.center as V3;
+      } else if (ev.data.section) {
         const o = ev.data.section.origin as V3, n = v3.norm(ev.data.section.normal as V3);
         const b0 = shape.boundingBox.bounds as [V3, V3];
         const L = v3.len(v3.sub(b0[1], b0[0])) * 4 + 100;
         let xs = v3.cross(n, [0, 0, 1]); if (v3.len(xs) < 1e-6) xs = v3.cross(n, [1, 0, 0]); xs = v3.norm(xs);
         const box = (drawRectangle(L, L).sketchOnPlane(new Plane(o, xs, v3.mul(n, -1))) as any).extrude(L) as Shape3D;
         const kept = shape.cut(box);
-        try {
-          const face = (drawRectangle(L, L).sketchOnPlane(new Plane(o, xs, n)) as any).face();
-          const sec = shape.intersect(face) as any;
-          const em = sec.meshEdges({ tolerance: 0.01, angularTolerance: 0.05 });
-          cutSegs = Array.from(em.lines as number[]);
-        } catch { /* sin caras de sección */ }
+        secEdges(shape, (drawRectangle(L, L).sketchOnPlane(new Plane(o, xs, n)) as any).face());
         shape = kept;
         secC = shape.boundingBox.center as V3;
       }
       const bb = shape.boundingBox;
       const c = bb.center as V3;
+      // Anclajes por componente (globos automáticos): caja proyectada y su centro, en coordenadas de la vista
+      const anchors: { id: string; c: [number, number]; r: [number, number, number, number]; z: number }[] = [];
+      if (ev.data.source.kind === 'asm') for (const it of lastAsm) {
+        if (!it.id) continue;
+        try {
+          const b = it.shape.boundingBox.bounds as [V3, V3];
+          let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity, z = -Infinity;
+          for (const ix of [0, 1]) for (const iy of [0, 1]) for (const iz of [0, 1]) {
+            const d = v3.sub([b[ix][0], b[iy][1], b[iz][2]], c);
+            const u = v3.dot(d, x), w = v3.dot(d, up);
+            u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, w); v1 = Math.max(v1, w); z = Math.max(z, -v3.dot(d, dir));
+          }
+          anchors.push({ id: it.id, c: [(u0 + u1) / 2, (v0 + v1) / 2], r: [u0, v0, u1, v1], z });
+        } catch { /* sin caja */ }
+      }
       const cam = new ProjectionCamera(v3.sub(c, v3.mul(dir, 10000)), dir, x);
       const { visible, hidden } = drawProjection(shape, cam);
       const flat = (p: string[] | string[][]) => (Array.isArray(p[0]) ? (p as string[][]).flat() : (p as string[]));
@@ -256,7 +339,7 @@ self.onmessage = async (ev: MessageEvent) => {
       const cut: number[] = [];
       for (let i = 0; i + 2 < cutSegs.length; i += 3) { const d = v3.sub([cutSegs[i], cutSegs[i + 1], cutSegs[i + 2]], c); cut.push(v3.dot(d, x), v3.dot(d, up)); }
       void secC;
-      const result = { visible: flat(visible.toSVGPaths()), hidden: flat(hidden.toSVGPaths()), center: c, cut };
+      const result = { visible: flat(visible.toSVGPaths()), hidden: flat(hidden.toSVGPaths()), center: c, cut, anchors };
       projCache.set(key, result);
       if (projCache.size > 60) projCache.delete(projCache.keys().next().value!);
       return post({ id, ok: true, result });

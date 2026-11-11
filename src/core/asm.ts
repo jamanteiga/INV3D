@@ -14,23 +14,45 @@ export interface Occurrence {
   grounded?: boolean;
   suppressed?: boolean;
   hidden?: boolean;
+  /** Simetría asociativa: sigue la posición del componente original respecto al plano */
+  mirrorOf?: { occ: string; plane: 'YZ' | 'XZ' | 'XY' };
+  /** Elemento de un patrón de componentes asociativo */
+  patternOf?: string;
+  /** Generado automáticamente (id de la red de conductos o tuberías) */
+  gen?: string;
 }
+/** Patrón de componentes asociativo: los elementos se recolocan al mover el padre o cambiar los parámetros. */
+export interface CompPattern { id: string; name: string; parent: string; p: Record<string, string>; members: string[]; suppressed?: boolean }
 
 /** Referencia geométrica de un componente, en coordenadas locales de la pieza:
  *  cara plana (punto + normal) o eje de una cara cilíndrica (punto del eje + dirección + radio). */
-export interface FaceRef { occ: string; point: V3; normal: V3; kind?: 'plane' | 'axis'; radius?: number; convex?: boolean }
+export interface FaceRef { occ: string; point: V3; normal: V3; kind?: 'plane' | 'axis'; radius?: number; convex?: boolean; /** dirección de referencia X y centro de la cara (uniones) */ xdir?: V3; center?: V3 }
 
-/** Coincidir, al ras, rígida, ángulo, tangente e insertar (como las restricciones de ensamblaje de Inventor). */
-export type JointType = 'mate' | 'flush' | 'rigid' | 'angle' | 'tangent' | 'insert';
-export const JOINT_NAMES: Record<JointType, string> = { mate: 'Coincidir', flush: 'Al ras', rigid: 'Rígida', angle: 'Ángulo', tangent: 'Tangente', insert: 'Insertar' };
+/** Coincidir, al ras, rígida, ángulo, tangente e insertar. */
+export type JointType = 'mate' | 'flush' | 'rigid' | 'angle' | 'tangent' | 'insert' | 'perp' | 'sym' | 'rot' | 'slider' | 'cyl' | 'planar' | 'ball';
+export const JOINT_NAMES: Record<JointType, string> = { mate: 'Coincidir', flush: 'Al ras', rigid: 'Rígida', angle: 'Ángulo', tangent: 'Tangente', insert: 'Insertar', perp: 'Perpendicular', sym: 'Simetría',
+  rot: 'Unión de rotación', slider: 'Unión corredera', cyl: 'Unión cilíndrica', planar: 'Unión planar', ball: 'Unión de bola' };
+/** Uniones (orígenes con eje): grados de libertad que dejan libres */
+export const JOINT_DOF: Partial<Record<JointType, string>> = { rot: '1 giro', slider: '1 traslación', cyl: '1 giro + 1 traslación', planar: '2 traslaciones + 1 giro', ball: '3 giros', rigid: 'ninguno' };
 export interface Joint {
   id: string; name: string; type: JointType;
   a: FaceRef; b: FaceRef;
+  /** Simetría: plano de simetría */
+  c?: FaceRef;
   offset: string; angle: string;
   /** Insertar: ejes en el mismo sentido (alineada) en lugar de opuestos */
   aligned?: boolean;
+  /** Rotación/corredera: fija el ángulo (rotación) o la posición (corredera) en el valor indicado (para conducir) */
+  lock?: boolean;
+  /** Límites de recorrido (rotación en grados, corredera en mm) */
+  min?: string; max?: string;
   suppressed?: boolean;
+  /** Creada al conectar ePoints (ids en A y B y nombre) */
+  ep?: { a: string; b: string; name: string };
 }
+/** Restricciones de movimiento entre dos uniones: engranaje (rotación-rotación) y piñón-cremallera (rotación-traslación). */
+export interface Motion { id: string; name: string; type: 'gear' | 'rack'; j1: string; j2: string; ratio: string; reverse?: boolean; base: number; suppressed?: boolean }
+export const MOTION_NAMES = { gear: 'Rotación-rotación', rack: 'Rotación-traslación' } as const;
 
 export type EndType = 'none' | 'miter' | 'trim';
 export interface EndTreat { type: EndType; other?: string; gap?: string }
@@ -48,6 +70,20 @@ export interface FrameMember {
   ext: [string, string];  // alargamiento en cada extremo (mm)
   suppressed?: boolean;
 }
+
+/** Geometría de referencia del propio ensamblaje (planos y ejes de origen, planos de trabajo): componente virtual fijo. */
+export const ASM_REF = '__asm';
+/** Plano de trabajo (auxiliar) del ensamblaje, en coordenadas del ensamblaje */
+export interface AsmWorkPlane { id: string; name: string; origin: V3; normal: V3; xdir: V3; hidden?: boolean }
+export const ORIGIN_REFS: { key: string; label: string; ref: FaceRef }[] = [
+  { key: 'YZ', label: 'Plano YZ', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [1, 0, 0], kind: 'plane', center: [0, 0, 0], xdir: [0, 1, 0] } },
+  { key: 'XZ', label: 'Plano XZ', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 1, 0], kind: 'plane', center: [0, 0, 0], xdir: [1, 0, 0] } },
+  { key: 'XY', label: 'Plano XY', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 0, 1], kind: 'plane', center: [0, 0, 0], xdir: [1, 0, 0] } },
+  { key: 'X', label: 'Eje X', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [1, 0, 0], kind: 'axis', radius: 0, center: [0, 0, 0], xdir: [0, 1, 0] } },
+  { key: 'Y', label: 'Eje Y', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 1, 0], kind: 'axis', radius: 0, center: [0, 0, 0], xdir: [1, 0, 0] } },
+  { key: 'Z', label: 'Eje Z', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 0, 1], kind: 'axis', radius: 0, center: [0, 0, 0], xdir: [1, 0, 0] } },
+];
+export const workPlaneRef = (w: AsmWorkPlane): FaceRef => ({ occ: ASM_REF, point: w.origin, normal: w.normal, kind: 'plane', center: w.origin, xdir: w.xdir });
 
 /** Línea de esqueleto 3D del ensamblaje. */
 export interface SkelLine { id: string; a: V3; b: V3 }
@@ -85,10 +121,22 @@ export interface BoltCalc {
 }
 
 /** Patrón de componentes (copias de uno o varios componentes). */
-export interface CompPattern { id: string; name: string; source: string[]; kind: 'rect' | 'circ'; dir1: V3; n1: string; d1: string; dir2?: V3; n2?: string; d2?: string; axisO?: V3; axis?: V3; count?: string; angle?: string; copies: string[] }
+
+/** Representación de vista: componentes ocultos */
+export interface ViewRep { id: string; name: string; hidden: string[]; /** colores por componente y cámara (opcionales) */ colors?: Record<string, string> }
+/** Estado de modelo: qué componentes, barras, cordones y tornillos están suprimidos, y posiciones de los no restringidos */
+export interface ModelState { id: string; name: string; suppressed: string[]; positions?: Record<string, Xform> }
 
 export interface AsmDoc {
   format: 'inv3d.assembly';
+  viewReps?: ViewRep[];
+  modelStates?: ModelState[];
+  ductNets?: import('./ductnet').DuctNet[];
+  pipeNets?: import('./pipenet').PipeNet[];
+  frameLoads?: import('./frame3d').FrameLoads;
+  activeState?: string;
+  patterns?: CompPattern[];
+  motions?: Motion[];
   version: 1;
   iProperties: IProps;
   kind: 'assembly' | 'weldment';
@@ -98,6 +146,7 @@ export interface AsmDoc {
   frames: FrameMember[];
   welds: Weld[];
   bolts: BoltGroup[];
+  workPlanes?: AsmWorkPlane[];
   /** desplazamientos de explosionado por id (componente o barra) */
   explode: Record<string, V3>;
 }
@@ -147,6 +196,15 @@ export const q = {
     return [c[0] / n, c[1] / n, c[2] / n, w / n];
   },
   norm: (a: Quat): Quat => { const n = Math.hypot(...a) || 1; return [a[0] / n, a[1] / n, a[2] / n, a[3] / n]; },
+  /** Matriz de rotación (filas) → cuaternión */
+  fromMatrix: (m: number[][]): Quat => {
+    const tr = m[0][0] + m[1][1] + m[2][2];
+    if (tr > 0) { const S = Math.sqrt(tr + 1) * 2; return q.norm([(m[2][1] - m[1][2]) / S, (m[0][2] - m[2][0]) / S, (m[1][0] - m[0][1]) / S, 0.25 * S]); }
+    if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) { const S = Math.sqrt(1 + m[0][0] - m[1][1] - m[2][2]) * 2; return q.norm([0.25 * S, (m[0][1] + m[1][0]) / S, (m[0][2] + m[2][0]) / S, (m[2][1] - m[1][2]) / S]); }
+    if (m[1][1] > m[2][2]) { const S = Math.sqrt(1 + m[1][1] - m[0][0] - m[2][2]) * 2; return q.norm([(m[0][1] + m[1][0]) / S, 0.25 * S, (m[1][2] + m[2][1]) / S, (m[0][2] - m[2][0]) / S]); }
+    const S = Math.sqrt(1 + m[2][2] - m[0][0] - m[1][1]) * 2; return q.norm([(m[0][2] + m[2][0]) / S, (m[1][2] + m[2][1]) / S, 0.25 * S, (m[1][0] - m[0][1]) / S]);
+  },
+  toMatrix: (qq: Quat): number[][] => { const c = (v: V3) => q.rotate(qq, v); const X = c([1, 0, 0]), Y = c([0, 1, 0]), Z = c([0, 0, 1]); return [[X[0], Y[0], Z[0]], [X[1], Y[1], Z[1]], [X[2], Y[2], Z[2]]]; },
 };
 export const xfPoint = (x: Xform, p: V3): V3 => v3.add(q.rotate(x.quat, p), x.pos);
 export const xfDir = (x: Xform, d: V3): V3 => q.rotate(x.quat, d);
@@ -154,23 +212,34 @@ export const xfInvPoint = (x: Xform, p: V3): V3 => q.rotate([-x.quat[0], -x.quat
 export const xfInvDir = (x: Xform, d: V3): V3 => q.rotate([-x.quat[0], -x.quat[1], -x.quat[2], x.quat[3]], d);
 
 /**
- * Resolución secuencial de uniones (como el orden del navegador de Inventor):
+ * Resolución secuencial de uniones:
  * cada unión mueve el componente B para cumplirla respecto a A.
  */
 export function solveJoints(asm: AsmDoc, ev: (s: string) => number): { xf: Record<string, Xform>; errors: Record<string, string> } {
   const xf: Record<string, Xform> = {};
   for (const o of asm.occurrences) xf[o.id] = { pos: [...o.xf.pos], quat: [...o.xf.quat] };
+  xf[ASM_REF] = { pos: [0, 0, 0], quat: [0, 0, 0, 1] };
   const errors: Record<string, string> = {};
-  const grounded = new Set(asm.occurrences.filter((o) => o.grounded).map((o) => o.id));
+  const grounded = new Set([ASM_REF, ...asm.occurrences.filter((o) => o.grounded).map((o) => o.id)]);
   for (const j of asm.joints) {
     if (j.suppressed) continue;
     const A = xf[j.a.occ], B = xf[j.b.occ];
-    if (!A || !B) { errors[j.id] = 'Componente no encontrado'; continue; }
+    if (!A || !B || (j.c && !xf[j.c.occ])) { errors[j.id] = 'Componente no encontrado'; continue; }
     if (grounded.has(j.b.occ) && !grounded.has(j.a.occ)) { errors[j.id] = 'El componente B está fijo; invierte la selección'; continue; }
     try {
       const pa = xfPoint(A, j.a.point), na = v3.norm(xfDir(A, j.a.normal));
       const nbW = v3.norm(xfDir(B, j.b.normal));
-      if (j.type === 'angle' || j.type === 'tangent') continue; // los resuelve el método numérico
+      if (j.type === 'angle' || j.type === 'tangent' || j.type === 'perp' || j.type === 'sym') continue; // los resuelve el método numérico
+      const pac = xfPoint(A, j.a.center ?? j.a.point);
+      if (j.type === 'ball') { xf[j.b.occ] = { pos: v3.add(B.pos, v3.sub(pac, xfPoint(B, j.b.center ?? j.b.point))), quat: B.quat }; continue; }
+      if (j.type === 'rot' || j.type === 'slider' || j.type === 'cyl' || j.type === 'planar') {
+        const rot0 = q.between(nbW, v3.mul(na, -1));
+        const nq = q.norm(q.mul(rot0, B.quat)), nb0: Xform = { pos: B.pos, quat: nq };
+        const pb0 = xfPoint(nb0, j.b.center ?? j.b.point), w = v3.sub(pb0, pac);
+        const sh = j.type === 'rot' ? v3.mul(w, -1) : j.type === 'planar' ? v3.mul(na, -v3.dot(w, na)) : v3.mul(v3.sub(w, v3.mul(na, v3.dot(w, na))), -1);
+        xf[j.b.occ] = { pos: v3.add(B.pos, sh), quat: nq };
+        continue;
+      }
       const axes = j.a.kind === 'axis' && j.b.kind === 'axis';
       if ((j.a.kind === 'axis') !== (j.b.kind === 'axis')) continue;
       // Coincidente: normales opuestas. Al ras: normales iguales. Ejes: se alinean en el sentido más próximo.
@@ -249,9 +318,11 @@ export function weldFromFaces(nA: V3, vertsA: V3[], nB: V3, vertsB: V3[]): { p0:
 const sub3 = v3.sub, dot3 = v3.dot, cross3 = v3.cross;
 
 /** Residuos de una restricción con las poses dadas de A y B. */
-export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => number): number[] {
-  const pa = xfPoint(A, j.a.point), na = v3.norm(xfDir(A, j.a.normal));
-  const pb = xfPoint(B, j.b.point), nb = v3.norm(xfDir(B, j.b.normal));
+const UNION = new Set<JointType>(['rot', 'slider', 'cyl', 'planar', 'ball']);
+export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => number, C?: Xform): number[] {
+  const u = UNION.has(j.type);
+  const pa = xfPoint(A, u ? j.a.center ?? j.a.point : j.a.point), na = v3.norm(xfDir(A, j.a.normal));
+  const pb = xfPoint(B, u ? j.b.center ?? j.b.point : j.b.point), nb = v3.norm(xfDir(B, j.b.normal));
   const off = ev(j.offset || '0') || 0;
   const ka = j.a.kind ?? 'plane', kb = j.b.kind ?? 'plane';
   const perp = (w: V3, d: V3) => sub3(w, v3.mul(d, dot3(w, d)));
@@ -264,15 +335,69 @@ export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => 
       return [dot3(N, D), dot3(sub3(Q, P), N) - off];
     }
     case 'flush': return [...sub3(na, nb), dot3(sub3(pb, pa), na) - off];
+    case 'perp': return [dot3(na, nb)];
+    case 'sym': {
+      if (!j.c || !C) return [];
+      // reflejo de la geometría A en el plano C: B debe coincidir con ese reflejo
+      const pc = xfPoint(C, j.c.point), nc = v3.norm(xfDir(C, j.c.normal));
+      const ra = sub3(pa, v3.mul(nc, 2 * dot3(sub3(pa, pc), nc))), rn = sub3(na, v3.mul(nc, 2 * dot3(na, nc)));
+      if (ka === 'axis' && kb === 'axis') return [...cross3(rn, nb), ...perp(sub3(pb, ra), rn)];
+      return [...sub3(rn, nb), dot3(sub3(pb, ra), nb)];
+    }
     case 'insert': return [...(j.aligned ? sub3(na, nb) : v3.add(na, nb)), ...perp(sub3(pb, pa), na), dot3(sub3(pb, pa), na) - off];
     case 'rigid': return [...v3.add(na, nb), ...sub3(pb, v3.add(pa, v3.mul(na, off)))];
     case 'angle': return [dot3(na, nb) - Math.cos(((ev(j.angle || '0') || 0) * Math.PI) / 180)];
+    case 'ball': return [...sub3(pb, pa)];
+    case 'planar': return [...v3.add(na, nb), dot3(sub3(pb, pa), na) - off];
+    case 'cyl': return [...cross3(na, nb), ...perp(sub3(pb, pa), na)];
+    case 'rot': case 'slider': {
+      const out = [...v3.add(na, nb), ...(j.type === 'rot' ? sub3(pb, pa) : perp(sub3(pb, pa), na))];
+      const xa = j.a.xdir ? v3.norm(xfDir(A, j.a.xdir)) : null, xb = j.b.xdir ? v3.norm(xfDir(B, j.b.xdir)) : null;
+      if (j.type === 'slider' && xa && xb) out.push(dot3(cross3(xa, xb), na));
+      if (j.lock) {
+        if (j.type === 'rot' && xa && xb) { const th = ((ev(j.angle || '0') || 0) * Math.PI) / 180; out.push(dot3(xa, xb) - Math.cos(th), dot3(cross3(xa, xb), na) - Math.sin(th)); }
+        if (j.type === 'slider') out.push(dot3(sub3(pb, pa), na) - off);
+      }
+      return out;
+    }
     case 'tangent': {
       if (ka === 'axis' && kb === 'axis') { const r = (j.a.radius ?? 0) + (j.b.radius ?? 0) + off; return [...cross3(na, nb), v3.len(perp(sub3(pb, pa), na)) - r]; }
       const [P, N, Q, D, r] = ka === 'plane' ? [pa, na, pb, nb, j.b.radius ?? 0] : [pb, nb, pa, na, j.a.radius ?? 0];
       return [dot3(N, D), dot3(sub3(Q, P), N) - (r + off)];
     }
   }
+}
+
+/** Valor actual de una unión: ángulo (°) para rotación/cilíndrica, posición (mm) para corredera. */
+export function jointValue(j: Joint, A: Xform, B: Xform): number {
+  const na = v3.norm(xfDir(A, j.a.normal));
+  if (j.type === 'slider') {
+    const u = UNION.has(j.type);
+    return dot3(sub3(xfPoint(B, u ? j.b.center ?? j.b.point : j.b.point), xfPoint(A, u ? j.a.center ?? j.a.point : j.a.point)), na);
+  }
+  if (!j.a.xdir || !j.b.xdir) return 0;
+  const xa = v3.norm(xfDir(A, j.a.xdir)), xb = v3.norm(xfDir(B, j.b.xdir));
+  return (Math.atan2(dot3(cross3(xa, xb), na), dot3(xa, xb)) * 180) / Math.PI;
+}
+const wrap180 = (a: number) => { let x = ((a + 180) % 360 + 360) % 360 - 180; if (x === -180) x = 180; return x; };
+/** Residuos de una restricción de movimiento (el valor de la unión 1 bloqueada se toma sin envolver). */
+export function motionResidual(m: Motion, j1: Joint, j2: Joint, P: (id: string) => Xform, ev: (s: string) => number): number {
+  const v1 = j1.lock && (j1.type === 'rot' || j1.type === 'slider') ? (j1.type === 'rot' ? ev(j1.angle || '0') : ev(j1.offset || '0')) : jointValue(j1, P(j1.a.occ), P(j1.b.occ));
+  const v2 = jointValue(j2, P(j2.a.occ), P(j2.b.occ));
+  const k = (ev(m.ratio || '1') || 1) * (m.reverse ? -1 : 1);
+  if (m.type === 'gear') return (wrap180(v2 - (k * v1 + m.base)) * Math.PI) / 180;
+  return v2 - ((k * v1) / 360 + m.base); // k = avance en mm por vuelta
+}
+/** Valor base al crear la restricción de movimiento, para que el mecanismo no salte. */
+export function motionBase(type: Motion['type'], ratio: number, j1: Joint, j2: Joint, P: (id: string) => Xform): number {
+  const v1 = jointValue(j1, P(j1.a.occ), P(j1.b.occ)), v2 = jointValue(j2, P(j2.a.occ), P(j2.b.occ));
+  return type === 'gear' ? v2 - ratio * v1 : v2 - (ratio * v1) / 360;
+}
+function limitResidual(j: Joint, A: Xform, B: Xform, ev: (s: string) => number): number[] {
+  if ((j.type !== 'rot' && j.type !== 'slider') || j.lock || (!j.min && !j.max)) return [];
+  const v = jointValue(j, A, B), lo = j.min ? ev(j.min) : -Infinity, hi = j.max ? ev(j.max) : Infinity;
+  const r = v > hi ? v - hi : v < lo ? v - lo : 0;
+  return [j.type === 'rot' ? (r * Math.PI) / 180 : r];
 }
 
 const poseWith = (x0: Xform, v: number[], o: number): Xform => {
@@ -289,13 +414,17 @@ export function solveAssembly(asm: AsmDoc, ev: (s: string) => number, opts: { do
   const seq = solveJoints(asm, ev);
   const xf0 = seq.xf;
   const errors: Record<string, string> = {};
-  const active = asm.joints.filter((j) => !j.suppressed && xf0[j.a.occ] && xf0[j.b.occ]);
-  const grounded = new Set(asm.occurrences.filter((o) => o.grounded).map((o) => o.id));
-  const movers = [...new Set(active.flatMap((j) => [j.a.occ, j.b.occ]))].filter((id) => !grounded.has(id));
+  const active = asm.joints.filter((j) => !j.suppressed && xf0[j.a.occ] && xf0[j.b.occ] && (!j.c || xf0[j.c.occ]) && (j.type !== 'sym' || j.c));
+  const grounded = new Set([ASM_REF, ...asm.occurrences.filter((o) => o.grounded).map((o) => o.id)]);
+  const movers = [...new Set(active.flatMap((j) => [j.a.occ, j.b.occ, ...(j.c ? [j.c.occ] : [])]))].filter((id) => !grounded.has(id));
   const idx = new Map(movers.map((id, i) => [id, i * 6]));
   const n = movers.length * 6;
   const pose = (v: number[], id: string) => (idx.has(id) ? poseWith(xf0[id], v, idx.get(id)!) : xf0[id]);
-  const R = (v: number[]) => active.flatMap((j) => { try { return jointResiduals(j, pose(v, j.a.occ), pose(v, j.b.occ), ev).map((x) => (isFinite(x) ? x : 0)); } catch { return []; } });
+  const motions = (asm.motions ?? []).filter((m) => !m.suppressed).map((m) => ({ m, j1: active.find((j) => j.id === m.j1), j2: active.find((j) => j.id === m.j2) })).filter((x) => x.j1 && x.j2) as { m: Motion; j1: Joint; j2: Joint }[];
+  const R = (v: number[]) => [
+    ...active.flatMap((j) => { try { return [...jointResiduals(j, pose(v, j.a.occ), pose(v, j.b.occ), ev, j.c ? pose(v, j.c.occ) : undefined), ...limitResidual(j, pose(v, j.a.occ), pose(v, j.b.occ), ev)].map((x) => (isFinite(x) ? x : 0)); } catch { return []; } }),
+    ...motions.map(({ m, j1, j2 }) => { try { const r = motionResidual(m, j1, j2, (id) => pose(v, id), ev); return isFinite(r) ? r : 0; } catch { return 0; } }),
+  ];
   let x = new Array(n).fill(0);
   const w = new Array(n).fill(0).map((_, i) => (i % 6 < 3 ? 1 : 1e-4));
   const norm2 = (r: number[]) => r.reduce((a, b) => a + b * b, 0);
@@ -324,7 +453,7 @@ export function solveAssembly(asm: AsmDoc, ev: (s: string) => number, opts: { do
   const xf: Record<string, Xform> = { ...xf0 };
   for (const id of movers) xf[id] = pose(x, id);
   for (const j of active) {
-    try { const rr = jointResiduals(j, xf[j.a.occ], xf[j.b.occ], ev); if (Math.sqrt(norm2(rr)) > 1e-3) errors[j.id] = 'Restricción no satisfecha (conflicto con otras o con componentes fijos)'; } catch (e) { errors[j.id] = (e as Error).message; }
+    try { const rr = jointResiduals(j, xf[j.a.occ], xf[j.b.occ], ev, j.c ? xf[j.c.occ] : undefined); if (Math.sqrt(norm2(rr)) > 1e-3) errors[j.id] = 'Restricción no satisfecha (conflicto con otras o con componentes fijos)'; } catch (e) { errors[j.id] = (e as Error).message; }
   }
   for (const [k, v] of Object.entries(seq.errors)) if (!/invierte/.test(v)) errors[k] ??= v;
   // Grados de libertad por componente
@@ -387,4 +516,58 @@ function rankOf(vecs: number[][]): number {
     rank++;
   }
   return rank;
+}
+
+// ---------- Patrones y simetrías asociativos ----------
+const AXV: Record<string, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
+/** Posiciones de las copias de un patrón (sin el original). */
+export function patternPoses(xf: Xform, p: Record<string, string>, ev: (s: string) => number): Xform[] {
+  const out: Xform[] = [];
+  if (p.kind === 'rect') {
+    const n1 = Math.max(1, Math.round(ev(p.n))), d1 = ev(p.d), n2 = p.dir2 ? Math.max(1, Math.round(ev(p.n2))) : 1, d2 = p.dir2 ? ev(p.d2) : 0;
+    for (let i = 0; i < n1; i++) for (let j = 0; j < n2; j++) {
+      if (!i && !j) continue;
+      const t = v3.add(v3.mul(AXV[p.dir] ?? AXV.X, i * d1), p.dir2 ? v3.mul(AXV[p.dir2], j * d2) : [0, 0, 0]);
+      out.push({ pos: v3.add(xf.pos, t), quat: [...xf.quat] as Quat });
+    }
+  } else {
+    const n = Math.max(2, Math.round(ev(p.count))), tot = ev(p.angle), step = Math.abs(tot - 360) < 1e-9 ? 360 / n : tot / (n - 1);
+    for (let k = 1; k < n; k++) {
+      const rq = q.axisAngle(AXV[p.dir] ?? AXV.Z, (step * k * Math.PI) / 180);
+      out.push({ pos: q.rotate(rq, xf.pos), quat: q.norm(q.mul(rq, xf.quat)) });
+    }
+  }
+  return out.slice(0, 400);
+}
+export function mirrorPose(xf: Xform, plane: 'YZ' | 'XZ' | 'XY'): Xform {
+  const M = plane === 'YZ' ? [-1, 1, 1] : plane === 'XZ' ? [1, -1, 1] : [1, 1, -1];
+  const R = q.toMatrix(xf.quat);
+  const R2 = R.map((row, i) => row.map((v, j) => M[i] * v * M[j]));
+  return { pos: xf.pos.map((v, i) => v * M[i]) as V3, quat: q.fromMatrix(R2) };
+}
+/** Recoloca simetrías y patrones a partir de sus originales; añade o quita elementos si cambia el número. */
+export function applyAssociative(a: AsmDoc, ev: (s: string) => number, uidFn: (p: string) => string) {
+  const byId = () => new Map(a.occurrences.map((o) => [o.id, o]));
+  for (const pt of a.patterns ?? []) {
+    let m = byId();
+    const par = m.get(pt.parent);
+    if (!par) { a.occurrences = a.occurrences.filter((o) => o.patternOf !== pt.id); pt.members = []; continue; }
+    const poses = pt.suppressed ? [] : patternPoses(par.xf, pt.p, ev);
+    pt.members = pt.members.filter((id) => m.has(id));
+    while (pt.members.length > poses.length) {
+      const id = pt.members.pop()!;
+      a.occurrences = a.occurrences.filter((o) => o.id !== id);
+      a.joints = a.joints.filter((j) => j.a.occ !== id && j.b.occ !== id);
+    }
+    const base = par.name.replace(/:\d+$/, '');
+    while (pt.members.length < poses.length) {
+      const id = uidFn('o');
+      a.occurrences.push({ id, name: `${base}:${a.occurrences.filter((x) => x.part === par.part).length + 1}`, part: par.part, xf: poses[pt.members.length], grounded: true, patternOf: pt.id });
+      pt.members.push(id);
+    }
+    m = byId();
+    pt.members.forEach((id, i) => { const o = m.get(id); if (o) { o.xf = poses[i]; o.part = par.part; o.suppressed = par.suppressed; } });
+  }
+  const m = byId();
+  for (const o of a.occurrences) if (o.mirrorOf) { const src = m.get(o.mirrorOf.occ); if (src) o.xf = mirrorPose(src.xf, o.mirrorOf.plane); }
 }

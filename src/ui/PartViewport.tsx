@@ -1,10 +1,14 @@
+import { femColor } from './FemPanel';
+import { partEPoints } from '../core/epoints';
+import HeadsUp from './HeadsUp';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useStore, activeSketch, type State } from '../core/store';
+import { asmActions } from './actions';
 import { makeEval, fmt } from '../core/expr';
 import {
   docParams, planeFrame, toWorld, entityOutline, consumedSketches, uid, v3, MATERIALS, PLANE_STD, resolveWorkPlanes,
-  type Frame, type V3, type V2, type SkEntity, type SketchF, type StdPlane, type EdgeSel, type WorkPlanes, type GRef, type SkConstraint, type DimKind,
+  type Frame, type V3, type V2, type SkEntity, type SketchF, type StdPlane, type EdgeSel, type WorkPlanes, type GRef, type SkConstraint, type DimKind, type Sketch3dF, type E3,
 } from '../core/doc';
 import {
   sketchPoints, pointOf, segKeys, segOf, entG, refPoint, refLine, refCurve, refKind, makeConstraint, makeDim, dimValue,
@@ -41,6 +45,30 @@ function faceGroupContaining(m: MeshData, p: V3): number {
   return -1;
 }
 
+/** Polilíneas para mostrar un boceto 3D (la geometría exacta la calcula el núcleo). */
+function sketch3dPolyline(f: Sketch3dF, ev: (x: string) => number): V3[][] {
+  const P = (e: E3): V3 => [ev(e[0]), ev(e[1]), ev(e[2])];
+  return f.entities.map((e) => {
+    if (e.type === 'line3') return [P(e.a), P(e.b)];
+    if (e.type === 'spline3') {
+      const q = e.pts.map(P), out: V3[] = [];
+      for (let i = 0; i + 1 < q.length; i++) {
+        const p0 = q[Math.max(0, i - 1)], p1 = q[i], p2 = q[i + 1], p3 = q[Math.min(q.length - 1, i + 2)];
+        for (let k = 0; k < 12; k++) { const t = k / 12, t2 = t * t, t3 = t2 * t; out.push([0, 1, 2].map((c) => 0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t2 + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t3)) as V3); }
+      }
+      out.push(q[q.length - 1]);
+      return out;
+    }
+    const o = P(e.origin), r = ev(e.radius), pitch = ev(e.pitch), h = ev(e.height), n = Math.max(8, Math.ceil((h / pitch) * 48)), out: V3[] = [];
+    for (let i = 0; i <= n; i++) {
+      const t = (i / n) * (h / pitch) * Math.PI * 2 * (e.left ? -1 : 1), z = (i / n) * h;
+      const a = r * Math.cos(t), b = r * Math.sin(t);
+      out.push(e.axis === 'Z' ? [o[0] + a, o[1] + b, o[2] + z] : e.axis === 'X' ? [o[0] + z, o[1] + a, o[2] + b] : [o[0] + b, o[1] + z, o[2] + a]);
+    }
+    return out;
+  });
+}
+
 export default function PartViewport() {
   const host = useRef<HTMLDivElement>(null);
   const cubeHost = useRef<HTMLDivElement>(null);
@@ -55,6 +83,26 @@ export default function PartViewport() {
     (window as unknown as { __v3d: View3D }).__v3d = V; // ayuda de depuración / pruebas
     const { scene, camera } = V;
     const partGroup = new THREE.Group(); scene.add(partGroup);
+    // Edición en contexto: resto del ensamblaje en transparente (coordenadas de la pieza)
+    const ctxGroup = new THREE.Group(); scene.add(ctxGroup);
+    let ctxMesh: MeshData | null = null, ctxObj: THREE.Mesh | null = null;
+    const buildCtx = (s: State) => {
+      V.clearGroup(ctxGroup); ctxMesh = null; ctxObj = null;
+      const c = s.ctxEdit;
+      if (!c || c.part !== s.active || !c.mesh) { V.request(); return; }
+      const { grp, mesh } = V.meshFromData(c.mesh, '#8f99a6', { opacity: 0.28, edges: true });
+      grp.traverse((x: any) => { if (x.material) x.material.depthWrite = false; x.renderOrder = 1; });
+      ctxGroup.add(grp); ctxGroup.updateMatrixWorld(true);
+      ctxMesh = c.mesh; ctxObj = mesh;
+      V.request();
+    };
+    const ctxFace = (ev: MouseEvent) => {
+      if (!ctxObj || !ctxMesh) return null;
+      const hit = V.ray(ev).intersectObject(ctxObj)[0];
+      if (!hit || hit.faceIndex == null) return null;
+      const pf = planarFaceAt(ctxMesh, hit.faceIndex);
+      return pf ? { ...pf, point: hit.point.clone(), distance: hit.distance } : null;
+    };
     const sketchGroup = new THREE.Group(); scene.add(sketchGroup);
     const dimGroup = new THREE.Group(); scene.add(dimGroup);
     const originGroup = new THREE.Group(); scene.add(originGroup);
@@ -82,7 +130,9 @@ export default function PartViewport() {
 
     V.onFrame = () => {
       const s = useStore.getState();
-      V.triad.visible = s.mode !== 'sketch';
+      V.triad.visible = s.mode !== 'sketch' && s.hud.triad;
+      originGroup.visible = s.hud.origin || s.tool === 'pickPlane' || s.tool === 'pickWorkBase' || s.mode === 'sketch';
+      sketchGroup.visible = s.mode === 'sketch' || s.hud.sketches || !!(s.dialog && 'draft' in s.dialog);
       if (snapMarker.visible) { snapMarker.quaternion.copy(camera.quaternion); snapMarker.scale.setScalar(V.worldPerPx() * 6); }
     };
     let labelRaf = 0;
@@ -110,7 +160,13 @@ export default function PartViewport() {
       const res = (s.dialog && 'draft' in s.dialog && s.preview) ? s.preview : s.result;
       const m = res?.mesh ?? null;
       state.mesh = m;
-      V.hasModel = !!m?.triangles.length;
+      const sm = res?.surfMesh;
+      if (sm?.triangles.length) {
+        const { grp, mesh } = V.meshFromData(sm, '#e9a23b', { opacity: 0.55, edges: true });
+        partGroup.add(grp);
+        if (!m?.triangles.length) { mesh.geometry.computeBoundingBox(); V.bbox.copy(mesh.geometry.boundingBox!); }
+      }
+      V.hasModel = !!m?.triangles.length || !!sm?.triangles.length;
       if (!m || !m.triangles.length) { buildOverlay(s); return; }
       const color = MATERIALS.find((x) => x.name === s.doc.iProperties.material)?.color ?? '#c3c8cf';
       const isPreview = res === s.preview && !!s.preview;
@@ -119,6 +175,35 @@ export default function PartViewport() {
       mesh.geometry.computeBoundingBox();
       V.bbox.copy(mesh.geometry.boundingBox!);
       state.partMesh = mesh;
+      const fr = s.fem?.part === s.active ? s.fem.res : undefined;
+      if (fr && fr.mesh === m && s.mode !== 'sketch') {
+        // resultados: se oculta el sólido y se dibuja la malla subdividida coloreada (las aristas siguen visibles)
+        const vals = s.fem!.show === 'vm' ? fr.vm : fr.disp, mx = (s.fem!.show === 'vm' ? fr.vmMax : fr.dispMax) || 1;
+        const col = new Float32Array(vals.length * 3);
+        for (let i = 0; i < vals.length; i++) { const c = femColor(vals[i] / mx); col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2]; }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(fr.disp3.vertices, 3));
+        g.setAttribute('normal', new THREE.BufferAttribute(fr.disp3.normals, 3));
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        g.setIndex(new THREE.BufferAttribute(fr.disp3.triangles, 1));
+        const cm = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0, roughness: 0.85, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+        cm.raycast = () => {};
+        { const om = mesh.material as THREE.Material; om.colorWrite = false; om.depthWrite = false; mesh.userData.noColor = true; }
+        grp.add(cm);
+      }
+      // ePoints: esfera y flecha (naranja = inserción por defecto, azul = inserción, verde = coincidencia)
+      if (s.mode !== 'sketch') {
+        const sz = Math.max(2, V.bbox.getSize(new THREE.Vector3()).length() * 0.025);
+        for (const e of partEPoints(s.doc)) {
+          if (e.kind === 'composite') continue;
+          const col = e.isDefault ? 0xf08c00 : e.kind === 'insert' ? 0x1673d0 : 0x2f9a4c;
+          const sph = new THREE.Mesh(new THREE.SphereGeometry(sz * 0.45, 16, 12), new THREE.MeshBasicMaterial({ color: col, depthTest: false }));
+          sph.position.set(...e.point); sph.renderOrder = 6; sph.raycast = () => {}; sph.userData.keep = true;
+          const ar = new THREE.ArrowHelper(new THREE.Vector3(...e.dir).normalize(), new THREE.Vector3(...e.point), sz * 2.6, col, sz * 0.9, sz * 0.5);
+          ar.traverse((o: any) => { if (o.material) { o.material.depthTest = false; o.renderOrder = 6; } o.raycast = () => {}; o.userData.keep = true; });
+          partGroup.add(sph, ar);
+        }
+      }
       V.applyVisual(s.mode === 'sketch' ? '' : s.clip, s.wire && s.mode !== 'sketch', [grp]);
       // Roscas cosméticas: anillos a paso constante sobre la cara cilíndrica
       for (const f of s.doc.features) {
@@ -194,10 +279,17 @@ export default function PartViewport() {
         if (selPts.length) overlayGroup.add(V.segs(selPts, V.lineMat(css('--accent'), 4, false, false)));
       }
       if (m && d && d.type === 'sm_flange' && d.edge) overlayGroup.add(V.segs([...d.edge.p0, ...d.edge.p1], V.lineMat(css('--accent'), 4, false, false)));
-      if (m && d && (d.type === 'shell' || d.type === 'draft' || d.type === 'split' || d.type === 'thicken')) {
+      if (m && d && (d.type === 'shell' || d.type === 'draft' || d.type === 'split' || d.type === 'thicken' || d.type === 'thread' || d.type === 'combine' || d.type === 'movebody')) {
         for (const p of (d.faces ?? []) as V3[]) { const gi = faceGroupContaining(m, p); if (gi >= 0) overlayGroup.add(faceOverlay(m, gi, css('--accent'), 0.45)); }
         if (hoverFace >= 0 && hoverFace < m.faceGroups.length) overlayGroup.add(faceOverlay(m, hoverFace, css('--hover'), 0.35));
       }
+      if (state.mesh && s.fem && s.fem.part === s.active && (s.dialog as { kind?: string } | null)?.kind === 'fem' && (!s.fem.res || s.tool === 'femFace')) {
+        const fm = state.mesh;
+        for (const g of s.fem.fixed) if (g < fm.faceGroups.length) overlayGroup.add(faceOverlay(fm, g, '#2f6fe0', 0.5));
+        for (const l of s.fem.loads) for (const g of l.faces) if (g < fm.faceGroups.length) overlayGroup.add(faceOverlay(fm, g, '#e0452f', 0.5));
+        if (s.tool === 'femFace' && hoverFace >= 0 && hoverFace < fm.faceGroups.length) overlayGroup.add(faceOverlay(fm, hoverFace, css('--hover'), 0.35));
+      }
+      if (s.tool === 'epPick' && state.mesh && hoverFace >= 0 && hoverFace < state.mesh.faceGroups.length) overlayGroup.add(faceOverlay(state.mesh, hoverFace, css('--hover'), 0.4));
       if (m && state.hoverEdge >= 0 && state.hoverEdge < m.edgeGroups.length && (s.tool === 'pickEdges' || s.tool === 'pickFlangeEdge' || s.tool === 'projectGeom' || s.tool === 'measure')) {
         overlayGroup.add(V.segs(groupPts(state.hoverEdge, m), V.lineMat(css('--hover'), 4, false, false)));
       }
@@ -327,6 +419,14 @@ export default function PartViewport() {
               const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(o, 3));
               originGroup.add(new THREE.Points(g, new THREE.PointsMaterial({ color: css('--plane'), size: 9 * dpr(), sizeAttenuation: false })));
             }
+          } catch { /* expresión inválida */ }
+        }
+        if (f.type === 'sketch3d' && !f.suppressed && s.mode !== 'sketch') {
+          try {
+            const pts = sketch3dPolyline(f, safeEval(s));
+            const flat: number[] = [];
+            for (const pl of pts) for (let i = 0; i + 1 < pl.length; i++) flat.push(...pl[i], ...pl[i + 1]);
+            originGroup.add(V.segs(flat, V.lineMat('#d9480f', 2, true, false)));
           } catch { /* expresión inválida */ }
         }
       }
@@ -814,8 +914,8 @@ export default function PartViewport() {
     };
 
     /** Proyecta una arista del modelo sobre el plano del boceto como geometría de referencia. */
-    const projectEdge = (gi: number) => {
-      const s = useStore.getState(), fr = state.frame, m = state.mesh; if (!fr || !m) return;
+    const projectEdge = (gi: number, mm?: MeshData) => {
+      const s = useStore.getState(), fr = state.frame, m = mm ?? state.mesh; if (!fr || !m) return;
       const a = groupPts(gi, m), pts: V2[] = [];
       for (let i = 0; i < a.length; i += 3) { const d = v3.sub([a[i], a[i + 1], a[i + 2]], fr.origin); pts.push([v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]); }
       const uniq = pts.filter((p, i) => i === 0 || dist2(p, pts[i - 1]) > 1e-7);
@@ -948,9 +1048,17 @@ export default function PartViewport() {
       if (btn !== 0) return;
       const d = s.dialog && 'draft' in s.dialog ? s.dialog.draft : null;
       if (s.tool === 'pickPlane' || s.tool === 'pickWorkBase') {
-        const ph = hitPlane(ev), fh = faceHit(ev);
+        const ph = hitPlane(ev), fh = faceHit(ev), ch = ctxFace(ev);
         let plane: Parameters<typeof s.startSketch>[0] | null = null;
-        if (fh && (!ph || fh.distance <= ph.dist)) {
+        if (ch && (!fh || ch.distance < fh.distance) && (!ph || ch.distance <= ph.dist)) {
+          if (!ch.planar) { s.notify('Selecciona una cara plana o un plano', 'error'); return; }
+          // cara de otro componente del ensamblaje: plano fijo (sin actualización automática)
+          const n = ch.normal.clone().normalize(), o = n.clone().multiplyScalar(ch.point.dot(n));
+          let x = new THREE.Vector3(1, 0, 0).projectOnPlane(n);
+          if (x.length() < 0.3) x = new THREE.Vector3(0, 1, 0).projectOnPlane(n);
+          x.normalize();
+          plane = { kind: 'custom', label: 'Cara del ensamblaje', origin: vArr(o), xDir: vArr(x), normal: vArr(n) };
+        } else if (fh && (!ph || fh.distance <= ph.dist)) {
           if (!fh.planar) { s.notify('Selecciona una cara plana o un plano', 'error'); return; }
           const n = fh.normal, o = n.clone().multiplyScalar(fh.point.dot(n));
           let x = new THREE.Vector3(1, 0, 0).projectOnPlane(n);
@@ -1018,6 +1126,43 @@ export default function PartViewport() {
           setHint(`Distancia mínima ${fmt(best, 3)} mm · ΔX ${fmt(Math.abs(dv.x), 2)} ΔY ${fmt(Math.abs(dv.y), 2)} ΔZ ${fmt(Math.abs(dv.z), 2)}`);
         }
         buildOverlay(s);
+        return;
+      }
+      if (s.tool === 'epPick') {
+        const fh = faceHit(ev); if (!fh) return;
+        const m = fh.mesh, g = m.faceGroups[fh.group];
+        if (fh.planar) {
+          useStore.setState({ epPick: { point: vArr(fh.point, 4), dir: vArr(fh.normal, 6), axis: false, n: (s.epPick?.n ?? 0) + 1 }, tool: null });
+        } else {
+          // cara cilíndrica: eje a partir de las normales, centro por tres puntos y extremo más cercano al clic
+          const vs: THREE.Vector3[] = [], ns: THREE.Vector3[] = [];
+          for (let i = g.start; i < g.start + g.count; i++) { const v = m.triangles[i]; vs.push(new THREE.Vector3(m.vertices[v * 3], m.vertices[v * 3 + 1], m.vertices[v * 3 + 2])); ns.push(new THREE.Vector3(m.normals[v * 3], m.normals[v * 3 + 1], m.normals[v * 3 + 2])); }
+          let axis: THREE.Vector3 | null = null;
+          for (let i = 1; i < ns.length && !axis; i++) { const c = ns[0].clone().cross(ns[i]); if (c.length() > 0.2) axis = c.normalize(); }
+          if (!axis) { s.notify('No se reconoce el eje de esa cara', 'error'); return; }
+          const flat = vs.map((v) => v.clone().addScaledVector(axis!, -v.dot(axis!)));
+          const a = flat[0], b = flat.reduce((p, q) => (q.distanceTo(a) > p.distanceTo(a) ? q : p), a);
+          const c = flat.reduce((p, q) => { const d = (x: THREE.Vector3) => Math.min(x.distanceTo(a), x.distanceTo(b)); return d(q) > d(p) ? q : p; }, a);
+          // circunferencia por tres puntos (en el plano perpendicular al eje)
+          const ab = b.clone().sub(a), ac = c.clone().sub(a), nn = ab.clone().cross(ac);
+          let center = a.clone().add(b).multiplyScalar(0.5);
+          if (nn.lengthSq() > 1e-12) center = a.clone().add(ac.clone().multiplyScalar(ab.lengthSq()).cross(nn).add(nn.clone().cross(ab).multiplyScalar(ac.lengthSq())).divideScalar(2 * nn.lengthSq()).multiplyScalar(1));
+          const r = center.distanceTo(a);
+          const ts = vs.map((v) => v.dot(axis!)), t0 = Math.min(...ts), t1 = Math.max(...ts), th = fh.point.dot(axis);
+          const atEnd = Math.abs(th - t1) < Math.abs(th - t0) ? t1 : t0, dir = atEnd === t1 ? axis.clone() : axis.clone().negate();
+          const P = center.clone().addScaledVector(axis, atEnd);
+          useStore.setState({ epPick: { point: vArr(P, 4), dir: vArr(dir, 6), radius: Math.round(r * 1000) / 1000, axis: true, n: (s.epPick?.n ?? 0) + 1 }, tool: null });
+        }
+        return;
+      }
+      if (s.tool === 'femFace' && s.fem) {
+        const fh = faceHit(ev); if (!fh) return;
+        const g = fh.group, f = s.fem;
+        const tog = (a: number[]) => (a.includes(g) ? a.filter((x) => x !== g) : [...a, g]);
+        // una cara sólo puede estar en un grupo
+        const fixed = f.pick === 'fixed' ? tog(f.fixed) : f.fixed.filter((x) => x !== g);
+        const loads = f.loads.map((l, i) => ({ ...l, faces: f.pick === i ? tog(l.faces) : l.faces.filter((x) => x !== g) }));
+        s.set({ fem: { ...f, fixed, loads, res: undefined } });
         return;
       }
       if (s.tool === 'pickFaces' && d && 'faces' in d) {
@@ -1094,9 +1239,13 @@ export default function PartViewport() {
         return;
       }
       if (tool === 'projectGeom') {
-        const m = state.mesh; if (!m) { s.notify('No hay modelo que proyectar', 'error'); return; }
-        const hit = V.nearestEdge(ev, m, null, []); if (!hit) return;
-        projectEdge(hit.group);
+        const m = state.mesh;
+        const hit = m ? V.nearestEdge(ev, m, null, []) : null;
+        if (hit) { projectEdge(hit.group); return; }
+        // aristas de otros componentes (edición en contexto)
+        const hc = ctxMesh ? V.nearestEdge(ev, ctxMesh, null, []) : null;
+        if (hc) { projectEdge(hc.group, ctxMesh!); return; }
+        if (!m && !ctxMesh) s.notify('No hay modelo que proyectar', 'error');
         return;
       }
       // --- herramientas de dibujo ---
@@ -1221,7 +1370,7 @@ export default function PartViewport() {
         if (gi !== state.hoverEdge) { state.hoverEdge = gi; buildOverlay(s); }
         return;
       }
-      if (s.tool === 'pickFaces') {
+      if (s.tool === 'pickFaces' || s.tool === 'femFace' || s.tool === 'epPick') {
         const fh = faceHit(ev), gi = fh?.group ?? -1;
         if (gi !== hoverFace) { hoverFace = gi; buildOverlay(s); }
         return;
@@ -1263,7 +1412,7 @@ export default function PartViewport() {
 
     const cancelTool = () => { state.chain = []; state.chainIds = []; state.clicks = []; state.picks = []; buildPreview(useStore.getState()); };
     const applyMouse = (s: State) => {
-      const picking = ['pickEdges', 'pickPlane', 'pickFaces', 'pickFlangeEdge', 'pickWorkBase', 'measure'].includes(s.tool ?? '');
+      const picking = ['pickEdges', 'pickPlane', 'pickFaces', 'femFace', 'epPick', 'pickFlangeEdge', 'pickWorkBase', 'measure'].includes(s.tool ?? '');
       V.setMouse(s.mode === 'sketch' || picking, s.mode === 'sketch');
       cvs.style.cursor = s.tool && !picking ? 'crosshair' : s.tool ? 'pointer' : 'default';
     };
@@ -1274,14 +1423,16 @@ export default function PartViewport() {
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'part') return;
       if (s.pickBase !== p.pickBase) buildOverlay(s);
-      if (s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material) {
+      if (s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material || s.fem !== p.fem || s.hud !== p.hud) {
         buildPart(s);
         if (firstMesh && s.result?.mesh) { firstMesh = false; setView('home'); }
       }
       if (s.doc !== p.doc || s.sketchId !== p.sketchId || s.selEntity !== p.selEntity || s.selEntities !== p.selEntities || s.selCon !== p.selCon || s.tool !== p.tool || s.mode !== p.mode || s.skInfo !== p.skInfo || s.showCons !== p.showCons || s.dialog !== p.dialog) buildSketches(s);
       if (s.tool !== p.tool || s.mode !== p.mode || s.conType !== p.conType) { applyMouse(s); cancelTool(); setHint(''); state.hoverEdge = -1; hoverFace = -1; measureSel = []; buildOverlay(s); }
       if (s.view !== p.view) setView(s.view.name);
+      if (s.ctxEdit !== p.ctxEdit || s.active !== p.active) buildCtx(s);
     });
+    buildCtx(useStore.getState());
     setView('home');
     return () => { unsub(); window.removeEventListener('keydown', onKey, true); V.dispose(); };
   }, []);
@@ -1302,12 +1453,16 @@ export default function PartViewport() {
   }, []);
 
   const mode = useStore((s) => s.mode);
+  const hud = useStore((s) => s.hud);
   const tool = useStore((s) => s.tool);
+  const ctxEdit = useStore((s) => s.ctxEdit), active = useStore((s) => s.active);
   const conType = useStore((s) => s.conType);
   const toolParam = useStore((s) => s.toolParam);
   const hints: Record<string, string> = {
     pickEdges: 'Selecciona aristas · clic de nuevo para quitar',
     pickFaces: 'Selecciona caras · clic de nuevo para quitar',
+    epPick: 'Clic en una cara plana (ePoint de coincidencia) o cilíndrica cerca del extremo (ePoint de inserción) · Esc cancela',
+    femFace: 'Clic en las caras para añadirlas al grupo activo (azul = fija, rojo = carga) · clic de nuevo para quitar',
     pickFlangeEdge: 'Selecciona la arista superior del borde de la chapa',
     pickWorkBase: 'Selecciona un plano o una cara plana de referencia',
     skdim: 'Cota: elige una o dos geometrías y luego la posición del texto',
@@ -1320,8 +1475,15 @@ export default function PartViewport() {
   };
 
   return (
-    <div className="viewport" ref={host}>
+    <div className={`viewport scene-${hud.scene} ${hud.cube ? '' : 'no-cube'}`} ref={host}>
       <div className="viewcube" ref={cubeHost} />
+      <HeadsUp kind="part" />
+      {ctxEdit && ctxEdit.part === active && (
+        <div className="ctx-bar">
+          <span>Edición en contexto · <b>{ctxEdit.asmName}</b></span>
+          <button className="btn primary" onClick={() => asmActions.returnToAsm()}>Volver al ensamblaje</button>
+        </div>
+      )}
       <button className="vp-home" title="Vista de inicio (F6)" onClick={() => useStore.getState().setView('home')}>
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </button>

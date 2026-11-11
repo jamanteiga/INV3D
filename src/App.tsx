@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore, activeSketch, startCad } from './core/store';
+import { iconThemeOf } from './core/persist';
 import Ribbon from './ui/Ribbon';
 import Browser from './ui/Browser';
 import PartViewport from './ui/PartViewport';
@@ -8,8 +9,9 @@ import DrawingView from './ui/DrawingView';
 import { PropertyPanel, Modals } from './ui/Panels';
 import { saveDoc, openFile } from './core/files';
 import { fmt } from './core/expr';
-import { Icon } from './ui/icons';
+import { Icon, IconDefs, KitDefs } from './ui/icons';
 import { asmActions } from './ui/actions';
+import { folderApi } from './ui/session';
 
 const TOOL_MSG: Record<string, string> = {
   pickPlane: 'Selecciona un plano de origen, un plano de trabajo o una cara plana para el boceto',
@@ -40,6 +42,7 @@ function StatusBar() {
       {s.spaceMouse && <span className="st-item sm" title="Ratón 3D conectado">⬤ {s.spaceMouse}</span>}
       {s.busy && <span className="st-item">Regenerando…</span>}
       {!s.busy && ms !== undefined && <span className="st-item">{fmt(ms, 0)} ms</span>}
+      <span className="st-item" title="Versión de INV3D cargada (Ctrl+F5 si no es la última)">v{__APP_VERSION__}</span>
       <span className={`st-item oc ${s.oc}`}>{s.oc === 'ready' ? 'OpenCascade listo' : s.oc === 'error' ? 'Núcleo con error' : `Cargando núcleo ${Math.round(s.ocProgress * 100)}%`}</span>
     </footer>
   );
@@ -92,13 +95,27 @@ function Loader() {
   );
 }
 
-/** Pestañas de documentos abiertos (como la barra inferior de Inventor). */
+/** Aviso para reconectar la carpeta de trabajo recordada (el navegador pide un clic por sesión). */
+function FolderBanner() {
+  const f = useStore((s) => s.folder);
+  const [hide, setHide] = useState(false);
+  if (f.state !== 'prompt' || hide) return null;
+  return (
+    <div className="folder-banner" role="status">
+      <Icon name="folder" size={16} /><span>Carpeta de trabajo <b>{f.name}</b>: el navegador pide confirmar el acceso.</span>
+      <button className="btn primary" onClick={() => folderApi.reconnect()}>Reconectar</button>
+      <span className="grow" /><button className="btn icon" title="Ocultar" onClick={() => setHide(true)}>×</button>
+    </div>
+  );
+}
+
+/** Pestañas de documentos abiertos. */
 function DocTabs() {
   const s = useStore();
   const icon = { part: 'part', assembly: 'assembly', drawing: 'drawing' } as const;
   return (
     <div className="doc-tabs" role="tablist">
-      {s.docs.map((d) => {
+      {s.docs.filter((d) => !d.hidden).map((d) => {
         const on = d.id === s.active;
         const dirty = on ? s.dirty : d.dirty;
         return (
@@ -107,7 +124,8 @@ function DocTabs() {
             <button className="doc-x" title="Cerrar" onClick={async (e) => {
               e.stopPropagation();
               const used = s.docs.some((o) => o.kind === 'assembly' && (s.docData(o.id) as any)?.occurrences?.some((x: any) => x.part === d.id));
-              if (used) { s.notify('Esta pieza la usa un ensamblaje abierto; cierra antes el ensamblaje', 'error'); return; }
+              // La pieza se cierra pero sigue cargada en memoria mientras la use el ensamblaje
+              if (used) { s.hideDocument(d.id); return; }
               if (dirty && !(await s.ask(`${d.fileName} tiene cambios sin guardar. ¿Cerrarlo?`, 'Cerrar sin guardar'))) return;
               s.closeDocument(d.id);
             }}>×</button>
@@ -123,6 +141,8 @@ export default function App() {
   useEffect(() => { startCad(); }, []);
   const kind = useStore((s) => s.kind);
   const active = useStore((s) => s.active);
+  const iconTheme = useStore((s) => iconThemeOf(s.settings.iconTheme));
+  useEffect(() => { document.documentElement.dataset.icons = iconTheme; }, [iconTheme]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -130,10 +150,11 @@ export default function App() {
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       const s = useStore.getState();
       const k = e.key.toLowerCase();
+      if (s.placing && (e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) asmActions.finishPlace();
       if (e.ctrlKey || e.metaKey) {
         if (k === 'z') { e.preventDefault(); s.undo(); }
         else if (k === 'y') { e.preventDefault(); s.redo(); }
-        else if (k === 's') { e.preventDefault(); saveDoc(); }
+        else if (k === 's') { e.preventDefault(); saveDoc(e.shiftKey); }
         else if (k === 'o') { e.preventDefault(); openFile(); }
         else if (k === 'n') { e.preventDefault(); s.open({ kind: 'newdoc' }); }
         return;
@@ -142,6 +163,7 @@ export default function App() {
       if (e.key === 'Escape') {
         if (s.menuOpen) return s.set({ menuOpen: false });
         if (s.dialog) return s.closeDialog();
+        if (s.tool === 'place') return asmActions.finishPlace();
         if (s.tool) return s.setTool(null);
         if (s.mode === 'sketch' && (s.selEntity || s.selCon || s.selEntities.length)) return s.set({ selEntity: null, selCon: null, selEntities: [] });
         if (s.mode === 'sketch') return s.finishSketch();
@@ -159,7 +181,7 @@ export default function App() {
         if (s.kind === 'assembly' && s.selItem && !s.dialog) {
           const id = s.selItem;
           return s.commitAsm((a) => {
-            a.occurrences = a.occurrences.filter((x) => x.id !== id); a.joints = a.joints.filter((j) => j.id !== id && j.a.occ !== id && j.b.occ !== id);
+            a.occurrences = a.occurrences.filter((x) => x.id !== id); a.joints = a.joints.filter((j) => j.id !== id && j.a.occ !== id && j.b.occ !== id && j.c?.occ !== id); if (a.workPlanes) a.workPlanes = a.workPlanes.filter((w) => w.id !== id);
             a.frames = a.frames.filter((x) => x.id !== id); for (const f of a.frames) f.ends = f.ends.map((en) => (en.other === id ? { type: 'none' } : en)) as typeof f.ends;
             a.welds = a.welds.filter((x) => x.id !== id); a.bolts = a.bolts.filter((x) => x.id !== id); a.skeleton = a.skeleton.filter((x) => x.id !== id);
           });
@@ -188,6 +210,7 @@ export default function App() {
         else if (k === 'h' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('hole'); }
         else if (k === 'f' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('fillet'); }
       } else if (s.kind === 'assembly') {
+        if (s.tool === 'place' && (k === 'x' || k === 'y' || k === 'z')) { e.preventDefault(); return asmActions.rotatePlace(k === 'x' ? 0 : k === 'y' ? 1 : 2); }
         if (k === 'p') { e.preventDefault(); s.open({ kind: 'place' }); }
         else if (k === 'j') { e.preventDefault(); asmActions.openJoint(); }
       } else if (k === 'd') { e.preventDefault(); s.setTool('drwDim'); }
@@ -204,7 +227,9 @@ export default function App() {
       onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }}
       onDrop={(e) => { e.preventDefault(); setDrag(false); for (const f of e.dataTransfer.files) openFile(f); }}>
+      <IconDefs /><KitDefs />
       <Ribbon />
+      <FolderBanner />
       <main className="work">
         <Browser />
         <section className="center">
