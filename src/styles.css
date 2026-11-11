@@ -535,3 +535,4 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .occp-col .ptable td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .occp-col .ptable td:first-child { width: 44%; }
 .occp-col .ptable select { width: 100%; }
+.occp-foot { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }

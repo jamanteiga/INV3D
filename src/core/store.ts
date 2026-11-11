@@ -143,6 +143,10 @@ export interface State {
   commitAsm: (fn: (d: AsmDoc) => void) => void;
   /** Cambia una pieza abierta en memoria (no activa) y recalcula el ensamblaje activo */
   editPartDoc: (id: string, next: PartDoc) => void;
+  /** Vista previa: cambia la pieza sin historial ni marca de modificado (Cancelar la restaura) */
+  previewPartDoc: (id: string, data: PartDoc, dirty?: boolean) => void;
+  /** Acepta los cambios de la vista previa: guarda el original en el historial y marca la pieza como modificada */
+  commitPartDoc: (id: string, orig: PartDoc) => void;
   commitDrw: (fn: (d: DrawingDoc) => void) => void;
   undo: () => void;
   redo: () => void;
@@ -401,6 +405,14 @@ export const useStore = create<State>((set, get) => ({
     const s = get();
     set({ docs: s.docs.map((d) => (d.id === id ? { ...d, data: next, past: [...d.past.slice(-99), d.data], future: [], dirty: true } : d)) });
     if (s.kind === 'assembly') set({ asm: { ...get().asm } });
+  },
+  previewPartDoc: (id, data, dirty) => {
+    const s = get();
+    set({ docs: s.docs.map((d) => (d.id === id ? { ...d, data, ...(dirty != null ? { dirty } : {}) } : d)) });
+    if (s.kind === 'assembly') set({ asm: { ...get().asm } });
+  },
+  commitPartDoc: (id, orig) => {
+    set({ docs: get().docs.map((d) => (d.id === id && d.data !== orig ? { ...d, past: [...d.past.slice(-99), orig], future: [], dirty: true } : d)) });
   },
   commitDrw: (fn) => {
     const { drw, past } = get();
