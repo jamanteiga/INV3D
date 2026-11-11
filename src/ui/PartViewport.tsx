@@ -1021,6 +1021,7 @@ export default function PartViewport() {
     let downAt: { x: number; y: number; btn: number } | null = null;
     const onDown = (ev: PointerEvent) => {
       downAt = { x: ev.clientX, y: ev.clientY, btn: ev.button };
+      if (V.picking) { downAt = null; return; } // designación de «Punto 3D» en curso
       const s = useStore.getState();
       if (s.mode === 'sketch' && !s.tool && ev.button === 0) {
         const pk = pickAt(ev);

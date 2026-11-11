@@ -191,6 +191,7 @@ export class View3D {
     g.setAttribute('normal', new THREE.BufferAttribute(m.normals, 3));
     g.setIndex(new THREE.BufferAttribute(m.triangles, 1));
     g.computeBoundingBox(); g.computeBoundingSphere();
+    g.userData.faceGroups = m.faceGroups;
     const op = opts.opacity ?? 1;
     const mat = new THREE.MeshStandardMaterial({
       color, metalness: 0.25, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
@@ -378,7 +379,8 @@ export class View3D {
       const ax = axOf(ct.plane); n = new THREE.Vector3(); n.setComponent(ax, 1); base = new THREE.Vector3();
       lo = mn.getComponent(ax); hi = mx.getComponent(ax);
     }
-    const at = lo + ct.pos * (hi - lo);
+    // plano libre: 0,5 = pasa por el punto; plano de ejes: 0–1 a lo largo del modelo
+    const at = ct.plane === '*' ? (ct.pos - 0.5) * (hi - lo) : lo + ct.pos * (hi - lo);
     const P = (d: number) => base.clone().addScaledVector(n, d);
     if (ct.mode === 'slab') {
       const w = Math.max(1e-3, ct.step) / 2;
@@ -391,6 +393,9 @@ export class View3D {
   /** Aplica los planos y dibuja las tapas de la sección (técnica de stencil) y el contorno del plano */
   refreshClip() {
     const { planes, cap } = this.clipPlanes();
+    // un pelo hacia el lado visible: si el plano coincide con una cara, la cara queda cortada y la tapa se ve limpia
+    const nudge = Math.max(1, this.bbox.getSize(new THREE.Vector3()).length()) * 2e-4;
+    for (const pl of planes) pl.constant -= nudge;
     this.renderer.clippingPlanes = planes;
     for (const o of [...this.capGroup.children]) { this.capGroup.remove(o); o.traverse((x: any) => { if (x.material) x.material.dispose?.(); if (x.userData.ownGeo) x.geometry?.dispose?.(); }); }
     const ct = useStore.getState().clipTool;
@@ -433,33 +438,162 @@ export class View3D {
     }
     this.request();
   }
-  /** Elige un punto del modelo con un clic (con la normal de la cara); `snap`: ajusta al vértice más cercano */
-  pickPoint(snap: boolean, cb: (p: [number, number, number], n: [number, number, number]) => void) {
-    this.pickOff?.();
-    const cvs = this.renderer.domElement, ray = new THREE.Raycaster();
-    cvs.style.cursor = 'crosshair';
-    const down = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      const r = cvs.getBoundingClientRect();
-      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
-      const hits = ray.intersectObjects(this.clipTargets, true).filter((h: any) => h.object.isMesh && !(h.object instanceof LineSegments2) && h.face);
-      const h = hits.find((x) => this.renderer.clippingPlanes.every((pl) => pl.distanceToPoint(x.point) >= -1e-6));
-      if (!h) return;
-      e.stopPropagation(); e.preventDefault();
-      let p = h.point.clone();
-      if (snap) {
-        const g = (h.object as THREE.Mesh).geometry, pos = g.getAttribute('position'), mw = h.object.matrixWorld;
-        let best = Infinity;
-        for (const i of [h.face!.a, h.face!.b, h.face!.c]) { const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mw); const d = v.distanceTo(h.point); if (d < best) { best = d; p = v; } }
-      }
-      const n = h.face!.normal.clone().transformDirection(h.object.matrixWorld).normalize();
-      off(); cb([p.x, p.y, p.z].map((x) => Math.round(x * 1000) / 1000) as [number, number, number], [n.x, n.y, n.z]);
-    };
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') off(); };
-    const off = () => { cvs.removeEventListener('pointerdown', down, true); window.removeEventListener('keydown', key, true); cvs.style.cursor = ''; this.pickOff = undefined; };
-    cvs.addEventListener('pointerdown', down, true); window.addEventListener('keydown', key, true);
-    this.pickOff = off;
+  // ---------- Designación de puntos 3D (ventana «Punto 3D») ----------
+  private pickMarker?: THREE.Group;
+  private edgeCache = new WeakMap<object, EdgeTopo>();
+  private scr(v: THREE.Vector3) {
+    const r = this.renderer.domElement.getBoundingClientRect(), p = v.clone().project(this.camera);
+    return new THREE.Vector2(r.left + ((p.x + 1) / 2) * r.width, r.top + ((1 - p.y) / 2) * r.height);
   }
+  private visible(p: THREE.Vector3) {
+    const tol = Math.max(1, this.bbox.getSize(new THREE.Vector3()).length()) * 5e-4;
+    return this.renderer.clippingPlanes.every((pl) => pl.distanceToPoint(p) >= -tol);
+  }
+  /** Aristas visibles del modelo con su topología (vértices, cadenas, centros de arco) en coordenadas globales */
+  private edgeSets() {
+    const out: { obj: THREE.Object3D; topo: EdgeTopo; mw: THREE.Matrix4 }[] = [];
+    for (const t of this.clipTargets) t.traverse((o: any) => {
+      if (!(o instanceof LineSegments2) || !o.userData.edge || o.userData.hidCopy || !o.visible) return;
+      let topo = this.edgeCache.get(o.geometry);
+      if (!topo) { topo = edgeTopo(((o.geometry as any).attributes.instanceStart?.data?.array as Float32Array) ?? new Float32Array()); this.edgeCache.set(o.geometry, topo); }
+      o.updateWorldMatrix(true, false);
+      out.push({ obj: o, topo, mw: o.matrixWorld });
+    });
+    return out;
+  }
+  /** Punto de referencia para el cursor 2D: plano normal a la vista por el punto de recorte o el centro del modelo */
+  refPoint = new THREE.Vector3();
+  private surfaceHit(ray: THREE.Raycaster) {
+    const hits = ray.intersectObjects(this.clipTargets, true).filter((h: any) => h.object.isMesh && !(h.object instanceof LineSegments2) && h.face && !h.object.userData.keep);
+    return hits.find((x) => this.visible(x.point));
+  }
+  /** Resuelve el punto según el tipo de designación bajo el cursor (null si no hay nada que designar) */
+  resolvePick(kind: PickKind, adv: AdvKind, cx: number, cy: number): PickRes | null {
+    const cvs = this.renderer.domElement, r = cvs.getBoundingClientRect(), ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), this.camera);
+    const m = new THREE.Vector2(cx, cy), TH = 18;
+    const h = this.surfaceHit(ray);
+    const hitN = h ? h.face!.normal.clone().transformDirection(h.object.matrixWorld).normalize() : undefined;
+    const viewPlane = () => {
+      const n = this.camDir().normalize(), pl = new THREE.Plane().setFromNormalAndCoplanarPoint(n, this.refPoint);
+      const p = ray.ray.intersectPlane(pl, new THREE.Vector3()) ?? ray.ray.closestPointToPoint(this.refPoint, new THREE.Vector3());
+      return { p, n: n.clone().negate(), what: 'Cursor 2D' } as PickRes;
+    };
+    const nearestOf = (cands: { p: THREE.Vector3; what: string }[]) => {
+      let best: PickRes | null = null, bd = TH;
+      for (const c of cands) { if (!this.visible(c.p)) continue; const d = this.scr(c.p).distanceTo(m); if (d < bd) { bd = d; best = { p: c.p, n: hitN, what: c.what }; } }
+      return best;
+    };
+    const sets = () => this.edgeSets();
+    /** Cadena (arista) más cercana al cursor en pantalla y el punto más cercano sobre ella */
+    const nearestChain = () => {
+      let best: { pts: THREE.Vector3[]; p: THREE.Vector3; d: number } | null = null;
+      for (const { topo, mw } of sets()) for (const ch of topo.chains) {
+        const W = ch.map((v) => v.clone().applyMatrix4(mw));
+        for (let i = 0; i + 1 < W.length; i++) {
+          const A = this.scr(W[i]), B = this.scr(W[i + 1]), AB = B.clone().sub(A), L2 = AB.lengthSq();
+          const t = L2 < 1e-9 ? 0 : Math.min(1, Math.max(0, m.clone().sub(A).dot(AB) / L2));
+          const d = A.clone().addScaledVector(AB, t).distanceTo(m);
+          const p = W[i].clone().lerp(W[i + 1], t);
+          if (d < TH && (!best || d < best.d) && this.visible(p)) best = { pts: W, p, d };
+        }
+      }
+      return best;
+    };
+    switch (kind) {
+      case 'cursor3d': return h ? { p: h.point.clone(), n: hitN, what: 'Cursor 3D' } : viewPlane();
+      case 'cursor2d': return viewPlane();
+      case 'face': return h ? { p: h.point.clone(), n: hitN, what: 'Sobre cara' } : null;
+      case 'vertex': {
+        const c: { p: THREE.Vector3; what: string }[] = [];
+        for (const { topo, mw } of sets()) for (const v of topo.corners) c.push({ p: v.clone().applyMatrix4(mw), what: 'Vértice' });
+        const v = nearestOf(c); if (v) return v;
+        if (h) { // sin aristas: vértice del triángulo más cercano
+          const g = (h.object as THREE.Mesh).geometry, pos = g.getAttribute('position'), mw = h.object.matrixWorld;
+          let best = Infinity, p = h.point.clone();
+          for (const i of [h.face!.a, h.face!.b, h.face!.c]) { const q = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mw); const d = q.distanceTo(h.point); if (d < best) { best = d; p = q; } }
+          return { p, n: hitN, what: 'Vértice' };
+        }
+        return null;
+      }
+      case 'pcon': {
+        const c: { p: THREE.Vector3; what: string }[] = [];
+        for (const { topo, mw } of sets()) {
+          for (const v of topo.corners) c.push({ p: v.clone().applyMatrix4(mw), what: 'Vértice' });
+          for (const ch of topo.chains) {
+            const W = ch.map((v) => v.clone().applyMatrix4(mw));
+            c.push({ p: chainMid(W), what: 'Punto medio' });
+            const cc = circleOf(W); if (cc) c.push({ p: cc.c, what: 'Centro' });
+          }
+        }
+        return nearestOf(c);
+      }
+      case 'edge': { const e = nearestChain(); return e ? { p: e.p, n: hitN, what: 'Sobre arista' } : null; }
+      case 'adv': {
+        if (adv === 'mid') { const e = nearestChain(); return e ? { p: chainMid(e.pts), n: hitN, what: 'Punto medio de arista' } : null; }
+        if (adv === 'center') { const e = nearestChain(); const cc = e && circleOf(e.pts); return cc ? { p: cc.c, n: cc.n, what: 'Centro de arco' } : null; }
+        if (adv === 'facec') {
+          if (!h) return null;
+          const g = (h.object as THREE.Mesh).geometry, fg = g.userData.faceGroups as { start: number; count: number }[] | undefined;
+          const idx = g.getIndex(), pos = g.getAttribute('position');
+          const grp = fg?.find((q) => h.faceIndex! * 3 >= q.start && h.faceIndex! * 3 < q.start + q.count);
+          if (!grp || !idx) return { p: h.point.clone(), n: hitN, what: 'Sobre cara' };
+          const acc = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(); let A = 0;
+          for (let i = grp.start; i < grp.start + grp.count; i += 3) {
+            a.fromBufferAttribute(pos, idx.getX(i)); b.fromBufferAttribute(pos, idx.getX(i + 1)); c.fromBufferAttribute(pos, idx.getX(i + 2));
+            const ar = b.clone().sub(a).cross(c.clone().sub(a)).length() / 2; A += ar;
+            acc.addScaledVector(a.clone().add(b).add(c).divideScalar(3), ar);
+          }
+          return { p: A > 0 ? acc.divideScalar(A).applyMatrix4(h.object.matrixWorld) : h.point.clone(), n: hitN, what: 'Centro de cara' };
+        }
+        if (adv === 'two') return this.resolvePick('pcon', adv, cx, cy) ?? (h ? { p: h.point.clone(), n: hitN, what: 'Punto' } : null);
+        return null;
+      }
+      default: return null;
+    }
+  }
+  private markerAt(p: THREE.Vector3 | null, color = 0xf08c00, slot = 0) {
+    if (!this.pickMarker) { this.pickMarker = new THREE.Group(); this.pickMarker.renderOrder = 30; this.scene.add(this.pickMarker); }
+    let mk = this.pickMarker.children[slot] as THREE.Mesh | undefined;
+    if (!mk) {
+      mk = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+      mk.renderOrder = 30; mk.raycast = () => {}; this.pickMarker.add(mk);
+    }
+    mk.visible = !!p;
+    if (p) { mk.position.copy(p); mk.scale.setScalar(this.worldPerPx() * 5); }
+    this.request();
+  }
+  /** Designación activa: resalta el punto bajo el cursor y llama a `onPick` con cada clic (sin arrastre) */
+  startPick(kind: PickKind, adv: AdvKind, onPick: (r: PickRes) => void) {
+    this.stopPick();
+    const cvs = this.renderer.domElement;
+    cvs.style.cursor = 'crosshair';
+    let first: THREE.Vector3 | null = null, down: { x: number; y: number } | null = null;
+    const move = (e: PointerEvent) => { if (e.buttons) return; const r = this.resolvePick(kind, adv, e.clientX, e.clientY); this.markerAt(r?.p ?? null); };
+    const pd = (e: PointerEvent) => { if (e.button === 0) down = { x: e.clientX, y: e.clientY }; };
+    const pu = (e: PointerEvent) => {
+      if (e.button !== 0 || !down) return;
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4; down = null; if (moved) return;
+      const r = this.resolvePick(kind, adv, e.clientX, e.clientY); if (!r) return;
+      r.p.set(...([r.p.x, r.p.y, r.p.z].map((x) => Math.round(x * 1000) / 1000) as [number, number, number]));
+      if (kind === 'adv' && adv === 'two') {
+        if (!first) { first = r.p.clone(); this.markerAt(first, 0x1673d0, 1); return; }
+        const p = first.clone().add(r.p).multiplyScalar(0.5); first = null; this.markerAt(null, 0, 1);
+        setTimeout(() => onPick({ p, n: r.n, what: 'Punto medio entre dos puntos' })); return;
+      }
+      setTimeout(() => onPick(r)); // tras los demás manejadores del clic (aún en designación: no seleccionan)
+    };
+    cvs.addEventListener('pointermove', move); cvs.addEventListener('pointerdown', pd, true); cvs.addEventListener('pointerup', pu, true);
+    this.pickOff = () => {
+      cvs.removeEventListener('pointermove', move); cvs.removeEventListener('pointerdown', pd, true); cvs.removeEventListener('pointerup', pu, true);
+      cvs.style.cursor = ''; this.markerAt(null); this.markerAt(null, 0, 1); this.pickOff = undefined;
+    };
+  }
+  stopPick() { this.pickOff?.(); }
+  /** Hay una designación de punto en curso (los visores no seleccionan con el clic) */
+  get picking() { return !!this.pickOff; }
+  /** Marca fija (punto elegido en la ventana «Punto 3D») */
+  showPoint(p: [number, number, number] | null) { this.markerAt(p ? new THREE.Vector3(...p) : null, 0x1673d0, 2); }
   /** Vista de sección (plano por el modelo con desfase e inversión), estilo alámbrico y líneas ocultas. */
   applyVisual(clip: '' | 'X' | 'Y' | 'Z', wire: boolean, meshes: THREE.Object3D[]) {
     const viewOpts = { style: useStore.getState().hud.style };
@@ -565,4 +699,58 @@ export function faceVertices(m: MeshData, group: number): THREE.Vector3[] {
     out.push(new THREE.Vector3(m.vertices[vi * 3], m.vertices[vi * 3 + 1], m.vertices[vi * 3 + 2]));
   }
   return out;
+}
+
+// ---------- Designación de puntos: tipos y topología de aristas ----------
+export type PickKind = 'cursor3d' | 'vertex' | 'face' | 'pcon' | 'aux' | 'cursor2d' | 'edge' | 'adv';
+export type AdvKind = 'mid' | 'center' | 'facec' | 'two' | 'bbox' | 'origin';
+export interface PickRes { p: THREE.Vector3; n?: THREE.Vector3; what: string }
+interface EdgeTopo { corners: THREE.Vector3[]; chains: THREE.Vector3[][] }
+/** Agrupa los segmentos de aristas en cadenas (aristas del modelo) separadas por vértices (esquinas o uniones de 3+) */
+function edgeTopo(a: Float32Array): EdgeTopo {
+  const key = (i: number) => `${Math.round(a[i] * 1e3)}_${Math.round(a[i + 1] * 1e3)}_${Math.round(a[i + 2] * 1e3)}`;
+  const nodes = new Map<string, { p: THREE.Vector3; segs: number[] }>();
+  const nseg = Math.floor(a.length / 6), ends: [string, string][] = [];
+  for (let s = 0; s < nseg; s++) {
+    const ka = key(s * 6), kb = key(s * 6 + 3); ends.push([ka, kb]);
+    if (ka === kb) continue;
+    for (const [k, o] of [[ka, s * 6], [kb, s * 6 + 3]] as const) { let n = nodes.get(k); if (!n) nodes.set(k, (n = { p: new THREE.Vector3(a[o], a[o + 1], a[o + 2]), segs: [] })); n.segs.push(s); }
+  }
+  const other = (s: number, k: string) => (ends[s][0] === k ? ends[s][1] : ends[s][0]);
+  const isCorner = (k: string) => {
+    const n = nodes.get(k)!; if (n.segs.length !== 2) return true;
+    const u = nodes.get(other(n.segs[0], k))!.p.clone().sub(n.p).normalize(), v = nodes.get(other(n.segs[1], k))!.p.clone().sub(n.p).normalize();
+    return u.dot(v) > Math.cos((145 * Math.PI) / 180); // giro de más de 35°
+  };
+  const corner = new Map<string, boolean>(); for (const k of nodes.keys()) corner.set(k, isCorner(k));
+  const used = new Set<number>(), chains: THREE.Vector3[][] = [];
+  const walk = (k0: string, s0: number) => {
+    const pts = [nodes.get(k0)!.p]; let k = k0, s = s0;
+    for (let guard = 0; guard < 1e6; guard++) {
+      used.add(s); k = other(s, k); pts.push(nodes.get(k)!.p);
+      if (corner.get(k) || k === k0) break;
+      const nx = nodes.get(k)!.segs.find((q) => !used.has(q)); if (nx === undefined) break; s = nx;
+    }
+    chains.push(pts);
+  };
+  for (const [k, n] of nodes) if (corner.get(k)) for (const s of n.segs) if (!used.has(s)) walk(k, s);
+  for (const [k, n] of nodes) for (const s of n.segs) if (!used.has(s)) walk(k, s); // bucles cerrados sin esquinas
+  return { corners: [...nodes].filter(([k]) => corner.get(k)).map(([, n]) => n.p), chains };
+}
+/** Punto medio (por longitud) de una cadena de puntos */
+function chainMid(W: THREE.Vector3[]) {
+  let L = 0; for (let i = 0; i + 1 < W.length; i++) L += W[i].distanceTo(W[i + 1]);
+  let acc = 0;
+  for (let i = 0; i + 1 < W.length; i++) { const d = W[i].distanceTo(W[i + 1]); if (acc + d >= L / 2) return W[i].clone().lerp(W[i + 1], d ? (L / 2 - acc) / d : 0); acc += d; }
+  return W[0].clone();
+}
+/** Centro y normal si la cadena es un arco o circunferencia */
+function circleOf(W: THREE.Vector3[]): { c: THREE.Vector3; n: THREE.Vector3 } | null {
+  if (W.length < 4) return null;
+  const A = W[0], B = W[Math.floor(W.length / 3)], C = W[Math.floor((2 * W.length) / 3)];
+  const ab = B.clone().sub(A), ac = C.clone().sub(A), n = ab.clone().cross(ac); const n2 = n.lengthSq(); if (n2 < 1e-12) return null;
+  const c = A.clone().add(n.clone().cross(ab).multiplyScalar(ac.lengthSq()).add(ac.clone().cross(n).multiplyScalar(ab.lengthSq())).divideScalar(2 * n2));
+  const R = c.distanceTo(A); if (!(R > 1e-6)) return null;
+  for (const p of W) if (Math.abs(p.distanceTo(c) - R) > Math.max(0.02 * R, 1e-3)) return null;
+  return { c, n: n.normalize() };
 }

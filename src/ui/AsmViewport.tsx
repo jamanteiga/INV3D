@@ -399,7 +399,7 @@ export default function AsmViewport() {
     let drag: { id: string; grp: THREE.Object3D; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; plane: THREE.Plane; start: THREE.Vector3; xf: Xform; moved: boolean } | null = null;
     host.current!.addEventListener('pointerdown', (ev) => {
       const s = useStore.getState();
-      if (ev.button !== 0 || s.tool || s.mode === 'present') return;
+      if (ev.button !== 0 || s.tool || s.mode === 'present' || V.picking) return;
       const hit = hitAt(ev);
       if (!hit || hit.object.userData.kind !== 'occ') return;
       const top = topOf(s, hit.object.userData.id);
@@ -434,6 +434,7 @@ export default function AsmViewport() {
     cvs.addEventListener('pointerdown', (ev) => { downAt = { x: ev.clientX, y: ev.clientY, button: ev.button }; });
     cvs.addEventListener('pointerup', (ev) => {
       if (endDrag(ev)) { downAt = null; return; }
+      if (V.picking) { downAt = null; return; }
       const small = !!downAt && Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y) <= 4;
       if (small && ev.button === 2 && useStore.getState().tool === 'place') { downAt = null; asmActions.finishPlace(); return; }
       if (small && ev.button === 2 && !useStore.getState().tool) {
