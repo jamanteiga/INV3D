@@ -1781,11 +1781,11 @@ function DimIn({ label, mm, std, list, onChange }: { label: string; mm: number; 
   );
 }
 
-function HvacDialog({ hk, onClose }: { hk: string; onClose: () => void }) {
+function HvacDialog({ hk, shape0, onClose }: { hk: string; shape0?: DuctShape; onClose: () => void }) {
   const s = useStore();
   const [kind, setKind] = useState<HvacKind>(hk as HvacKind);
   const [std, setStd] = useState<'EN' | 'SMACNA'>(s.settings.drawingStd === 'ANSI' ? 'SMACNA' : 'EN');
-  const [shape, setShape] = useState<DuctShape>(['flex'].includes(hk) ? 'round' : 'rect');
+  const [shape, setShape] = useState<DuctShape>(shape0 ?? (['flex'].includes(hk) ? 'round' : 'rect'));
   const [spiral, setSpiral] = useState(true), [seamGeo, setSeamGeo] = useState(false);
   const [W, setW] = useState(600), [H, setH] = useState(400), [D, setD] = useState(400);
   const [shape2, setShape2] = useState<DuctShape>('round');
@@ -1842,7 +1842,8 @@ function HvacDialog({ hk, onClose }: { hk: string; onClose: () => void }) {
     } catch (e) { s.notify((e as Error).message, 'error'); }
   };
   const SHAPES: [DuctShape, string][] = ovalOk ? [['rect', 'Rectangular'], ['round', 'Circular'], ['oval', 'Oval plano']] : [['rect', 'Rectangular'], ['round', 'Circular']];
-  const ShapeSel = <Row label="Sección"><Seg value={sh} onChange={(v) => setShape(v)} options={SHAPES} /></Row>;
+  const spk = HVAC_TO_SPIRO[kind];
+  const ShapeSel = <Row label="Sección"><Seg value={sh as string} onChange={(v) => (v === 'spiro' ? s.open({ kind: 'spiro', sk: spk! }) : setShape(v as DuctShape))} options={spk ? [...SHAPES, ['spiro', 'Espirotubo']] : SHAPES} /></Row>;
   const DimsOf = (shp: DuctShape, w: number, h: number, d: number, sw: (v: number) => void, shh: (v: number) => void, sd: (v: number) => void, suf = '') => (
     shp === 'rect' ? (<><DimIn label={`Anchura${suf} (interior)`} mm={w} std={std} list={RL} onChange={sw} /><DimIn label={`Altura${suf} (interior)`} mm={h} std={std} list={RL} onChange={shh} /></>)
       : shp === 'oval' ? (<><DimIn label={`Eje mayor${suf}`} mm={w} std={std} list={RL} onChange={sw} /><DimIn label={`Eje menor${suf}`} mm={h} std={std} list={RL} onChange={shh} /></>)
@@ -1863,6 +1864,8 @@ function HvacDialog({ hk, onClose }: { hk: string; onClose: () => void }) {
         <div className="cc-tree">
           <div style={{ padding: '4px 6px 8px' }}><Seg value={std} onChange={setStd} options={[['EN', 'EN / UNE'], ['SMACNA', 'SMACNA']]} /></div>
           {groups.map(([g, ks]) => (<div key={g}><div className="cc-cat">{g}</div>{ks.map((k) => <button key={k} className={`cc-item ${k === kind ? 'on' : ''}`} onClick={() => setKind(k)}><span>{HVAC_KINDS[k]}</span></button>)}</div>))}
+          <div className="cc-cat">Espirotubo comercial</div>
+          {(Object.keys(SPIRO_KINDS) as SpiroKind[]).map((k) => <button key={k} className="cc-item" onClick={() => s.open({ kind: 'spiro', sk: k })}><span>{SPIRO_KINDS[k]}</span></button>)}
         </div>
         <div className="cc-form">
           <div className="psec-title">{HVAC_KINDS[kind]} · {sm ? 'SMACNA' : 'EN 1505 / EN 1506'}</div>
@@ -1929,6 +1932,9 @@ function HvacDialog({ hk, onClose }: { hk: string; onClose: () => void }) {
 }
 
 /** Espirotubo comercial: tubo y accesorios con extremos macho, diámetros y espesores de catálogo. */
+/** Equivalencias entre el centro de contenido HVAC y el catálogo de espirotubo */
+const HVAC_TO_SPIRO: Partial<Record<HvacKind, SpiroKind>> = { duct: 'tube', elbow: 'elbow', transition: 'reducer', branch: 'tee', coupling: 'nipple', cap: 'capM', damper: 'damper', support: 'clamp' };
+const SPIRO_TO_HVAC: Partial<Record<SpiroKind, HvacKind>> = { tube: 'duct', elbow: 'elbow', tee: 'branch', tee45: 'branch', cross: 'branch', saddle: 'branch', reducer: 'transition', reducerEcc: 'transition', nipple: 'coupling', capM: 'cap', capF: 'cap', damper: 'damper', clamp: 'support' };
 function SpiroDialog({ sk, onClose }: { sk: string; onClose: () => void }) {
   const s = useStore();
   const [kind, setKind] = useState<SpiroKind>((sk in SPIRO_KINDS ? sk : 'tube') as SpiroKind);
@@ -1961,6 +1967,7 @@ function SpiroDialog({ sk, onClose }: { sk: string; onClose: () => void }) {
         </div>
         <div className="cc-form">
           <div className="psec-title">{SPIRO_KINDS[kind]} · EN 1506 / EN 12237</div>
+          {SPIRO_TO_HVAC[kind] && <Row label="Sección"><Seg value="spiro" onChange={(v) => { if (v !== 'spiro') s.open({ kind: 'hvac', hk: SPIRO_TO_HVAC[kind]!, shape: v as DuctShape }); }} options={[['rect', 'Rectangular'], ['round', 'Circular'], ['oval', 'Oval plano'], ['spiro', 'Espirotubo']]} /></Row>}
           <Row label={need2 ? (kind === 'saddle' ? 'Ø tubo' : 'Ø principal') : 'Diámetro'}><select value={D} onChange={(e) => setD(Number(e.target.value))}>{SPIRO_D.map((d) => <option key={d} value={d}>Ø {d}</option>)}</select></Row>
           {need2 && <Row label={kind.startsWith('reducer') ? 'Ø menor' : kind === 'saddle' ? 'Ø toma' : 'Ø derivación'}><select value={d2} onChange={(e) => setD2(Number(e.target.value))}>{list2.map((d) => <option key={d} value={d}>Ø {d}</option>)}</select></Row>}
           {kind === 'tube' && <Row label="Longitud"><select value={L} onChange={(e) => setL(Number(e.target.value))}>{SPIRO_L.map((l) => <option key={l} value={l}>{l} mm{l === 3000 ? ' (estándar)' : ''}</option>)}</select></Row>}
@@ -2447,8 +2454,8 @@ export function Modals() {
     case 'cpattern': return <CompPatternDialog onClose={close} />;
     case 'drive': return <DriveDialog onClose={close} />;
     case 'motion': return <MotionDialog onClose={close} />;
-    case 'hvac': return <HvacDialog hk={(d as { hk: string }).hk} onClose={close} />;
-    case 'spiro': return <SpiroDialog sk={(d as { sk: string }).sk} onClose={close} />;
+    case 'hvac': return <HvacDialog key={`${(d as { hk: string }).hk}${(d as { shape?: string }).shape ?? ''}`} hk={(d as { hk: string }).hk} shape0={(d as { shape?: DuctShape }).shape} onClose={close} />;
+    case 'spiro': return <SpiroDialog key={(d as { sk: string }).sk} sk={(d as { sk: string }).sk} onClose={close} />;
     case 'ductcalc': return <DuctCalcDialog onClose={close} />;
     case 'piping': return <PipingDialog pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} onClose={close} />;
     case 'ipart': return <IPartDialog onClose={close} />;
