@@ -23,6 +23,10 @@ const DIRS: ClipDir[] = ['-x', '+x', '-y', '+y', '-z', '+z'];
 const r2 = (x: number) => (Math.round(x * 100) / 100).toFixed(2);
 const axOfPlane = (p: ClipPlaneName) => (p.startsWith('XY') ? 2 : p.startsWith('XZ') ? 1 : 0);
 
+/** Flechas del paso (dibujadas, no dependen de la fuente) y cruz del punto 3D */
+const ArrowL = () => <svg width="20" height="14" viewBox="0 0 20 14" aria-hidden><path d="M1 7l7-6v4h11v4H8v4z" fill="currentColor" /></svg>;
+const ArrowR = () => <svg width="20" height="14" viewBox="0 0 20 14" aria-hidden><path d="M19 7l-7-6v4H1v4h11v4z" fill="currentColor" /></svg>;
+const Cross = () => <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden><circle cx="7" cy="7" r="3.2" /><path d="M7 0.5v4M7 9.5v4M0.5 7h4M9.5 7h4" /><circle cx="7" cy="7" r=".9" fill="currentColor" stroke="none" /></svg>;
 const IcoPlane = () => <svg width="18" height="16" viewBox="0 0 18 16" fill="none" stroke="currentColor" strokeWidth="1.2"><rect x="3.5" y="5.5" width="11" height="5" /><path d="M9 1.5v13" strokeWidth="1.6" /></svg>;
 const IcoSlab = () => <svg width="18" height="16" viewBox="0 0 18 16" fill="none" stroke="currentColor" strokeWidth="1.2"><rect x="3.5" y="5.5" width="11" height="5" /><path d="M7 1.5v13M11 1.5v13" strokeWidth="1.4" /><rect x="7" y="5.5" width="4" height="5" fill="currentColor" fillOpacity=".22" stroke="none" /></svg>;
 
@@ -53,6 +57,19 @@ export default function ClipBar() {
   const ct = useStore((s) => s.clipTool);
   const set = (p: Partial<ClipTool>) => { const c = useStore.getState().clipTool; if (c) useStore.setState({ clipTool: { ...c, ...p } }); };
   const [ptOpen, setPtOpen] = useState(false);
+  const [pkind, setPkind] = useState<PickKind>('auto');
+  // Atajos: Shift+F cara, Shift+G arista, Shift+V vértice (abren la ventana «Punto 3D» con esa designación)
+  useEffect(() => {
+    if (!ct) return;
+    const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || (t && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))) return;
+      const k = ({ KeyF: 'face', KeyG: 'edge', KeyV: 'vertex' } as Record<string, PickKind>)[e.code]; if (!k) return;
+      e.preventDefault(); e.stopPropagation(); setPkind(k); setPtOpen(true);
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, [!ct]);
   const [coord, setCoord] = useState('0.00');
   const [stepTxt, setStepTxt] = useState('100.00');
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
@@ -127,18 +144,18 @@ export default function ClipBar() {
           </div>
           <div className="cb-row">
             <input className="cb-num" value={coord} disabled={!M && ct.plane === '*'} title="Coordenada del plano en su eje (mm) · Intro aplica" onChange={(e) => setCoord(e.target.value)} onBlur={applyCoord} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') applyCoord(); }} />
-            <button className={`cb-b cb-pt ${ptOpen ? 'on' : ''}`} title="Punto 3D: por dónde pasa el plano" onClick={() => setPtOpen(!ptOpen)}>⌖</button>
-            <button className="cb-arrow" title="Mover el plano hacia − el valor del paso" onClick={() => nudge(-1)}>🡄</button>
+            <button className={`cb-b cb-pt ${ptOpen ? 'on' : ''}`} title="Punto 3D: por dónde pasa el plano (Shift+F cara · Shift+G arista · Shift+V vértice)" onClick={() => setPtOpen(!ptOpen)}><Cross /></button>
+            <button className="cb-arrow" title="Menos: mueve el plano hacia − el valor del paso" onClick={() => nudge(-1)}><ArrowL /></button>
             <input className="cb-num cb-step" value={stepTxt} title="Paso de las flechas y espesor de la franja (mm)" onChange={(e) => setStepTxt(e.target.value)}
               onBlur={() => { const v = parseFloat(stepTxt.replace(',', '.')); if (v > 0) set({ step: v }); else setStepTxt(r2(ct.step)); }}
               onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
-            <button className="cb-arrow" title="Mover el plano hacia + el valor del paso" onClick={() => nudge(1)}>🡆</button>
+            <button className="cb-arrow" title="Más: mueve el plano hacia + el valor del paso" onClick={() => nudge(1)}><ArrowR /></button>
             <input className="cb-slider cb-slider-r" type="range" min={0} max={1000} disabled={!M} value={M ? Math.round(ct.mpos * 1000) : 0} onChange={(e) => set({ mpos: +e.target.value / 1000 })} title="Modo M: lleva el plano desde el punto (0 %) hasta el final del modelo (100 %)" />
             <span className="cb-pct">{M ? pct(ct.mpos) : '0%'}</span>
           </div>
         </div>
       </div>
-      {ptOpen && <Point3D at={(() => { const el = ref.current, W = (el?.offsetParent as HTMLElement | null)?.clientWidth ?? 1200, w = 330; if (!el) return { x: 8, y: 130 }; const right = el.offsetLeft + el.offsetWidth + 8; return right + w <= W ? { x: right, y: el.offsetTop } : { x: Math.max(8, W - w - 8), y: el.offsetTop + el.offsetHeight + 6 }; })()} onClose={() => setPtOpen(false)} />}
+      {ptOpen && <Point3D at={(() => { const el = ref.current, W = (el?.offsetParent as HTMLElement | null)?.clientWidth ?? 1200, w = 330; if (!el) return { x: 8, y: 130 }; const right = el.offsetLeft + el.offsetWidth + 8; return right + w <= W ? { x: right, y: el.offsetTop } : { x: Math.max(8, W - w - 8), y: el.offsetTop + el.offsetHeight + 6 }; })()} kind={pkind} setKind={setPkind} onClose={() => setPtOpen(false)} />}
     </>
   );
 }
@@ -147,12 +164,12 @@ export default function ClipBar() {
 const UNITS: Record<string, number> = { mm: 1, cm: 10, m: 1000, in: 25.4 };
 const KINDS: [PickKind, string, string][] = [
   ['cursor3d', 'Cursor 3D', 'Punto bajo el cursor sobre el modelo; fuera de él, en el plano de la pantalla'],
-  ['vertex', 'Vértice', 'Vértice (esquina) de una arista más cercano al cursor'],
-  ['face', 'Sobre Cara', 'Punto sobre una cara (con su normal)'],
+  ['vertex', 'Vértice', 'Vértice (esquina) más cercano al cursor · Shift+V'],
+  ['face', 'Sobre Cara', 'Punto sobre una cara (con su normal) · Shift+F'],
   ['pcon', 'Pcon', 'Punto de control: vértices, puntos medios de aristas y centros de arcos'],
   ['aux', 'Punto Auxiliar', 'Origen, centro del modelo, puntos de trabajo y ePoints'],
   ['cursor2d', 'Cursor 2D', 'Punto en el plano de la pantalla que pasa por el punto actual'],
-  ['edge', 'Sobre Arista', 'Punto sobre la arista más cercana al cursor'],
+  ['edge', 'Sobre Arista', 'Punto sobre la arista más cercana al cursor · Shift+G'],
 ];
 const ADV: [AdvKind, string][] = [['mid', 'Punto medio de arista'], ['center', 'Centro de arco o circunferencia'], ['facec', 'Centro de cara'], ['two', 'Punto medio entre dos puntos'], ['bbox', 'Centro del modelo'], ['origin', 'Origen (0, 0, 0)']];
 
@@ -181,9 +198,8 @@ function NumU({ mm, unit, onMm, disabled }: { mm: number; unit: string; onMm: (v
     onBlur={() => { setFocus(false); commit(); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />;
 }
 
-function Point3D({ onClose, at }: { onClose: () => void; at: { x: number; y: number } }) {
+function Point3D({ onClose, at, kind, setKind }: { onClose: () => void; at: { x: number; y: number }; kind: PickKind; setKind: (k: PickKind) => void }) {
   const ct0 = useRef(useStore.getState().clipTool);
-  const [kind, setKind] = useState<PickKind>('vertex');
   const [adv, setAdv] = useState<AdvKind>('mid');
   const [aux, setAux] = useState('o');
   const [p, setP] = useState<V3>([...(ct0.current?.pt ?? [0, 0, 0])] as V3);
@@ -249,19 +265,20 @@ function Point3D({ onClose, at }: { onClose: () => void; at: { x: number; y: num
     : kind === 'aux' ? 'Elige el punto auxiliar en la lista.'
     : kind === 'adv' && adv === 'two' ? 'Haz clic en dos puntos: se toma el punto medio.'
     : kind === 'adv' && (adv === 'bbox' || adv === 'origin') ? 'Punto fijo: pulsa Aceptar.'
-    : wait ? 'Haz clic en el modelo; los valores se actualizan y esperan a Aceptar.' : 'Haz clic en el modelo: el punto se aplica al momento.';
+    : (wait ? 'Haz clic en el modelo; los valores se actualizan y esperan a Aceptar.' : 'Haz clic en el modelo: el punto se aplica al momento.') + ' Shift+F cara · Shift+G arista · Shift+V vértice.';
 
   return (
     <div className="p3" style={{ left: pos.x, top: pos.y }} role="dialog" aria-label="Punto 3D"
       onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') cancel(); }}>
       <div className="p3-ttl" onPointerDown={drag}>
-        <span className="p3-logo">⌖</span><span>Punto 3D</span><span style={{ flex: 1 }} />
+        <span className="p3-logo"><Cross /></span><span>Punto 3D</span><span style={{ flex: 1 }} />
         <button className="p3-close" title="Cerrar (Cancelar)" onClick={cancel}>✕</button>
       </div>
       <div className="p3-body">
         <fieldset className="p3-fs">
           <legend>Opciones de punto</legend>
           <div className="p3-grid">
+            <label className="p3-r p3-auto" title="Toma el vértice más cercano; si no hay, la arista; si no, la cara"><input type="radio" name="p3k" checked={kind === 'auto'} onChange={() => setKind('auto')} /> Automático: cara, arista o vértice</label>
             {KINDS.map(([k, l, t]) => (
               <label key={k} className="p3-r" title={t}><input type="radio" name="p3k" checked={kind === k} onChange={() => setKind(k)} /> {l}</label>
             ))}

@@ -501,6 +501,15 @@ export class View3D {
       return best;
     };
     switch (kind) {
+      case 'auto': { // vértice si está cerca, si no arista, si no cara
+        const c: { p: THREE.Vector3; what: string }[] = [];
+        for (const { topo, mw } of sets()) for (const v of topo.corners) c.push({ p: v.clone().applyMatrix4(mw), what: 'Vértice' });
+        let best: PickRes | null = null, bd = 10;
+        for (const q of c) { if (!this.visible(q.p)) continue; const d = this.scr(q.p).distanceTo(m); if (d < bd) { bd = d; best = { p: q.p, n: hitN, what: 'Vértice' }; } }
+        if (best) return best;
+        const e = nearestChain(); if (e && e.d < 7) return { p: e.p, n: hitN, what: 'Arista' };
+        return h ? { p: h.point.clone(), n: hitN, what: 'Cara' } : null;
+      }
       case 'cursor3d': return h ? { p: h.point.clone(), n: hitN, what: 'Cursor 3D' } : viewPlane();
       case 'cursor2d': return viewPlane();
       case 'face': return h ? { p: h.point.clone(), n: hitN, what: 'Sobre cara' } : null;
@@ -702,7 +711,7 @@ export function faceVertices(m: MeshData, group: number): THREE.Vector3[] {
 }
 
 // ---------- Designación de puntos: tipos y topología de aristas ----------
-export type PickKind = 'cursor3d' | 'vertex' | 'face' | 'pcon' | 'aux' | 'cursor2d' | 'edge' | 'adv';
+export type PickKind = 'auto' | 'cursor3d' | 'vertex' | 'face' | 'pcon' | 'aux' | 'cursor2d' | 'edge' | 'adv';
 export type AdvKind = 'mid' | 'center' | 'facec' | 'two' | 'bbox' | 'origin';
 export interface PickRes { p: THREE.Vector3; n?: THREE.Vector3; what: string }
 interface EdgeTopo { corners: THREE.Vector3[]; chains: THREE.Vector3[][] }

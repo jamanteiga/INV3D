@@ -646,13 +646,14 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .cb-sel:disabled { color: var(--cb-dis); background: #f7f7f7; }
 .cb-num { width: 66px; height: 22px; border: 1px solid #c4c4c4; border-radius: 2px; padding: 0 4px; text-align: center; font: 12px "Segoe UI", system-ui, sans-serif; background: #fff; color: var(--cb-fg); }
 .cb-num:disabled { color: var(--cb-dis); background: #f7f7f7; }
-.cb-arrow { border: 0; background: none; color: #1d3a9e; font-size: 17px; line-height: 1; cursor: pointer; padding: 0 1px; }
+.cb-arrow { border: 0; background: none; color: #1d3a9e; line-height: 0; cursor: pointer; padding: 2px 1px; display: inline-grid; place-items: center; }
 .cb-arrow:hover { color: #0a6fd6; }
 .cb-pt { min-width: 22px; width: 22px; font-size: 14px; }
 /* Ventana «Punto 3D» */
 .p3 { position: absolute; z-index: 40; width: 318px; background: #fff; border: 1px solid #b9b9b9; box-shadow: 0 6px 22px rgba(0,0,0,.28); font: 12px "Segoe UI", system-ui, sans-serif; color: #1b1b1b; user-select: none; }
 .p3-ttl { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 0 0 9px; cursor: move; }
-.p3-logo { color: #1d3a9e; font-weight: 700; font-size: 15px; }
+.p3-logo { color: #1d3a9e; display: inline-grid; }
+.p3-auto { grid-column: 1 / -1; font-weight: 600; }
 .p3-close { width: 40px; height: 30px; border: 0; background: none; font-size: 13px; cursor: pointer; }
 .p3-close:hover { background: #e81123; color: #fff; }
 .p3-body { padding: 2px 9px 9px; display: flex; flex-direction: column; gap: 6px; }
