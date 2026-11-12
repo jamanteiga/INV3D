@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   newDoc, uid, nextName, consumedSketches, newSheetDoc, docParams,
   type PartDoc, type Feature, type PlaneRef, type SkEntity, type SketchF, type V3, type ConstraintType, type SkConstraint,
+  syncModelParams,
 } from './doc';
 import { makeEval } from './expr';
 import { solve, applySolution, checkNew } from './sketch';
@@ -82,7 +83,9 @@ export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' }
+  | { kind: 'auxsketch'; init?: { pt?: string; ax?: string } }
+  | { kind: 'asmaux'; aux: 'axis' | 'point' }
   | { kind: 'sketch3d'; id?: string }
   | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN' }
   | { kind: 'hvac'; hk: string; shape?: 'rect' | 'round' | 'oval' }
@@ -252,6 +255,7 @@ const lastBody = (doc: PartDoc) => [...doc.features].reverse().find((f) => ['ext
 function makeSafeEval(doc: PartDoc) { const e = makeEval(docParams(doc)); return (x: string) => { try { return e(x); } catch { return NaN; } }; }
 /** Vuelve a resolver los bocetos con restricciones (p. ej. tras cambiar un parámetro). */
 function resolveAll(doc: PartDoc, skip?: string) {
+  syncModelParams(doc); // c1, c2… para los valores nuevos de las operaciones
   let ev: ((x: string) => number) | null = null;
   for (const f of doc.features) {
     if (f.type !== 'sketch' || !f.constraints?.length || f.id === skip) continue;
@@ -555,7 +559,8 @@ export const useStore = create<State>((set, get) => ({
         case 'fillet': draft = { id, name, type: 'fillet', radius: '2 mm', edges: { mode: 'picked', points: [] } }; break;
         case 'chamfer': draft = { id, name, type: 'chamfer', distance: '1 mm', edges: { mode: 'picked', points: [] } }; break;
         case 'hole': draft = { id, name, type: 'hole', sketch: lastSketch(doc, (s) => s.entities.some((e) => e.type === 'point' || e.type === 'circle')),
-          dia: '10 mm', depth: '20 mm', through: true, kind: 'simple', cbDia: '18 mm', cbDepth: '10 mm', csDia: '20 mm', csAngle: '90 deg', thread: '' }; break;
+          dia: '11 mm', depth: '20 mm', through: true, kind: 'simple', cbDia: '18 mm', cbDepth: '10.6 mm', csDia: '22.8 mm', csAngle: '90 deg', thread: '',
+          std: 'M', fastener: 'iso4762', size: '10', fit: 'normal', tipAngle: '118 deg', tapDepth: '15 mm', cosmetic: true, slotLen: '20 mm', slotAng: '0 deg' }; break;
         case 'pattern': draft = { id, name, type: 'pattern', ptype: 'rect', features: body ? [body] : [], dir1: 'X', n1: '3', d1: '30 mm', dir2: '', n2: '2', d2: '30 mm', axis: 'Z', count: '6', angle: '360 deg' }; break;
         case 'mirror': draft = { id, name, type: 'mirror', features: [], plane: 'YZ' }; break;
         case 'shell': draft = { id, name, type: 'shell', thickness: '2 mm', faces: [] }; break;
@@ -585,7 +590,7 @@ export const useStore = create<State>((set, get) => ({
         case 'split': draft = { id, name, type: 'split', plane: { kind: 'std', name: 'XY', offset: '0' }, keep: 'pos' }; break;
         case 'draft': draft = { id, name, type: 'draft', faces: [], angle: '3 deg', plane: { kind: 'std', name: 'XY', offset: '0' } }; break;
         case 'thicken': draft = { id, name, type: 'thicken', faces: [], distance: '2 mm', op: 'join' }; break;
-        case 'thread': draft = { id, name, type: 'thread', faces: [], designation: 'M10x1.5', length: '20 mm', full: true }; break;
+        case 'thread': draft = { id, name, type: 'thread', faces: [], designation: 'M10x1.5', length: '20 mm', full: true, std: 'M', offset: '0 mm' }; break;
         case 'workaxis': draft = { id, name, type: 'workaxis', origin: ['0', '0', '0'], dir: ['0', '0', '1'] }; break;
         case 'workpoint': draft = { id, name, type: 'workpoint', origin: ['0', '0', '0'] }; break;
         case 'combine': draft = { id, name, type: 'combine', faces: [], op: 'join', keep: false }; break;

@@ -20,6 +20,8 @@ export interface AppSettings {
   showEdges: boolean;
   /** Estilo de iconos de la interfaz */
   iconTheme?: IconTheme;
+  /** Referencias a objetos (tipo osnap): activadas y modos */
+  osnap?: { on: boolean; modes: string[] };
 }
 export const DEFAULT_SETTINGS: AppSettings = {
   userName: '', company: '', defaultMaterial: 'Acero S275JR', restoreSession: true, autosave: true, autosaveFolder: false,

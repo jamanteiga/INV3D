@@ -7,7 +7,7 @@ import { openSegments, findLoops, loopPolyline, polyArea, pointInPoly, type Seg 
 import type { Drawing, Shape3D, EdgeFinder } from 'replicad';
 import { makeEval } from '../core/expr';
 import {
-  docParams, planeFrame, entityOutline, npolyPoints, toWorld, v3, workPlaneFrame, splineBeziers,
+  docParams, planeFrame, entityOutline, npolyPoints, toWorld, v3, workPlaneFrame, registerAux, splineBeziers,
   type PartDoc, type SkEntity, type SketchF, type Feature, type EdgeSel, type Frame, type V3, type V2,
   type WorkPlanes, type BoolOp, type SmFlangeF, type Sketch3dF, type E3,
 } from '../core/doc';
@@ -280,28 +280,67 @@ export function sampleClosed(w: any, n: number): V3[] {
 }
 
 /** Sólido herramienta de un agujero (revolución de la media sección) en un punto. */
-function holeTool(f: Extract<Feature, { type: 'hole' }>, P: V3, n: V3, ev: Ev, through: number): Shape3D {
+/** Ranura recta (coliso) centrada en el origen a lo largo de X: longitud entre centros «len», anchura «w» */
+function stadium(len: number, w: number): Drawing {
+  if (len < 1e-6) return drawCircle(w / 2);
+  const x1 = -len / 2, x2 = len / 2, r = w / 2;
+  return draw([x1, r]).lineTo([x2, r]).threePointsArcTo([x2, -r], [x2 + r, 0]).lineTo([x1, -r]).threePointsArcTo([x1, r], [x1 - r, 0]).close();
+}
+/** Herramienta de taladro (asistente tipo SolidWorks): escariado, avellanado, taladro, roscado, roscado cónico,
+ *  heredado, ranuras (simple, escariada, avellanada) y avanzado (escalonado). Se corta hacia −n desde P. */
+function holeTool(f: Extract<Feature, { type: 'hole' }>, P: V3, n: V3, ev: Ev, through: number, xd: V3 = [1, 0, 0]): Shape3D {
+  const kind = f.kind ?? 'simple';
   const d = ev(f.dia);
   if (!(d > 0)) throw new Error('Diámetro no válido');
   const L = f.through ? through : ev(f.depth);
   if (!(L > 0)) throw new Error('Profundidad no válida');
-  const e = 0.05;
-  const pts: V2[] = [[0, e]];
-  if (f.kind === 'cbore') {
-    const cb = ev(f.cbDia) / 2, cbd = ev(f.cbDepth);
-    if (!(cb * 2 > d && cbd > 0)) throw new Error('Refrentado mayor que el taladro');
-    pts.push([cb, e], [cb, -cbd], [d / 2, -cbd]);
-  } else if (f.kind === 'csink') {
-    const cs = ev(f.csDia) / 2, ang = ev(f.csAngle);
-    if (!(cs * 2 > d)) throw new Error('Avellanado mayor que el taladro');
-    const depth = (cs - d / 2) / Math.tan((ang * Math.PI) / 360);
-    pts.push([cs, e], [cs, 0], [d / 2, -depth]);
-  } else pts.push([d / 2, e]);
-  pts.push([d / 2, -L]);
-  // Punta de broca a 118° en agujeros ciegos
-  if (!f.through) pts.push([0, -L - (d / 2) / Math.tan((59 * Math.PI) / 180)]); else pts.push([0, -L]);
+  const e = 0.05, D2 = Math.PI / 180;
   let u = v3.cross(n, [0, 0, 1]); if (v3.len(u) < 1e-6) u = v3.cross(n, [1, 0, 0]);
   u = v3.norm(u);
+  // ---- ranuras: se extruye un coliso ----
+  if (kind === 'slot' || kind === 'cbslot' || kind === 'csslot') {
+    const len = ev(f.slotLen || '20 mm'), ang = ev(f.slotAng || '0 deg') * D2;
+    const x0 = v3.norm(v3.sub(xd, v3.mul(n, v3.dot(xd, n)))), y0 = v3.cross(n, x0);
+    const x = v3.add(v3.mul(x0, Math.cos(ang)), v3.mul(y0, Math.sin(ang)));
+    const neg = v3.mul(n, -1);
+    const at = (o: V3) => new Plane(o, x, neg);
+    let tool = (stadium(len, d).sketchOnPlane(at(v3.add(P, v3.mul(n, e)))) as any).extrude(L + e) as Shape3D;
+    if (kind === 'cbslot') {
+      const cb = ev(f.cbDia), cbd = ev(f.cbDepth);
+      if (!(cb > d && cbd > 0)) throw new Error('El escariado de la ranura debe ser mayor que la ranura');
+      tool = tool.fuse((stadium(len, cb).sketchOnPlane(at(v3.add(P, v3.mul(n, e)))) as any).extrude(cbd + e));
+    } else if (kind === 'csslot') {
+      const cs = ev(f.csDia), a = ev(f.csAngle || '90 deg');
+      if (!(cs > d)) throw new Error('El avellanado de la ranura debe ser mayor que la ranura');
+      const h = (cs - d) / 2 / Math.tan((a / 2) * D2);
+      const top = (stadium(len, cs).sketchOnPlane(at(P)) as any), bot = (stadium(len, d).sketchOnPlane(at(v3.add(P, v3.mul(n, -h)))) as any);
+      tool = tool.fuse(top.loftWith([bot]) as Shape3D);
+    }
+    return tool;
+  }
+  // ---- taladros redondos: perfil de revolución (radio, altura sobre P) ----
+  const pts: V2[] = [];
+  const csTop = (csD: number, ang: number) => { if (!(csD > d)) throw new Error('Avellanado mayor que el taladro'); const h = (csD - d) / 2 / Math.tan((ang / 2) * D2); pts.push([0, e], [csD / 2, e], [csD / 2, 0], [d / 2, -h]); };
+  const cbTop = (cb: number, cbd: number) => { if (!(cb > d && cbd > 0)) throw new Error('Escariado mayor que el taladro'); pts.push([0, e], [cb / 2, e], [cb / 2, -cbd], [d / 2, -cbd]); };
+  const sub = kind === 'legacy' ? f.legacyKind ?? 'simple' : kind === 'adv' ? f.advNear ?? 'cbore' : kind;
+  if (sub === 'cbore') cbTop(ev(f.cbDia), ev(f.cbDepth));
+  else if (sub === 'csink') csTop(ev(f.csDia), ev(f.csAngle || '90 deg'));
+  else if (sub === 'cdrill') { // abocardado: escariado con fondo cónico a 118°
+    const cb = ev(f.cbDia), cbd = ev(f.cbDepth); if (!(cb > d && cbd > 0)) throw new Error('Abocardado mayor que el taladro');
+    pts.push([0, e], [cb / 2, e], [cb / 2, -cbd], [d / 2, -cbd - (cb - d) / 2 / Math.tan(59 * D2)]);
+  } else if (f.nearCs) csTop(ev(f.nearCsDia || `${d * 1.6} mm`), ev(f.nearCsAngle || '90 deg'));
+  else pts.push([0, e], [d / 2, e]);
+  if (kind === 'ptap') pts.push([d / 2 - L / 32, -L]); // conicidad 1:16 en diámetro
+  else pts.push([d / 2, -L]);
+  let bottom = -L;
+  // taladro avanzado: segundo diámetro tras el primero
+  if (kind === 'adv' && !f.through && f.step2Dia) {
+    const d2 = ev(f.step2Dia), l2 = ev(f.step2Depth || '10 mm');
+    if (d2 > 0 && d2 < d && l2 > 0) { pts.push([d2 / 2, -L], [d2 / 2, -L - l2]); bottom = -L - l2; }
+  }
+  const rb = kind === 'adv' && bottom !== -L ? ev(f.step2Dia!) / 2 : kind === 'ptap' ? d / 2 - L / 32 : d / 2;
+  const tipA = ev(f.tipAngle || '118 deg');
+  if (!f.through && tipA > 0 && tipA < 180) pts.push([0, bottom - rb / Math.tan((tipA / 2) * D2)]); else pts.push([0, bottom]);
   const pl = new Plane(P, u, v3.cross(u, n));
   return (polyDrawing(pts).sketchOnPlane(pl) as any).revolve(n, { origin: P });
 }
@@ -547,7 +586,7 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
       if (shape) { const b = shape.boundingBox.bounds; through = v3.len(v3.sub(b[1] as V3, b[0] as V3)) * 2 + 10; }
       let tool: Shape3D | null = null;
       for (const c of centers) {
-        const t = holeTool(f, toWorld(fr, c[0], c[1]), fr.normal, ev, through);
+        const t = holeTool(f, toWorld(fr, c[0], c[1]), fr.normal, ev, through, fr.xDir);
         tool = tool ? tool.fuse(t) : t;
       }
       return { solid: tool!, op: 'cut' };
@@ -631,8 +670,8 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
           planeFrame(f.plane, ev, ctx.work);
           ctx.sketches.set(f.id, f);
           break;
-        case 'workplane':
-          ctx.work.set(f.id, workPlaneFrame(f, ev, ctx.work));
+        case 'workplane': case 'workpoint': case 'workaxis':
+          registerAux(ctx.work, f, ev);
           break;
         case 'sketch3d':
           wire3d(f, ev);
@@ -737,7 +776,6 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
           }
           break;
         }
-        case 'workaxis': case 'workpoint': break;
         case 'combine': {
           if (!shape) throw new Error('No hay sólidos');
           const solids = ((shape as any).solids ?? [shape]) as Shape3D[];
@@ -923,7 +961,7 @@ export function flatPattern(doc: PartDoc) {
     if (f.suppressed) continue;
     if (f.type === 'sketch') sketches.set(f.id, f);
     if (f.type === 'sketch3d') sk3.set(f.id, f);
-    if (f.type === 'workplane') work.set(f.id, workPlaneFrame(f, ev, work));
+    if (f.type === 'workplane' || f.type === 'workpoint' || f.type === 'workaxis') registerAux(work, f, ev);
     if (f.type === 'sm_loft' && !base && !flat) {
       const wire = (id: string) => { const a = sk3.get(id); if (a) return wire3d(a, ev); const sk = sketches.get(id); if (!sk) throw new Error('Boceto no encontrado'); return (sketchProfile(sk, ev, true).sketchOnPlane(makePlane(planeFrame(sk.plane, ev, work))) as any).wire; };
       const N = Math.max(8, Math.min(200, Math.round(ev(f.segments) || 24)));

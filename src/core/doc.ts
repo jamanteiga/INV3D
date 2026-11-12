@@ -1,7 +1,7 @@
 import { PIPE_MATERIALS } from './pipedata';
 import { HVAC_MATERIALS } from './hvacdata';
 // Modelo de datos del formato de pieza INV3D (.i3p)
-import type { Param } from './expr';
+import { evaluate, type Param } from './expr';
 
 export type V3 = [number, number, number];
 export type V2 = [number, number];
@@ -11,7 +11,9 @@ export type StdPlane = 'XY' | 'XZ' | 'YZ';
 export type PlaneRef =
   | { kind: 'std'; name: StdPlane; offset: string }
   | { kind: 'custom'; label: string; origin: V3; xDir: V3; normal: V3 }
-  | { kind: 'work'; id: string };
+  | { kind: 'work'; id: string }
+  /** Plano por un punto auxiliar: paralelo a XY/XZ/YZ, o normal a un eje auxiliar */
+  | { kind: 'aux'; pt: string; on?: StdPlane; ax?: string };
 
 /** Banderas comunes: construcción (no forma perfiles) y referencia (geometría proyectada, fija). */
 interface EFlags { construction?: boolean; ref?: boolean; center?: boolean }
@@ -62,10 +64,22 @@ export interface RevolveF extends FBase { type: 'revolve'; profile: string; axis
 export interface FilletF extends FBase { type: 'fillet'; radius: string; edges: EdgeSel }
 export interface ChamferF extends FBase { type: 'chamfer'; distance: string; edges: EdgeSel }
 export interface ImportF extends FBase { type: 'import'; fileName: string; step: string }
-export type HoleKind = 'simple' | 'cbore' | 'csink';
+export type HoleKind = import('./holes').HoleType;
 export interface HoleF extends FBase {
   type: 'hole'; sketch: string; dia: string; depth: string; through: boolean; kind: HoleKind;
   cbDia: string; cbDepth: string; csDia: string; csAngle: string; thread: string;
+  /** Asistente: norma de rosca, tornillo, tamaño nominal y ajuste ISO 273 */
+  std?: import('./holes').ThreadStd; fastener?: import('./holes').Fastener; size?: string; fit?: import('./holes').Fit;
+  /** Roscado: profundidad de rosca y rosca cosmética visible */
+  tapDepth?: string; cosmetic?: boolean;
+  /** Ranuras: longitud entre centros y giro respecto al eje X del boceto */
+  slotLen?: string; slotAng?: string;
+  /** Ángulo de punta de broca (ciego) */
+  tipAngle?: string;
+  /** Avellanado del lado cercano (taladro y roscados) */
+  nearCs?: boolean; nearCsDia?: string; nearCsAngle?: string;
+  /** Heredado: tipo manual; avanzado: elemento del lado cercano y segundo diámetro */
+  legacyKind?: 'simple' | 'cbore' | 'csink' | 'cdrill'; advNear?: 'none' | 'cbore' | 'csink'; step2Dia?: string; step2Depth?: string;
 }
 export type AxisName = 'X' | 'Y' | 'Z';
 export interface PatternF extends FBase {
@@ -86,7 +100,11 @@ export interface CoilF extends FBase { type: 'coil'; profile: string; axis: stri
 export interface SplitF extends FBase { type: 'split'; plane: PlaneRef; keep: 'pos' | 'neg' }
 export interface DraftF extends FBase { type: 'draft'; faces: V3[]; angle: string; plane: PlaneRef }
 export interface ThickenF extends FBase { type: 'thicken'; faces: V3[]; distance: string; op: BoolOp; /** engrosar una superficie en lugar de caras del sólido */ surface?: string }
-export interface ThreadF extends FBase { type: 'thread'; faces: V3[]; designation: string; length: string; full: boolean }
+export interface ThreadF extends FBase {
+  type: 'thread'; faces: V3[]; designation: string; length: string; full: boolean;
+  /** Norma de rosca, desfase desde el extremo, rosca a izquierdas y clase de tolerancia (6H / 6g) */
+  std?: import('./holes').ThreadStd; offset?: string; left?: boolean; cls?: string;
+}
 /** Combinar cuerpos (cuerpos múltiples): faces[0] = cuerpo base, resto = herramientas */
 export interface CombineF extends FBase { type: 'combine'; faces: V3[]; op: 'join' | 'cut' | 'intersect'; keep: boolean }
 /** Mover o copiar cuerpo: traslación + giro (eje por el origen). Sin caras = todos los cuerpos */
@@ -141,19 +159,80 @@ export interface PartDoc {
   units: 'mm';
   iProperties: IProps;
   parameters: Param[];
-  /** Tabla iPart (familia de piezas) */
+  /** Tabla eFamily (familia de piezas) */
   ipart?: { cols: string[]; rows: { name: string; values: string[] }[]; active: number };
   features: Feature[];
   /** Pieza de chapa: espesor, radio de plegado interior y factor K */
   sheet?: { t: string; r: string; k: string };
   /** ePoints: puntos de conexión para ensamblar (coincidencia, inserción, compuesto) */
   epoints?: import('./epoints').EPoint[];
+  /** Parámetros de modelo de las operaciones: { idOperación: { campo: 'c7' } } (c1, c2… automáticos) */
+  pnames?: Record<string, Record<string, string>>;
 }
 
-/** Parámetros del documento: de usuario + parámetros del modelo (cotas de boceto d0, d1…). */
+// ---------- Parámetros de modelo c1, c2… (un parámetro por cada valor de cada operación y cada cota de boceto) ----------
+/** Campos de operación que nunca son valores (referencias, textos, modos) */
+const NOT_VALUE = new Set(['std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec']);
+/** Nombre legible de cada campo (para la tabla de parámetros) */
+export const FIELD_NAMES: Record<string, string> = {
+  distance: 'Distancia', distance2: 'Distancia 2', angle: 'Ángulo', radius: 'Radio', depth: 'Profundidad', dia: 'Diámetro', thickness: 'Espesor', offset: 'Desfase',
+  length: 'Longitud', width: 'Anchura', height: 'Altura', pitch: 'Paso', turns: 'Vueltas', count: 'Número', n1: 'Número 1', n2: 'Número 2', d1: 'Separación 1', d2: 'Separación 2',
+  cbDia: 'Ø escariado', cbDepth: 'Prof. escariado', csDia: 'Ø avellanado', csAngle: 'Ángulo avellanado', d: 'Diámetro', w: 'Anchura', h: 'Altura', rot: 'Giro', scale: 'Escala',
+  dx: 'Desplazamiento X', dy: 'Desplazamiento Y', dz: 'Desplazamiento Z', segments: 'Segmentos', taper: 'Conicidad', tipAngle: 'Ángulo de punta', farDia: 'Ø lado opuesto', slotLen: 'Longitud de ranura',
+  'origin[0]': 'Origen X', 'origin[1]': 'Origen Y', 'origin[2]': 'Origen Z', 'dir[0]': 'Dirección X', 'dir[1]': 'Dirección Y', 'dir[2]': 'Dirección Z',
+};
+/** Valores numéricos (expresiones) de una operación: [campo, expresión] */
+export function featureValues(f: Feature): [string, string][] {
+  if (f.type === 'sketch' || f.type === 'sketch3d' || f.type === 'import' || f.type === 'derive') return [];
+  const out: [string, string][] = [];
+  const isNum = (v: string) => { if (!v || !/[0-9]/.test(v)) return false; try { return isFinite(evaluate(v, () => 1)); } catch { return false; } };
+  for (const [k, v] of Object.entries(f)) {
+    if (NOT_VALUE.has(k)) continue;
+    if (typeof v === 'string' && isNum(v)) out.push([k, v]);
+    else if (Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'string') && (k === 'origin' || k === 'dir')) v.forEach((x, i) => { if (isNum(x)) out.push([`${k}[${i}]`, x]); });
+  }
+  return out;
+}
+const getField = (f: Feature, k: string): string | undefined => { const m = /^(\w+)\[(\d)\]$/.exec(k); const o = f as any; return m ? o[m[1]]?.[+m[2]] : o[k]; };
+export function setFeatureField(f: Feature, k: string, v: string) { const m = /^(\w+)\[(\d)\]$/.exec(k); const o = f as any; if (m) o[m[1]][+m[2]] = v; else o[k] = v; }
+/** Índice siguiente libre de cN en el documento */
+function nextC(doc: PartDoc, extra: Set<string> = new Set()) {
+  let mx = 0;
+  const see = (n?: string) => { const m = /^c(\d+)$/.exec(n ?? ''); if (m) mx = Math.max(mx, +m[1]); };
+  doc.parameters.forEach((p) => see(p.name));
+  for (const f of doc.features) if (f.type === 'sketch') (f.constraints ?? []).forEach((c) => see(c.name));
+  for (const m of Object.values(doc.pnames ?? {})) Object.values(m).forEach(see);
+  extra.forEach(see);
+  return mx + 1;
+}
+/** Nombre siguiente para una cota de boceto (c1, c2…) */
+export const nextCName = (doc: PartDoc) => `c${nextC(doc)}`;
+/** Asigna c1, c2… a los valores de las operaciones que aún no tienen nombre y quita los de operaciones borradas */
+export function syncModelParams(doc: PartDoc) {
+  const pn = (doc.pnames ??= {});
+  const ids = new Set(doc.features.map((f) => f.id));
+  for (const id of Object.keys(pn)) if (!ids.has(id)) delete pn[id];
+  let n = nextC(doc);
+  for (const f of doc.features) {
+    const vals = featureValues(f);
+    if (!vals.length) { delete pn[f.id]; continue; }
+    const m = (pn[f.id] ??= {});
+    for (const k of Object.keys(m)) if (!vals.some(([q]) => q === k)) delete m[k];
+    for (const [k] of vals) if (!m[k]) m[k] = `c${n++}`;
+  }
+}
+/** Parámetros de modelo de las operaciones (nombre, expresión, operación, campo) */
+export function featureParams(doc: PartDoc): { name: string; expr: string; feature: Feature; field: string }[] {
+  const out: { name: string; expr: string; feature: Feature; field: string }[] = [];
+  for (const f of doc.features) for (const [k, name] of Object.entries(doc.pnames?.[f.id] ?? {})) { const e = getField(f, k); if (e != null) out.push({ name, expr: e, feature: f, field: k }); }
+  return out.sort((a, b) => +a.name.slice(1) - +b.name.slice(1));
+}
+
+/** Parámetros del documento: de usuario + parámetros del modelo (cotas de boceto y valores de operaciones c1, c2…). */
 export function docParams(doc: PartDoc): Param[] {
   const out: Param[] = [...doc.parameters];
   const names = new Set(out.map((p) => p.name));
+  for (const p of featureParams(doc)) if (!names.has(p.name) && p.expr.trim() !== p.name) { out.push({ name: p.name, expr: p.expr, comment: '' }); names.add(p.name); }
   for (const f of doc.features) {
     if (f.type !== 'sketch') continue;
     for (const c of f.constraints ?? []) if (c.type === 'dim' && c.name && !c.driven && c.expr && !names.has(c.name)) { out.push({ name: c.name, expr: c.expr, comment: '' }); names.add(c.name); }
@@ -206,6 +285,20 @@ export function rotateAbout(v: V3, axis: V3, deg: number): V3 {
 }
 
 export function planeFrame(p: PlaneRef, ev: (s: string) => number, work?: WorkPlanes): Frame {
+  if (p.kind === 'aux') {
+    // puntos y ejes auxiliares se registran en el mapa como «pt:id» y «ax:id» (origen y dirección en normal)
+    const P = p.pt === 'O' ? { origin: [0, 0, 0] as V3 } : work?.get('pt:' + p.pt);
+    if (!P) throw new Error('Punto auxiliar no encontrado');
+    if (p.ax) {
+      const A = ['X', 'Y', 'Z'].includes(p.ax) ? { normal: (p.ax === 'X' ? [1, 0, 0] : p.ax === 'Y' ? [0, 1, 0] : [0, 0, 1]) as V3 } : work?.get('ax:' + p.ax);
+      if (!A) throw new Error('Eje auxiliar no encontrado');
+      const n = v3.norm(A.normal), ref: V3 = Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+      const x = v3.norm(v3.cross(ref, n));
+      return { origin: P.origin, xDir: x, normal: n, yDir: v3.cross(n, x) };
+    }
+    const st = PLANE_STD[p.on ?? 'XY'];
+    return { origin: P.origin, xDir: st.xDir, normal: st.normal, yDir: v3.cross(st.normal, st.xDir) };
+  }
   if (p.kind === 'work') {
     const f = work?.get(p.id);
     if (!f) throw new Error('Plano de trabajo no encontrado');
@@ -225,16 +318,30 @@ export const toWorld = (f: Frame, u: number, v: number): V3 =>
 
 export const planeLabel = (p: PlaneRef, doc?: PartDoc) =>
   p.kind === 'std' ? `Plano ${p.name}${p.offset && p.offset !== '0' ? ` + ${p.offset}` : ''}`
-    : p.kind === 'work' ? (doc?.features.find((f) => f.id === p.id)?.name ?? 'Plano de trabajo') : p.label;
+    : p.kind === 'work' ? (doc?.features.find((f) => f.id === p.id)?.name ?? 'Plano de trabajo')
+    : p.kind === 'aux' ? (() => { const nm = (id: string) => (id === 'O' ? 'Origen' : ['X', 'Y', 'Z'].includes(id) ? `Eje ${id}` : doc?.features.find((f) => f.id === id)?.name ?? '?');
+      return p.ax ? `Normal a ${nm(p.ax)} por ${nm(p.pt)}` : `${p.on ?? 'XY'} por ${nm(p.pt)}`; })()
+    : p.label;
 
 /** Resuelve los planos de trabajo de un documento (para dibujar y para bocetos sobre ellos). */
 export function resolveWorkPlanes(doc: PartDoc, ev: (s: string) => number): WorkPlanes {
   const m: WorkPlanes = new Map();
   for (const f of doc.features) {
-    if (f.type !== 'workplane' || f.suppressed) continue;
-    try { m.set(f.id, workPlaneFrame(f, ev, m)); } catch { /* inválido */ }
+    if (f.suppressed) continue;
+    try { registerAux(m, f, ev); } catch { /* inválido */ }
   }
   return m;
+}
+
+/** Registra planos («id»), puntos («pt:id») y ejes («ax:id») auxiliares en el mapa de referencias */
+export function registerAux(m: WorkPlanes, f: Feature, ev: (s: string) => number) {
+  if (f.type === 'workplane') m.set(f.id, workPlaneFrame(f, ev, m));
+  else if (f.type === 'workpoint') m.set('pt:' + f.id, { origin: f.origin.map(ev) as V3, xDir: [1, 0, 0], yDir: [0, 1, 0], normal: [0, 0, 1] });
+  else if (f.type === 'workaxis') {
+    const n = v3.norm(f.dir.map(ev) as V3), o = f.origin.map(ev) as V3;
+    m.set('ax:' + f.id, { origin: o, xDir: [1, 0, 0], yDir: [0, 1, 0], normal: n });
+    m.set('pt:' + f.id, { origin: o, xDir: [1, 0, 0], yDir: [0, 1, 0], normal: n }); // el origen del eje también vale como punto
+  }
 }
 
 export function workPlaneFrame(f: WorkPlaneF, ev: (s: string) => number, work: WorkPlanes): Frame {
@@ -369,8 +476,10 @@ export function newDoc(): PartDoc {
 let _seq = 0;
 export const uid = (p = 'e') => `${p}${Date.now().toString(36)}${(_seq++).toString(36)}`;
 
+/** Prefijos de los auxiliares: planos P1, P2…, ejes E1, E2…, puntos pt1, pt2… */
+export const AUX_PREFIX: Partial<Record<FeatureType, string>> = { workplane: 'P', workaxis: 'E', workpoint: 'pt' };
 export function nextName(doc: PartDoc, type: FeatureType): string {
-  const base = FEATURE_NAMES[type];
+  const base = AUX_PREFIX[type] ?? FEATURE_NAMES[type];
   let n = 1;
   const names = new Set(doc.features.map((f) => f.name));
   while (names.has(`${base}${n}`)) n++;
@@ -413,6 +522,7 @@ export function validateDoc(x: unknown): PartDoc {
   if (!d || d.format !== 'inv3d.part' || !Array.isArray(d.features)) throw new Error('No es un fichero de pieza INV3D (.i3p) válido');
   d.parameters ??= [];
   d.iProperties ??= newDoc().iProperties;
+  syncModelParams(d);
   return d;
 }
 

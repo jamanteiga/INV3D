@@ -280,6 +280,7 @@ export default function Ribbon() {
           <Group label="Boceto">
             <Big icon="sketch" label="Iniciar boceto 2D" kbd="S" active={tool === 'pickPlane'} onClick={P.startSketch} />
             <Big icon="sketch3d" label="Boceto 3D" onClick={() => s.open({ kind: 'sketch3d' })} title="Líneas, splines y hélices en el espacio (trayectorias y contornos)" />
+            <Big icon="workpoint" label="Boceto en auxiliar" onClick={() => s.open({ kind: 'auxsketch' })} title="Boceto por un punto auxiliar (paralelo a XY/XZ/YZ) o por punto y eje auxiliar (normal al eje)" />
           </Group>
           <Group label="Crear">
             <Big icon="extrude" label="Extrusión" kbd="E" onClick={() => s.openFeatureDialog('extrude')} />
@@ -350,8 +351,8 @@ export default function Ribbon() {
           <Group label="Parámetros">
             <Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} />
             <Col>
-              <Small icon="ipart" label="Tabla iPart" onClick={() => s.open({ kind: 'ipart' })} title="Familia de piezas: una fila por miembro" />
-              <Small icon="ifeature" label="iFeature" onClick={() => s.open({ kind: 'ifeature' })} title="Extraer o insertar operaciones reutilizables" />
+              <Small icon="ipart" label="Tabla eFamily" onClick={() => s.open({ kind: 'ipart' })} title="Familia de piezas: una fila por miembro" />
+              <Small icon="ifeature" label="eOperaciones" onClick={() => s.open({ kind: 'ifeature' })} title="Extraer o insertar operaciones reutilizables" />
             </Col>
           </Group>
         </>)}
@@ -404,7 +405,11 @@ export default function Ribbon() {
             </Col>
           </Group>
           <Group label="Geometría de trabajo">
-            <Big icon="workplane" label="Plano" onClick={() => A.openWorkPlane()} title="Plano de trabajo (auxiliar) del ensamblaje: desfase de un plano de origen o de una cara" />
+            <Big icon="workplane" label="Plano" onClick={() => A.openWorkPlane()} title="Plano auxiliar del ensamblaje (P1, P2…): desfase de un plano de origen o de una cara" />
+            <Col>
+              <Small icon="workaxis" label="Eje" onClick={() => s.open({ kind: 'asmaux', aux: 'axis' })} title="Eje auxiliar del ensamblaje (E1, E2…)" />
+              <Small icon="workpoint" label="Punto" onClick={() => s.open({ kind: 'asmaux', aux: 'point' })} title="Punto auxiliar del ensamblaje (pt1, pt2…)" />
+            </Col>
           </Group>
           <Group label="Esqueleto">
             <Big icon="skel" label="Línea 3D" onClick={() => A.openSkel()} title="Línea de esqueleto para la estructura" />
@@ -552,6 +557,7 @@ export default function Ribbon() {
             {k === 'part' && <Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} />}
             <Big icon="iprops" label="iProperties" onClick={() => s.open({ kind: 'iprops' })} />
             <Big icon="project" label="Proyectos" onClick={() => s.open({ kind: 'project' })} />
+            {(k === 'part' || k === 'assembly') && <Big icon="workpoint" label="Referencias a objetos" kbd="F3" onClick={() => s.open({ kind: 'osnap' })} title="Punto final, medio, centro, cuadrante, intersección, perpendicular, tangente, cercano, nodo, origen" />}
           </Group>
           <Group label="Intercambio">
             <Big icon="ilogic" label="Regla de exportación" onClick={() => s.open({ kind: 'ilogic' })} title="Regla (VB.NET) para exportar un proyecto .ipj a STEP y DWG" />

@@ -4,7 +4,7 @@ import { allPages } from '../core/drawing';
 import { useState, Fragment, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
-import { planeLabel, ENTITY_NAMES, type Feature, type StdPlane, type PartDoc } from '../core/doc';
+import { planeLabel, ENTITY_NAMES, uid, type Feature, type StdPlane, type PartDoc } from '../core/doc';
 import { profileLabel } from '../core/catalog';
 import { scaleLabel } from '../core/drawing';
 import { asmActions } from './actions';
@@ -32,10 +32,10 @@ function ContextMenu({ menu, close }: { menu: Menu; close: () => void }) {
   );
 }
 
-function Folder({ icon, label, children, defaultOpen = true, depth = 0, count }: { icon: string; label: string; children: ReactNode; defaultOpen?: boolean; depth?: number; count?: number }) {
+function Folder({ icon, label, children, defaultOpen = true, depth = 0, count, onMenu }: { icon: string; label: string; children: ReactNode; defaultOpen?: boolean; depth?: number; count?: number; onMenu?: (x: number, y: number) => void }) {
   const [open, setOpen] = useState(defaultOpen);
   return (<>
-    <div className="tree-row" style={{ paddingLeft: 10 + depth * 16 }} onClick={() => setOpen(!open)}>
+    <div className="tree-row" style={{ paddingLeft: 10 + depth * 16 }} onClick={() => setOpen(!open)} onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(e.clientX, e.clientY); } : undefined}>
       <span className={`caret ${open ? 'open' : ''}`}>▸</span><Icon name={icon} size={17} /><span className="tree-name">{label}</span>
       {count !== undefined && <span className="tree-count">{count}</span>}
     </div>
@@ -90,6 +90,9 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
             const user = f.type === 'sketch' ? s.doc.features.find((x) => nestOwner.get(f.id) === x.id) : null;
             setMenu({ x: e.clientX, y: e.clientY, items: [
               { label: f.type === 'sketch' ? 'Editar boceto' : 'Editar operación', run: () => edit(f) },
+              ...(f.type === 'workplane' ? [{ label: `Nuevo boceto en ${f.name}`, run: () => { if (s.mode === 'sketch') s.finishSketch(); s.startSketch({ kind: 'work', id: f.id }); } }] : []),
+              ...(f.type === 'workpoint' ? [{ label: `Nuevo boceto por ${f.name}…`, run: () => s.open({ kind: 'auxsketch', init: { pt: f.id } }) }] : []),
+              ...(f.type === 'workaxis' ? [{ label: `Nuevo boceto normal a ${f.name}…`, run: () => s.open({ kind: 'auxsketch', init: { ax: f.id, pt: f.id } }) }] : []),
               ...(kids.length && f.type !== 'sketch' ? [{ label: 'Editar boceto', run: () => s.editSketch(kids[0].id) }] : []),
               { label: 'Cambiar nombre', run: () => setRenaming(f.id) },
               { label: f.suppressed ? 'Reanudar operación' : 'Suprimir operación', run: () => s.toggleSuppress(f.id) },
@@ -127,12 +130,32 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
       {['X', 'Y', 'Z'].map((a) => <div key={a} className="tree-row" style={{ paddingLeft: 30 }}><Icon name="axis" size={16} /><span className="tree-name">Eje {a}</span></div>)}
       <div className="tree-row" style={{ paddingLeft: 30 }}><Icon name="point" size={16} /><span className="tree-name">Punto central</span></div>
     </Folder>
-    <Folder icon="epoint" label="ePoints" count={partEPoints(s.doc).length} defaultOpen={false}>
-      {partEPoints(s.doc).map((e) => (
-        <div key={e.id} className="tree-row" style={{ paddingLeft: 30 }} title="Doble clic: editar ePoints" onDoubleClick={() => s.open({ kind: 'epoint' })}>
-          <span className={`ep-dot ep-${e.isDefault ? 'def' : e.kind}`} /><span className="tree-name">{e.name}</span><span className="tree-count">{e.isDefault ? 'inserción' : EP_KIND_NAMES[e.kind].toLowerCase()}</span>
-        </div>
-      ))}
+    <Folder icon="epoint" label="ePoints" count={partEPoints(s.doc).filter((e) => !e.inactive).length} defaultOpen={false}
+      onMenu={(x, y) => setMenu({ x, y, items: [{ label: 'Nuevo ePoint…', run: () => s.open({ kind: 'epoint' }) }] })}>
+      {partEPoints(s.doc).map((e) => {
+        const stored = (s.doc.epoints ?? []).some((x) => x.id === e.id);
+        // el de inserción por defecto implícito (origen) se guarda al desactivarlo
+        const setInactive = (v: boolean) => s.commit((doc) => {
+          const cur = doc.epoints ?? [];
+          doc.epoints = stored ? cur.map((x) => (x.id === e.id ? { ...x, inactive: v || undefined } : x)) : [{ ...e, inactive: v || undefined }, ...cur];
+        });
+        return (
+          <div key={e.id} className={`tree-row ${e.inactive ? 'supp' : ''}`} style={{ paddingLeft: 30 }} title={e.inactive ? 'Desactivado · clic derecho: Activar' : 'Doble clic: editar · clic derecho: activar/desactivar'} onDoubleClick={() => s.open({ kind: 'epoint' })}
+            onContextMenu={(ev) => { ev.preventDefault(); setMenu({ x: ev.clientX, y: ev.clientY, items: [
+              { label: e.inactive ? 'Activar' : 'Desactivar', run: () => setInactive(!e.inactive) },
+              { label: 'Editar…', run: () => s.open({ kind: 'epoint' }) },
+              { label: 'Nuevo ePoint…', run: () => s.open({ kind: 'epoint' }) },
+              ...(!e.isDefault ? [
+                { label: 'Duplicar', run: () => s.commit((doc) => { const cur = doc.epoints ?? []; let k = 2; while (cur.some((x) => x.name === `${e.name}_${k}`)) k++; doc.epoints = [...cur, { ...structuredClone(e), id: uid('ep'), name: `${e.name}_${k}` }]; }) },
+                { label: 'Usar como ePoint de inserción', run: () => s.commit((doc) => { doc.epoints = (doc.epoints ?? []).map((x) => ({ ...x, isDefault: x.id === e.id ? true : undefined, inactive: x.id === e.id ? undefined : x.inactive })); }) },
+                { label: '-', run: () => {} },
+                { label: 'Eliminar', danger: true, run: () => s.commit((doc) => { doc.epoints = (doc.epoints ?? []).filter((x) => x.id !== e.id).map((x) => (x.members ? { ...x, members: x.members.filter((m) => m !== e.id) } : x)); }) },
+              ] : []),
+            ] }); }}>
+            <span className={`ep-dot ep-${e.inactive ? 'off' : e.isDefault ? 'def' : e.kind}`} /><span className="tree-name">{e.name}</span><span className="tree-count">{e.inactive ? 'desactivado' : e.isDefault ? 'inserción' : EP_KIND_NAMES[e.kind].toLowerCase()}</span>
+          </div>
+        );
+      })}
     </Folder>
     {s.doc.sheet && <div className="tree-row" style={{ paddingLeft: 10 }} onDoubleClick={() => s.open({ kind: 'sheetstyle' })}><Icon name="style" size={16} /><span className="tree-name">Chapa: t = {s.doc.sheet.t}</span></div>}
     {s.doc.features.filter((x) => !nestOwner.has(x.id)).map((x) => row(x))}
@@ -190,6 +213,15 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
         <Icon name="workplane" size={16} /><span className="tree-name">{w.name}</span>
       </div>
     ))}
+    {([['workAxes', 'axis', 'Eje'], ['workPoints', 'point', 'Punto']] as const).map(([coll, icon]) => ((s.asm as any)[coll] ?? []).map((w: { id: string; name: string; hidden?: boolean }) => (
+      <div key={w.id} className={rowCls(w.id, w.hidden ? 'supp' : '')} style={{ paddingLeft: 14 }} onClick={() => sel(w.id)}
+        onContextMenu={(e) => { e.preventDefault(); sel(w.id); setMenu({ x: e.clientX, y: e.clientY, items: [
+          { label: w.hidden ? 'Mostrar' : 'Ocultar', run: () => s.commitAsm((a) => { const t = ((a as any)[coll] as { id: string; hidden?: boolean }[]).find((x) => x.id === w.id); if (t) t.hidden = !t.hidden; }) },
+          { label: 'Eliminar', danger: true, run: () => s.commitAsm((a) => { (a as any)[coll] = ((a as any)[coll] as { id: string }[]).filter((x) => x.id !== w.id); }) },
+        ] }); }}>
+        <Icon name={icon} size={16} /><span className="tree-name">{w.name}</span>
+      </div>
+    )))}
     <Folder icon="joint" label="Relaciones" count={s.asm.joints.length} defaultOpen={false}>
       {s.asm.joints.map((j) => (
         <div key={j.id} className={rowCls(j.id, j.suppressed ? 'supp' : '')} style={{ paddingLeft: 30 }} onClick={() => sel(j.id)} title={errs[j.id]}
@@ -250,7 +282,11 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
               </div>
             ))}
             {partEPoints(pd).filter((x) => !x.isDefault).map((x) => (
-              <div key={x.id} className="tree-row sub" style={{ paddingLeft: 34 }} title={`ePoint de ${EP_KIND_NAMES[x.kind].toLowerCase()}`}><span className={`ep-dot ep-${x.kind}`} /><span className="tree-name">{x.name}</span></div>
+              <div key={x.id} className={`tree-row sub ${x.inactive ? 'supp' : ''}`} style={{ paddingLeft: 34 }} title={`ePoint de ${EP_KIND_NAMES[x.kind].toLowerCase()}${x.inactive ? ' · desactivado' : ''} · clic derecho: activar/desactivar`}
+                onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); setMenu({ x: ev.clientX, y: ev.clientY, items: [
+                  { label: x.inactive ? 'Activar' : 'Desactivar', run: () => { const next = structuredClone(pd); next.epoints = (next.epoints ?? []).map((q) => (q.id === x.id ? { ...q, inactive: x.inactive ? undefined : true } : q)); s.editPartDoc(o.part, next); } },
+                ] }); }}>
+                <span className={`ep-dot ep-${x.inactive ? 'off' : x.kind}`} /><span className="tree-name">{x.name}</span></div>
             ))}
           </>;
         })()}

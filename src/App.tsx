@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { toggleOsnap } from './ui/osnap';
 import { useStore, activeSketch, startCad } from './core/store';
 import { iconThemeOf } from './core/persist';
 import Ribbon from './ui/Ribbon';
@@ -39,6 +40,8 @@ function StatusBar() {
       {s.mode === 'sketch' && s.skInfo && <span className={`st-item dofs ${s.skInfo.dof === 0 ? 'full' : ''}`}>{s.skInfo.dof === 0 ? 'Totalmente restringido' : `Se necesitan ${s.skInfo.dof} cotas`}</span>}
       <span className="grow" />
       {s.cursor && s.mode === 'sketch' && <span className="st-item mono">X {fmt(s.cursor[0], 2)} · Y {fmt(s.cursor[1], 2)} mm</span>}
+      {(s.kind === 'part' || s.kind === 'assembly') && <button className={`st-item st-os ${s.settings.osnap?.on === false ? '' : 'on'}`} title="Referencias a objetos (F3) · clic derecho: modos"
+        onClick={toggleOsnap} onContextMenu={(e) => { e.preventDefault(); s.open({ kind: 'osnap' }); }}>REFENT</button>}
       {s.spaceMouse && <span className="st-item sm" title="Ratón 3D conectado">⬤ {s.spaceMouse}</span>}
       {s.busy && <span className="st-item">Regenerando…</span>}
       {!s.busy && ms !== undefined && <span className="st-item">{fmt(ms, 0)} ms</span>}
@@ -186,6 +189,7 @@ export default function App() {
         if (s.mode === 'present') return s.set({ mode: 'model', explodeT: 0 });
         return s.set({ selFeature: null, selItem: null });
       }
+      if (e.key === 'F3') { e.preventDefault(); return toggleOsnap(); }
       if (e.key === 'F6') { e.preventDefault(); return s.setView('home'); }
       if (e.key === 'Home') return s.setView('fit');
       if (e.key === 'Delete' || e.key === 'Backspace') {

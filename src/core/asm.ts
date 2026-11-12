@@ -75,6 +75,13 @@ export interface FrameMember {
 export const ASM_REF = '__asm';
 /** Plano de trabajo (auxiliar) del ensamblaje, en coordenadas del ensamblaje */
 export interface AsmWorkPlane { id: string; name: string; origin: V3; normal: V3; xdir: V3; hidden?: boolean }
+/** Eje auxiliar del ensamblaje (E1, E2…) */
+export interface AsmWorkAxis { id: string; name: string; origin: V3; dir: V3; hidden?: boolean }
+/** Punto auxiliar del ensamblaje (pt1, pt2…) */
+export interface AsmWorkPoint { id: string; name: string; origin: V3; hidden?: boolean }
+export const workAxisRef = (w: AsmWorkAxis): FaceRef => ({ occ: ASM_REF, point: w.origin, normal: w.dir, kind: 'axis', radius: 0, center: w.origin });
+/** Siguiente nombre libre con prefijo (P, E, pt) */
+export const auxName = (prefix: string, used: { name: string }[]) => { let k = 1; while (used.some((u) => u.name === `${prefix}${k}`)) k++; return `${prefix}${k}`; };
 export const ORIGIN_REFS: { key: string; label: string; ref: FaceRef }[] = [
   { key: 'YZ', label: 'Plano YZ', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [1, 0, 0], kind: 'plane', center: [0, 0, 0], xdir: [0, 1, 0] } },
   { key: 'XZ', label: 'Plano XZ', ref: { occ: ASM_REF, point: [0, 0, 0], normal: [0, 1, 0], kind: 'plane', center: [0, 0, 0], xdir: [1, 0, 0] } },
@@ -147,6 +154,8 @@ export interface AsmDoc {
   welds: Weld[];
   bolts: BoltGroup[];
   workPlanes?: AsmWorkPlane[];
+  workAxes?: AsmWorkAxis[];
+  workPoints?: AsmWorkPoint[];
   /** desplazamientos de explosionado por id (componente o barra) */
   explode: Record<string, V3>;
 }

@@ -20,6 +20,8 @@ export interface EPoint {
   offset?: string;
   /** ePoint de inserción por defecto de la pieza */
   isDefault?: boolean;
+  /** Desactivado por el diseñador: no se conecta ni se ofrece al colocar */
+  inactive?: boolean;
 }
 
 /** ePoints de la pieza, con el de inserción por defecto en primer lugar */
@@ -29,7 +31,10 @@ export function partEPoints(doc: PartDoc | null | undefined): EPoint[] {
   const def = list.find((e) => e.isDefault);
   return def ? [def, ...list.filter((e) => e !== def)] : [{ id: 'ep0', name: 'ePoint de inserción', kind: 'insert', point: [0, 0, 0], dir: [0, 0, 1], isDefault: true }, ...list];
 }
-export const insertPoint = (doc: PartDoc | null | undefined): V3 => partEPoints(doc)[0]?.point ?? [0, 0, 0];
+/** ePoints activos (los desactivados no se conectan ni se ofrecen al colocar) */
+export const activeEPoints = (doc: PartDoc | null | undefined) => partEPoints(doc).filter((e) => !e.inactive);
+/** Punto por el que se coge la pieza: su ePoint de inserción (si está desactivado, el origen) */
+export const insertPoint = (doc: PartDoc | null | undefined): V3 => { const d = partEPoints(doc)[0]; return d && !d.inactive ? d.point : [0, 0, 0]; };
 
 const ref = (e: EPoint, occ: string): FaceRef => (e.kind === 'insert'
   ? { occ, point: e.point, normal: e.dir, kind: 'axis', radius: e.radius ?? 5, center: e.point }
@@ -42,7 +47,7 @@ export function autoEPointJoints(asm: AsmDoc, getPart: (id: string) => PartDoc |
   const used = new Set<string>(); // «occ:ePoint» ya conectados
   for (const j of asm.joints) { if (j.ep) { used.add(`${j.a.occ}:${j.ep.a}`); used.add(`${j.b.occ}:${j.ep.b}`); } }
   const occs = asm.occurrences.filter((o) => !o.suppressed);
-  const eps = new Map(occs.map((o) => [o.id, partEPoints(getPart(o.part)).filter((e) => !e.isDefault)]));
+  const eps = new Map(occs.map((o) => [o.id, partEPoints(getPart(o.part)).filter((e) => !e.isDefault && !e.inactive)]));
   const fixed = (id: string) => !!asm.occurrences.find((o) => o.id === id)?.grounded;
   const connect = (oA: string, eA: EPoint, oB: string, eB: EPoint, n: number) => {
     // se mueve el componente nuevo (o el libre)

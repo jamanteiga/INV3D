@@ -47,16 +47,21 @@ export default function EPointPanel({ onClose }: { onClose: () => void }) {
         <table className="ptable"><tbody>
           {list.map((e) => (
             <tr key={e.id} className={editing === e.id ? 'sel' : ''}>
-              <td><span className={`ep-dot ep-${e.isDefault ? 'def' : e.kind}`} /> {e.name}</td>
+              <td><label className="check" title={e.inactive ? 'Desactivado: no se conecta ni se ofrece al colocar' : 'Activo'}><input type="checkbox" checked={!e.inactive} onChange={(ev) => s.commit((doc) => {
+                const cur = doc.epoints ?? [], v = ev.target.checked ? undefined : true;
+                doc.epoints = cur.some((x) => x.id === e.id) ? cur.map((x) => (x.id === e.id ? { ...x, inactive: v } : x)) : [{ ...e, inactive: v }, ...cur];
+              })} /><span className={`ep-dot ep-${e.inactive ? 'off' : e.isDefault ? 'def' : e.kind}`} /> {e.name}</label></td>
               <td className="muted">{e.isDefault ? 'Inserción (por defecto)' : EP_KIND_NAMES[e.kind]}{e.kind === 'composite' ? ` · ${e.members?.length ?? 0}` : ''}</td>
               <td style={{ whiteSpace: 'nowrap' }}>
                 <button className="btn sm" onClick={() => { setEditing(e.id); setD(structuredClone(e)); }}>Editar</button>
+                {!e.isDefault && <button className="btn sm" title="Duplicar (mismo tipo, nombre nuevo)" onClick={() => s.commit((doc) => { const cur = doc.epoints ?? []; let k = 2; while (cur.some((x) => x.name === `${e.name}_${k}`)) k++; doc.epoints = [...cur, { ...structuredClone(e), id: uid('ep'), name: `${e.name}_${k}` }]; })}>⧉</button>}
                 {!e.isDefault && <button className="btn sm" title="Eliminar" onClick={() => del(e.id)}>✕</button>}
               </td>
             </tr>
           ))}
         </tbody></table>
-        <div className="psec-title" style={{ marginTop: 4 }}>{editing ? `Editar «${d.name}»` : 'Nuevo ePoint'}</div>
+        <div className="psec-title" style={{ marginTop: 4, display: 'flex', alignItems: 'center' }}>{editing ? `Editar «${d.name}»` : 'Nuevo ePoint'}<span style={{ flex: 1 }} />
+          <button className="btn sm" title="Otro ePoint nuevo en esta pieza (elige una cara y Guardar)" onClick={() => { setEditing(null); setD({ ...blank(), name: (() => { let k = list.length; while (list.some((x) => x.name === `ePoint${k}`)) k++; return `ePoint${k}`; })() }); s.set({ tool: 'epPick' }); }}>＋ Nuevo</button></div>
         <div className="fem-row">Nombre <input value={d.name} disabled={d.isDefault} onChange={(e) => up({ name: e.target.value })} onKeyDown={(e) => e.stopPropagation()} style={{ flex: 1 }} /></div>
         {!d.isDefault && <div className="fem-row seg-mini">
           {(['mate', 'insert', 'composite'] as EPointKind[]).map((k) => <button key={k} className={d.kind === k ? 'on' : ''} onClick={() => up({ kind: k, members: k === 'composite' ? d.members ?? [] : undefined })}>{EP_KIND_NAMES[k]}</button>)}

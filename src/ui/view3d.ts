@@ -7,6 +7,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { V3 } from '../core/doc';
 import { useStore, manualRange, manualX } from '../core/store';
+import { osCfg, showSnapHint, OS_PRIO, OS_NAMES, type OsMode } from './osnap';
 import type { MeshData } from '../core/cadClient';
 
 export const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#000';
@@ -500,13 +501,25 @@ export class View3D {
       return best;
     };
     switch (kind) {
-      case 'auto': { // vértice si está cerca, si no arista, si no cara
-        const c: { p: THREE.Vector3; what: string }[] = [];
-        for (const { topo, mw } of sets()) for (const v of topo.corners) c.push({ p: v.clone().applyMatrix4(mw), what: 'Vértice' });
-        let best: PickRes | null = null, bd = 10;
-        for (const q of c) { if (!this.visible(q.p)) continue; const d = this.scr(q.p).distanceTo(m); if (d < bd) { bd = d; best = { p: q.p, n: hitN, what: 'Vértice' }; } }
+      case 'auto': { // referencias a objetos (F3): final, medio, centro, origen; si no, cercano en arista; si no, cara
+        const os = osCfg(), M = os.on ? os.modes : new Set<OsMode>();
+        let best: PickRes | null = null, bd = 11, bp = 99;
+        const cand = (p: THREE.Vector3, mode: OsMode, n?: THREE.Vector3) => {
+          if (!M.has(mode) || !this.visible(p)) return;
+          const d = this.scr(p).distanceTo(m), pr = OS_PRIO[mode];
+          if (d < bd - 0.5 || (d < bd + 2 && pr < bp)) { bd = Math.min(d, bd); bp = pr; best = { p, n: n ?? hitN, what: OS_NAMES[mode], mode }; }
+        };
+        cand(new THREE.Vector3(0, 0, 0), 'ori');
+        for (const { topo, mw } of sets()) {
+          for (const v of topo.corners) cand(v.clone().applyMatrix4(mw), 'end');
+          for (const ch of topo.chains) {
+            const W = ch.map((v) => v.clone().applyMatrix4(mw));
+            const cc = circleOf(W);
+            if (cc) cand(cc.c, 'cen', cc.n); else cand(chainMid(W), 'mid');
+          }
+        }
         if (best) return best;
-        const e = nearestChain(); if (e && e.d < 7) return { p: e.p, n: hitN, what: 'Arista' };
+        if (M.has('nea')) { const e = nearestChain(); if (e && e.d < 7) return { p: e.p, n: hitN, what: OS_NAMES.nea, mode: 'nea' }; }
         return h ? { p: h.point.clone(), n: hitN, what: 'Cara' } : null;
       }
       case 'cursor3d': return h ? { p: h.point.clone(), n: hitN, what: 'Cursor 3D' } : viewPlane();
@@ -577,7 +590,11 @@ export class View3D {
     const cvs = this.renderer.domElement;
     cvs.style.cursor = 'crosshair';
     let first: THREE.Vector3 | null = null, down: { x: number; y: number } | null = null;
-    const move = (e: PointerEvent) => { if (e.buttons) return; const r = this.resolvePick(kind, adv, e.clientX, e.clientY); this.markerAt(r?.p ?? null); };
+    const move = (e: PointerEvent) => {
+      if (e.buttons) return; const r = this.resolvePick(kind, adv, e.clientX, e.clientY); this.markerAt(r?.p ?? null);
+      const mode = r?.mode ?? (r && kind === 'vertex' ? 'end' : r && kind === 'edge' ? 'nea' : undefined);
+      if (r && mode) { const q = this.scr(r.p); showSnapHint(q.x, q.y, mode); } else showSnapHint(null);
+    };
     const pd = (e: PointerEvent) => { if (e.button === 0) down = { x: e.clientX, y: e.clientY }; };
     const pu = (e: PointerEvent) => {
       if (e.button !== 0 || !down) return;
@@ -594,7 +611,7 @@ export class View3D {
     cvs.addEventListener('pointermove', move); cvs.addEventListener('pointerdown', pd, true); cvs.addEventListener('pointerup', pu, true);
     this.pickOff = () => {
       cvs.removeEventListener('pointermove', move); cvs.removeEventListener('pointerdown', pd, true); cvs.removeEventListener('pointerup', pu, true);
-      cvs.style.cursor = ''; this.markerAt(null); this.markerAt(null, 0, 1); this.pickOff = undefined;
+      cvs.style.cursor = ''; this.markerAt(null); this.markerAt(null, 0, 1); this.pickOff = undefined; showSnapHint(null);
     };
   }
   stopPick() { this.pickOff?.(); }
@@ -712,7 +729,7 @@ export function faceVertices(m: MeshData, group: number): THREE.Vector3[] {
 // ---------- Designación de puntos: tipos y topología de aristas ----------
 export type PickKind = 'auto' | 'cursor3d' | 'vertex' | 'face' | 'pcon' | 'aux' | 'cursor2d' | 'edge' | 'adv';
 export type AdvKind = 'mid' | 'center' | 'facec' | 'two' | 'bbox' | 'origin';
-export interface PickRes { p: THREE.Vector3; n?: THREE.Vector3; what: string }
+export interface PickRes { p: THREE.Vector3; n?: THREE.Vector3; what: string; mode?: OsMode }
 interface EdgeTopo { corners: THREE.Vector3[]; chains: THREE.Vector3[][] }
 /** Agrupa los segmentos de aristas en cadenas (aristas del modelo) separadas por vértices (esquinas o uniones de 3+) */
 function edgeTopo(a: Float32Array): EdgeTopo {

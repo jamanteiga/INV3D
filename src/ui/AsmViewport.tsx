@@ -7,7 +7,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { useStore, type State } from '../core/store';
 import { makeEval } from '../core/expr';
 import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
-import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
+import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, workAxisRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
 import { asmActions } from './actions';
 import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
@@ -113,6 +113,11 @@ export default function AsmViewport() {
       };
       if (joint) for (const o of ORIGIN_REFS) (o.ref.kind === 'axis' ? axis : plane)(o.ref, `Ensamblaje · ${o.label}`, o.key.includes('X') && o.key.length === 1 ? '#d9480f' : o.key === 'Y' ? '#2b8a3e' : o.key === 'Z' ? '#1c7ed6' : '#e8a33d');
       for (const w of s.asm.workPlanes ?? []) if (!w.hidden || joint) plane(workPlaneRef(w), w.name, '#e8a33d');
+      for (const w of s.asm.workAxes ?? []) if (!w.hidden || joint) axis(workAxisRef(w), w.name, '#e8a33d');
+      for (const w of s.asm.workPoints ?? []) if (!w.hidden) {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(size * 0.012, 12, 8), new THREE.MeshBasicMaterial({ color: '#e8a33d', depthTest: false }));
+        m.position.set(...w.origin); m.renderOrder = 5; m.userData = { label: w.name }; refGroup.add(m);
+      }
       refGroup.updateMatrixWorld(true);
       V.request();
     };
@@ -581,7 +586,7 @@ export default function AsmViewport() {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }
-      if (s.dialog?.kind !== p.dialog?.kind || s.asm.workPlanes !== p.asm.workPlanes) buildRefs(s);
+      if (s.dialog?.kind !== p.dialog?.kind || s.asm.workPlanes !== p.asm.workPlanes || s.asm.workAxes !== p.asm.workAxes || s.asm.workPoints !== p.asm.workPoints) buildRefs(s);
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); }
@@ -658,6 +663,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       <hr />
       {orig.map((o) => <button key={o.key} onClick={() => start(isAxis ? 'mate' : 'flush', {}, { ref: o.ref, label: `Ensamblaje · ${o.label}` })}>{isAxis ? 'Coaxial con' : 'Al ras con'} {o.label} del ensamblaje</button>)}
       {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}
+      {isAxis && (s.asm.workAxes ?? []).map((w) => <button key={w.id} onClick={() => start('mate', {}, { ref: workAxisRef(w), label: w.name })}>Coaxial con {w.name}</button>)}
       {occ && (<><hr />
         <button onClick={() => { close(); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.grounded = !t.grounded; }); }}>{occ.grounded ? 'Liberar' : 'Fijar'}</button>
         {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); s.open({ kind: 'occprops', occ: vo?.id ?? occ.id }); }}>Propiedades y cotas…</button>}

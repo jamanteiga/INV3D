@@ -5,7 +5,7 @@ import { docGetter } from '../core/store';
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
 import { useStore, type SkOp } from '../core/store';
 import { uid, v3, newDoc, MATERIALS, type V3, type SketchF, type PartDoc } from '../core/doc';
-import { IDENTITY, solveAssembly, patternPoses, mirrorPose, xfPoint, q as qq, q, type Occurrence, type FrameMember, type BoltGroup, type EndType, type Xform } from '../core/asm';
+import { IDENTITY, auxName, solveAssembly, patternPoses, mirrorPose, xfPoint, q as qq, q, type Occurrence, type FrameMember, type BoltGroup, type EndType, type Xform } from '../core/asm';
 import { CONTENT } from '../core/content';
 import { makeEval, fmt } from '../core/expr';
 import { cad, type MeshData } from '../core/cadClient';
@@ -313,7 +313,7 @@ export const asmActions = {
   },
   toggleGround: () => { const s = S(); s.commitAsm((a) => { const o = a.occurrences.find((x) => x.id === s.selItem); if (o) o.grounded = !o.grounded; }); },
   openJoint: () => S().openAsmDialog('joint', { id: uid('j'), name: `Unión${S().asm.joints.length + 1}`, type: 'mate', offset: '0 mm', angle: '0 deg' }, undefined, 'asmFace'),
-  openWorkPlane: () => S().openAsmDialog('asmwp', { id: uid('wp'), name: `Plano de trabajo${(S().asm.workPlanes?.length ?? 0) + 1}`, base: 'XY', offset: '0 mm', angle: '0 deg' }, undefined, 'asmFace'),
+  openWorkPlane: () => S().openAsmDialog('asmwp', { id: uid('wp'), name: auxName('P', S().asm.workPlanes ?? []), base: 'XY', offset: '0 mm', angle: '0 deg' }, undefined, 'asmFace'),
   openSkel: () => S().openAsmDialog('skel', { id: uid('k') }, undefined, 'skelPoint'),
   openFrame: () => S().openAsmDialog('frame', { family: 'SHS', size: '40x4', material: 'Acero S275JR', rot: '0 deg', offX: '0 mm', offY: '0 mm', lines: [], autoMiter: true }, undefined, 'frameLine'),
   openEnd: (type: EndType) => S().openAsmDialog('endtreat', { type, member: '', target: '', gap: '0 mm' }, undefined, 'pickMember'),

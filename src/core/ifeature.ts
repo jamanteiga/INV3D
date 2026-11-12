@@ -1,7 +1,7 @@
-// iPart (familias de piezas por tabla) e iFeature (operaciones reutilizables con parámetros).
+// eFamily (familias de piezas por tabla) y eOperaciones (operaciones reutilizables con parámetros).
 import { uid, docParams, type PartDoc, type Feature, type SketchF, type PlaneRef } from './doc';
 
-// ---------- iPart ----------
+// ---------- eFamily ----------
 export interface IPartTable { cols: string[]; rows: { name: string; values: string[] }[]; active: number }
 
 /** Nombres que se pueden poner como columnas: parámetros de usuario y cotas de boceto. */
@@ -28,7 +28,7 @@ export function applyIPartRow(doc: PartDoc, t: IPartTable, i: number) {
   doc.iProperties.partNumber = row.name;
 }
 
-// ---------- iFeature ----------
+// ---------- eOperaciones ----------
 export interface IFeatureDef { name: string; desc?: string; features: Feature[]; at: number }
 export interface IFParam { key: string; label: string; expr: string }
 
@@ -55,7 +55,7 @@ export function ifParams(def: IFeatureDef): IFParam[] {
   return out;
 }
 
-/** Inserta la iFeature en un plano (mutación del documento). Las cotas se renombran para no chocar. */
+/** Inserta la eOperación en un plano (mutación del documento). Las cotas se renombran para no chocar. */
 export function insertIFeature(doc: PartDoc, def: IFeatureDef, plane: PlaneRef, values: Record<string, string>) {
   const feats: Feature[] = JSON.parse(JSON.stringify(def.features));
   // valores

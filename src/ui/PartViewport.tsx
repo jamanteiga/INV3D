@@ -1,5 +1,7 @@
 import { femColor } from './FemPanel';
 import { partEPoints } from '../core/epoints';
+import { threadByName, threadPitch } from '../core/holes';
+import { osCfg, showSnapHint, OS_PRIO, intersect, perpFoot, tangentPts, quadrants, type OsMode, type Prim } from './osnap';
 import HeadsUp from './HeadsUp';
 import ClipBar from './ClipBar';
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -8,12 +10,12 @@ import { useStore, activeSketch, type State } from '../core/store';
 import { asmActions } from './actions';
 import { makeEval, fmt } from '../core/expr';
 import {
-  docParams, planeFrame, toWorld, entityOutline, consumedSketches, uid, v3, MATERIALS, PLANE_STD, resolveWorkPlanes,
+  docParams, nextCName, nextName, planeFrame, toWorld, type PlaneRef, entityOutline, consumedSketches, uid, v3, MATERIALS, PLANE_STD, resolveWorkPlanes,
   type Frame, type V3, type V2, type SkEntity, type SketchF, type StdPlane, type EdgeSel, type WorkPlanes, type GRef, type SkConstraint, type DimKind, type Sketch3dF, type E3,
 } from '../core/doc';
 import {
   sketchPoints, pointOf, segKeys, segOf, entG, refPoint, refLine, refCurve, refKind, makeConstraint, makeDim, dimValue,
-  trim, extend, filletCorner, solve, applySolution, isLiteral, num, circleFrom3, CONSTRAINT_GLYPH, CONSTRAINT_NAMES, nextDimName, distToSeg,
+  trim, extend, filletCorner, solve, applySolution, isLiteral, num, circleFrom3, CONSTRAINT_GLYPH, CONSTRAINT_NAMES, nextDimName, distToSeg, curveOf,
 } from '../core/sketch';
 import type { MeshData } from '../core/cadClient';
 import { View3D, css, tv, r3, vArr, planarFaceAt, faceVertices, dpr } from './view3d';
@@ -22,7 +24,23 @@ type Ev = (s: string) => number;
 interface DimLabel { id: string; x: number; y: number; text: string; expr: string; fx: boolean; driven: boolean; sel: boolean }
 interface Glyph { id: string; x: number; y: number; g: string; title: string; sel: boolean }
 type Pick = { kind: 'point' | 'line' | 'curve' | 'entity'; ref: GRef; p: V2 };
-interface Snap { p: V2; ref?: GRef; mid?: GRef; on?: GRef; hv?: 'h' | 'v' }
+interface Snap { p: V2; ref?: GRef; mid?: GRef; on?: GRef; hv?: 'h' | 'v'; mode?: OsMode }
+
+/** Textura de rosca cosmética (como Inventor): hélice oscura con cresta clara, una vuelta por paso */
+const threadTex: Record<string, THREE.CanvasTexture> = {};
+function threadTexture(left = false): THREE.CanvasTexture {
+  const key = left ? 'L' : 'R';
+  if (threadTex[key]) return threadTex[key];
+  const c = document.createElement('canvas'); c.width = 128; c.height = 32;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 128, 32);
+  const line = (dy: number, col: string, w: number) => { g.strokeStyle = col; g.lineWidth = w; for (const k of [-1, 0, 1]) { g.beginPath(); if (left) { g.moveTo(0, 32 * k + dy); g.lineTo(128, 32 * (k + 1) + dy); } else { g.moveTo(0, 32 * (k + 1) + dy); g.lineTo(128, 32 * k + dy); } g.stroke(); } };
+  line(0, 'rgba(60,50,30,0.85)', 3.2);
+  line(12, 'rgba(255,255,255,0.55)', 2);
+  line(-9, 'rgba(60,50,30,0.35)', 1.5);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  return (threadTex[key] = t);
+}
 
 function niceStep(worldPerPx: number) {
   const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
@@ -117,7 +135,7 @@ export default function PartViewport() {
       partMesh: null as THREE.Mesh | null,
       frame: null as Frame | null,
       work: new Map() as WorkPlanes,
-      chain: [] as { p: V2; snap: Snap }[], chainIds: [] as string[], chainFirst: null as Snap | null,
+      chain: [] as { p: V2; snap: Snap }[], chainIds: [] as string[], chainFirst: null as Snap | null, locks: {} as Record<string, number>,
       clicks: [] as Snap[],
       hover: null as Snap | null,
       hoverPick: null as Pick | null,
@@ -197,7 +215,7 @@ export default function PartViewport() {
         const sz = Math.max(2, V.bbox.getSize(new THREE.Vector3()).length() * 0.025);
         for (const e of partEPoints(s.doc)) {
           if (e.kind === 'composite') continue;
-          const col = e.isDefault ? 0xf08c00 : e.kind === 'insert' ? 0x1673d0 : 0x2f9a4c;
+          const col = e.inactive ? 0x9aa0a6 : e.isDefault ? 0xf08c00 : e.kind === 'insert' ? 0x1673d0 : 0x2f9a4c; // gris = desactivado
           const sph = new THREE.Mesh(new THREE.SphereGeometry(sz * 0.45, 16, 12), new THREE.MeshBasicMaterial({ color: col, depthTest: false }));
           sph.position.set(...e.point); sph.renderOrder = 6; sph.raycast = () => {}; sph.userData.keep = true;
           const ar = new THREE.ArrowHelper(new THREE.Vector3(...e.dir).normalize(), new THREE.Vector3(...e.point), sz * 2.6, col, sz * 0.9, sz * 0.5);
@@ -206,10 +224,22 @@ export default function PartViewport() {
         }
       }
       V.applyVisual(s.mode === 'sketch' ? '' : s.clip, s.wire && s.mode !== 'sketch', [grp]);
-      // Roscas cosméticas: anillos a paso constante sobre la cara cilíndrica
+      // Roscas cosméticas (como Inventor): funda con textura helicoidal sobre la cara roscada
+      const sleeve = (center: THREE.Vector3, axis: THREE.Vector3, r: number, tTop: number, len: number, pitch: number, inner: boolean, left = false) => {
+        if (!(len > 0) || !(r > 0)) return;
+        const tex = threadTexture(left).clone(); tex.needsUpdate = true;
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(1, Math.max(1, len / pitch));
+        const g = new THREE.CylinderGeometry(r, r, len, 64, 1, true);
+        const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: inner ? THREE.BackSide : THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+        const cyl = new THREE.Mesh(g, mat);
+        cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis.clone().normalize());
+        cyl.position.copy(center).addScaledVector(axis, tTop - len / 2);
+        cyl.renderOrder = 4; cyl.raycast = () => {}; cyl.userData.keep = true;
+        partGroup.add(cyl);
+      };
       for (const f of s.doc.features) {
         if (f.type !== 'thread' || f.suppressed || !s.result?.status[f.id]?.ok) continue;
-        const pitch = parseFloat((f.designation.split(/x/i)[1] ?? '1.5')) || 1.5;
+        const pitch = threadPitch(f.designation);
         for (const pt of f.faces) {
           const gi = faceGroupContaining(m, pt); if (gi < 0) continue;
           const g = m.faceGroups[gi], vs: THREE.Vector3[] = [], ns: THREE.Vector3[] = [];
@@ -218,27 +248,37 @@ export default function PartViewport() {
           for (let i = 1; i < ns.length && !axis; i++) { const c = ns[0].clone().cross(ns[i]); if (c.length() > 0.2) axis = c.normalize(); }
           if (!axis) continue;
           const tmin = Math.min(...vs.map((v) => v.dot(axis!))), tmax = Math.max(...vs.map((v) => v.dot(axis!)));
-          // centro: punto medio entre dos vértices de normales opuestas (aprox.) → mejor: proyección y circunferencia por 3 puntos
           const P0 = vs[0].clone().addScaledVector(axis, -vs[0].dot(axis));
           const far = vs.reduce((b, v) => { const q = v.clone().addScaledVector(axis!, -v.dot(axis!)); return q.distanceTo(P0) > b.distanceTo(P0) ? q : b; }, P0.clone());
           const center = P0.clone().add(far).multiplyScalar(0.5), r = P0.distanceTo(far) / 2;
           if (!(r > 1e-6)) continue;
-          const len = f.full ? tmax - tmin : Math.min(tmax - tmin, parseFloat(f.length) || tmax - tmin);
-          const u = new THREE.Vector3(1, 0, 0); if (Math.abs(u.dot(axis)) > 0.9) u.set(0, 1, 0); u.sub(axis.clone().multiplyScalar(u.dot(axis))).normalize();
-          const w = axis.clone().cross(u), segs: number[] = [];
-          const rr = r * 1.004;
-          for (let t = tmax - pitch / 2; t > tmax - len; t -= pitch) {
-            const base = center.clone().addScaledVector(axis, t);
-            for (let k = 0; k < 48; k++) {
-              const a0 = (k / 48) * Math.PI * 2, a1 = ((k + 1) / 48) * Math.PI * 2;
-              const p0 = base.clone().addScaledVector(u, rr * Math.cos(a0)).addScaledVector(w, rr * Math.sin(a0)).addScaledVector(axis, (-pitch * k) / 48 * 0);
-              const p1 = base.clone().addScaledVector(u, rr * Math.cos(a1)).addScaledVector(w, rr * Math.sin(a1));
-              segs.push(...p0.toArray(), ...p1.toArray());
-            }
-          }
-          if (segs.length) partGroup.add(V.segs(segs, V.lineMat('#6b5a2a', 1, false, true)));
+          // interior si la normal de la cara apunta hacia el eje
+          const radial = vs[0].clone().addScaledVector(axis, -vs[0].dot(axis)).sub(center);
+          const inner = radial.dot(ns[0]) < 0;
+          const ev0 = safeEval(s), off = Math.max(0, ev0(f.offset ?? '0') || 0);
+          const avail = tmax - tmin - off;
+          const len = f.full ? avail : Math.min(avail, ev0(f.length) || avail);
+          sleeve(center, axis, r * (inner ? 0.996 : 1.004), tmax - off, len, pitch, inner, f.left);
         }
       }
+      // Taladros roscados: rosca cosmética en cada centro
+      try {
+        const ev0 = safeEval(s);
+        for (const f of s.doc.features) {
+          if (f.type !== 'hole' || f.suppressed || !(f.kind === 'tap' || f.kind === 'ptap') || f.cosmetic === false || !s.result?.status[f.id]?.ok) continue;
+          const sk = s.doc.features.find((x) => x.id === f.sketch); if (!sk || sk.type !== 'sketch') continue;
+          const T = threadByName(f.thread); if (!T) continue;
+          const fr = planeFrame(sk.plane, ev0, state.work.size ? state.work : resolveWorkPlanes(s.doc, ev0));
+          const axis = tv(fr.normal).normalize().negate();
+          const len = Math.min(ev0(f.tapDepth ?? '15') || 15, f.through ? 1e9 : ev0(f.depth) || 1e9);
+          for (const e of sk.entities) {
+            if (e.type !== 'point' && e.type !== 'circle') continue;
+            const c = tv(toWorld(fr, ev0(e.cx), ev0(e.cy)));
+            // la funda va desde el plano del boceto hacia dentro (−normal): centro en c, eje hacia dentro
+            sleeve(c, axis.clone().negate(), (ev0(f.dia) || T.tap) / 2 * 0.995, 0, len, T.p, true); // sobre la pared del taladro (Ø broca)
+          }
+        }
+      } catch { /* expresión inválida */ }
       buildOverlay(s);
     };
 
@@ -564,7 +604,9 @@ export default function PartViewport() {
       if (!fr || s.mode !== 'sketch') { V.request(); return; }
       const W = (p: V2) => toWorld(fr, p[0], p[1]);
       const pts: number[] = [], aux: number[] = [];
-      if (hs && (hs.ref || hs.mid || hs.on)) { snapMarker.visible = true; snapMarker.position.copy(tv(W(hs.p))); (snapMarker.material as THREE.MeshBasicMaterial).color.set(hs.mid ? 0x3fa34d : hs.on ? 0x1d6fb0 : 0xf2b600); }
+      // marcador de referencia a objetos (símbolo tipo AutoCAD y nombre)
+      if (hs?.mode && s.tool) { const q = V.project(W(hs.p)), r = V.renderer.domElement.getBoundingClientRect(); showSnapHint(r.left + q.x, r.top + q.y, hs.mode); }
+      else { showSnapHint(null); if (hs && (hs.ref || hs.mid || hs.on)) { snapMarker.visible = true; snapMarker.position.copy(tv(W(hs.p))); (snapMarker.material as THREE.MeshBasicMaterial).color.set(hs.mid ? 0x3fa34d : hs.on ? 0x1d6fb0 : 0xf2b600); } }
       const h = hs?.p;
       const c = state.clicks.map((x) => x.p);
       const loop = (ps: V2[], closed = true, arr = pts) => { for (let i = 0; i < ps.length - (closed ? 0 : 1); i++) arr.push(...W(ps[i]), ...W(ps[(i + 1) % ps.length])); };
@@ -751,29 +793,55 @@ export default function PartViewport() {
       return best;
     };
 
-    /** Forzado de cursor para las herramientas de dibujo: puntos, punto medio, sobre curva y alineación H/V. */
+    /** Forzado de cursor para las herramientas de dibujo: referencias a objetos tipo AutoCAD (final, medio, centro, cuadrante,
+     *  intersección, perpendicular, tangente, cercano, nodo, origen) y alineación H/V. F3 las activa o desactiva. */
     const snap = (ev: { clientX: number; clientY: number }, raw: V2, from?: V2): Snap => {
       const s = useStore.getState(); const sk = activeSketch(s);
       const m = V.local(ev);
       const sd = (p: V2) => { const q = screenOfLocal(p); return Math.hypot(q.x - m.x, q.y - m.y); };
-      if (sk) {
-        const evl = safeEval(s);
-        let best: Snap | null = null, bd = 10;
-        for (const q of sketchPoints(sk, evl)) { const d = sd(q.p); if (d < bd) { bd = d; best = { p: q.p, ref: q.ref }; } }
-        // puntos de la cadena en curso (aún sin restricciones)
-        for (const c of [...state.chain.map((x) => x.p), ...state.clicks.map((x) => x.p)]) { const d = sd(c); if (d < bd) { bd = d; best = { p: c }; } }
-        if (best) return best;
-        // punto medio de líneas
-        for (const e of sk.entities) for (const k of segKeys(e)) {
-          const [a, b] = segOf(e, k, entG(e, evl)), mid: V2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-          const d = sd(mid); if (d < bd) { bd = d; best = { p: mid, mid: k ? { e: e.id, k } : { e: e.id } }; }
+      const os = osCfg();
+      if (sk && os.on) {
+        const evl = safeEval(s), M = os.modes;
+        let best: Snap | null = null, bd = 11, bp = 99;
+        const cand = (p: V2, mode: OsMode, extra: Partial<Snap> = {}) => {
+          if (!M.has(mode) || !isFinite(p[0]) || !isFinite(p[1])) return;
+          const d = sd(p), pr = OS_PRIO[mode];
+          if (d < bd - 0.5 || (d < bd + 2 && pr < bp)) { bd = Math.min(d, bd); bp = pr; best = { p, mode, ...extra }; }
+        };
+        // puntos de las entidades: finales, centros, nodos y origen
+        for (const q of sketchPoints(sk, evl)) {
+          if (q.ref.e === 'O') { cand(q.p, 'ori', { ref: q.ref }); continue; }
+          const e = sk.entities.find((x) => x.id === q.ref.e);
+          const mode: OsMode = e?.type === 'point' ? 'nod' : q.ref.k === 'c' || q.ref.k === 'c1' || q.ref.k === 'c2' ? (e?.type === 'text' ? 'nod' : 'cen') : 'end';
+          cand(q.p, mode, { ref: q.ref });
         }
+        // origen 0,0,0 del modelo proyectado al plano del boceto (si no coincide con el del boceto)
+        if (state.frame) { const f = state.frame, o = f.origin; const u = -(o[0] * f.xDir[0] + o[1] * f.xDir[1] + o[2] * f.xDir[2]), v = -(o[0] * f.yDir[0] + o[1] * f.yDir[1] + o[2] * f.yDir[2]); if (Math.hypot(u, v) > 1e-6) cand([u, v], 'ori'); }
+        // puntos de la cadena en curso (aún sin restricciones)
+        for (const c of [...state.chain.map((x) => x.p), ...state.clicks.map((x) => x.p)]) cand(c, 'end');
+        // primitivas: segmentos y circunferencias/arcos
+        const prims: Prim[] = [];
+        for (const e of sk.entities) {
+          const g = entG(e, evl);
+          for (const k of segKeys(e)) { try { const [a, b2] = segOf(e, k, g); prims.push({ kind: 'seg', a, b: b2, ref: k ? { e: e.id, k } : { e: e.id } }); } catch { /* */ } }
+          if (e.type === 'circle' || e.type === 'arc') { try { const C = curveOf(e, g); prims.push({ kind: 'circ', c: C.c, r: C.r, ref: { e: e.id }, ...(e.type === 'arc' ? { a0: g('a0') * D2R, a1: g('a1') * D2R } : {}) }); } catch { /* */ } }
+        }
+        const nearPx = (X: Prim) => { if (X.kind === 'seg') { const A = screenOfLocal(X.a), B = screenOfLocal(X.b); return distToSeg([m.x, m.y], [A.x, A.y], [B.x, B.y]); } const C = screenOfLocal(X.c), R = screenOfLocal([X.c[0] + X.r, X.c[1]]); return Math.abs(Math.hypot(C.x - m.x, C.y - m.y) - Math.hypot(R.x - C.x, R.y - C.y)); };
+        const close = prims.filter((X) => nearPx(X) < 40);
+        for (const X of close) {
+          if (X.kind === 'seg') cand([(X.a[0] + X.b[0]) / 2, (X.a[1] + X.b[1]) / 2], 'mid', { mid: X.ref });
+          for (const q of quadrants(X)) cand(q, 'qua', { on: X.ref });
+          if (from) { const f = perpFoot(from, X); if (f) cand(f, 'per', { on: X.ref }); for (const t of tangentPts(from, X)) cand(t, 'tan', { on: X.ref }); }
+        }
+        for (let i = 0; i < close.length; i++) for (let j = i + 1; j < close.length; j++) for (const q of intersect(close[i], close[j])) cand(q, 'int');
         if (best) return best;
-        // sobre una línea o circunferencia
-        const pk = pickAt(ev, 'nopoint');
-        if (pk && (pk.kind === 'line' || pk.kind === 'curve') && pk.ref.e !== 'X' && pk.ref.e !== 'Y') {
-          if (pk.kind === 'line') { const L = refLine(sk, pk.ref, evl)!; const d = [L[1][0] - L[0][0], L[1][1] - L[0][1]], t = ((raw[0] - L[0][0]) * d[0] + (raw[1] - L[0][1]) * d[1]) / (d[0] ** 2 + d[1] ** 2 || 1); return { p: [L[0][0] + d[0] * t, L[0][1] + d[1] * t], on: pk.ref }; }
-          const C = refCurve(sk, pk.ref, evl)!; const a = Math.atan2(raw[1] - C.c[1], raw[0] - C.c[0]); return { p: [C.c[0] + C.r * Math.cos(a), C.c[1] + C.r * Math.sin(a)], on: pk.ref };
+        // cercano: sobre una línea o circunferencia
+        if (M.has('nea')) {
+          const pk = pickAt(ev, 'nopoint');
+          if (pk && (pk.kind === 'line' || pk.kind === 'curve') && pk.ref.e !== 'X' && pk.ref.e !== 'Y') {
+            if (pk.kind === 'line') { const L = refLine(sk, pk.ref, evl)!; const d = [L[1][0] - L[0][0], L[1][1] - L[0][1]], t = ((raw[0] - L[0][0]) * d[0] + (raw[1] - L[0][1]) * d[1]) / (d[0] ** 2 + d[1] ** 2 || 1); return { p: [L[0][0] + d[0] * t, L[0][1] + d[1] * t], on: pk.ref, mode: 'nea' }; }
+            const C = refCurve(sk, pk.ref, evl)!; const a = Math.atan2(raw[1] - C.c[1], raw[0] - C.c[0]); return { p: [C.c[0] + C.r * Math.cos(a), C.c[1] + C.r * Math.sin(a)], on: pk.ref, mode: 'nea' };
+          }
         }
       }
       const step = niceStep(V.worldPerPx());
@@ -973,8 +1041,7 @@ export default function PartViewport() {
         }
       }
       if (!kind || !a) { s.notify('Combinación no válida para una cota', 'error'); return; }
-      const used = new Set(s.doc.features.flatMap((f) => (f.type === 'sketch' ? (f.constraints ?? []).map((c) => c.name ?? '') : [])));
-      const c = makeDim(sk, ev, kind, a, b, [Number(pos[0].toFixed(3)), Number(pos[1].toFixed(3))], nextDimName(used));
+      const c = makeDim(sk, ev, kind, a, b, [Number(pos[0].toFixed(3)), Number(pos[1].toFixed(3))], nextCName(s.doc));
       if (s.addConstraint(c)) {
         const q = screenOfLocal(pos);
         const cc = activeSketch(useStore.getState())?.constraints?.find((x) => x.id === c.id);
@@ -1036,6 +1103,34 @@ export default function PartViewport() {
         }
       }
     };
+    /** Datos de la cara bajo el cursor para el menú contextual */
+    const openFaceMenu = (ev: PointerEvent, fh: NonNullable<ReturnType<typeof faceHit>>) => {
+      const m = fh.mesh, g = m.faceGroups[fh.group];
+      const n = fh.normal.clone().normalize(), P = fh.point.clone();
+      let plane: PlaneRef | null = null, cyl: { o: V3; d: V3; r: number } | null = null;
+      if (fh.planar) {
+        const o = n.clone().multiplyScalar(P.dot(n));
+        let x = new THREE.Vector3(1, 0, 0).projectOnPlane(n); if (x.length() < 0.3) x = new THREE.Vector3(0, 1, 0).projectOnPlane(n); x.normalize();
+        plane = { kind: 'custom', label: 'Cara de la pieza', origin: vArr(o), xDir: vArr(x), normal: vArr(n) };
+      } else {
+        // cara cilíndrica: eje por las normales y centro por tres puntos
+        const vs: THREE.Vector3[] = [], ns: THREE.Vector3[] = [];
+        for (let i = g.start; i < g.start + g.count; i += 3) { const v = m.triangles[i]; vs.push(new THREE.Vector3(m.vertices[v * 3], m.vertices[v * 3 + 1], m.vertices[v * 3 + 2])); ns.push(new THREE.Vector3(m.normals[v * 3], m.normals[v * 3 + 1], m.normals[v * 3 + 2])); }
+        let ax: THREE.Vector3 | null = null;
+        for (let i = 1; i < ns.length && !ax; i++) { const c = ns[0].clone().cross(ns[i]); if (c.length() > 0.2) ax = c.normalize(); }
+        if (ax) {
+          const pr = (v: THREE.Vector3) => v.clone().addScaledVector(ax!, -v.dot(ax!));
+          const A = pr(vs[0]), B = pr(vs[Math.floor(vs.length / 3)]), C = pr(vs[Math.floor((2 * vs.length) / 3)]);
+          const ab = B.clone().sub(A), ac = C.clone().sub(A), nn = ab.clone().cross(ac);
+          if (nn.lengthSq() > 1e-12) {
+            const c = A.clone().add(nn.clone().cross(ab).multiplyScalar(ac.lengthSq()).add(ac.clone().cross(nn).multiplyScalar(ab.lengthSq())).divideScalar(2 * nn.lengthSq()));
+            c.addScaledVector(ax, P.dot(ax));
+            cyl = { o: vArr(c, 4), d: vArr(ax, 6), r: c.distanceTo(pr(P).addScaledVector(ax, P.dot(ax))) };
+          }
+        }
+      }
+      faceMenuApi.set?.({ x: ev.clientX, y: ev.clientY, point: vArr(P, 4), normal: vArr(n, 6), plane, cyl, look: () => { const box = new THREE.Box3().setFromCenterAndSize(P, new THREE.Vector3(1, 1, 1)).union(V.bbox); let up = new THREE.Vector3(0, 0, 1); if (Math.abs(up.dot(n)) > 0.9) up = new THREE.Vector3(0, 1, 0); V.fitTo(box, n.clone().negate(), up); } });
+    };
     const onUp = (ev: PointerEvent) => {
       V.controls.enabled = true;
       if (state.drag) {
@@ -1047,6 +1142,8 @@ export default function PartViewport() {
       const btn = downAt.btn; downAt = null;
       const s = useStore.getState();
       if (btn === 2 && s.mode === 'sketch') { onContext(); return; }
+      // clic derecho sobre una cara: menú de operaciones (nuevo boceto, taladro, empalme, vaciado, rosca, auxiliares…)
+      if (btn === 2 && s.mode !== 'sketch' && !s.tool) { const fh = faceHit(ev); if (fh) { openFaceMenu(ev, fh); return; } }
       if (btn !== 0) return;
       const d = s.dialog && 'draft' in s.dialog ? s.dialog.draft : null;
       if (s.tool === 'pickPlane' || s.tool === 'pickWorkBase') {
@@ -1231,9 +1328,8 @@ export default function PartViewport() {
           const sk2 = activeSketch(useStore.getState())!;
           const arc = sk2.entities.slice(before).concat(sk2.entities).find((e) => e.type === 'arc' && !(sk2.constraints ?? []).some((c) => c.type === 'dim' && c.a.e === e.id));
           if (arc && arc.type === 'arc') {
-            const used = new Set(useStore.getState().doc.features.flatMap((f) => (f.type === 'sketch' ? (f.constraints ?? []).map((c) => c.name ?? '') : [])));
             const ev3 = safeEval(useStore.getState());
-            const c = makeDim(sk2, ev3, 'radius', { e: arc.id }, undefined, [ev3(arc.cx) + ev3(arc.r) * 1.6, ev3(arc.cy) + ev3(arc.r) * 1.6], nextDimName(used));
+            const c = makeDim(sk2, ev3, 'radius', { e: arc.id }, undefined, [ev3(arc.cx) + ev3(arc.r) * 1.6, ev3(arc.cy) + ev3(arc.r) * 1.6], nextCName(useStore.getState().doc));
             c.expr = s.toolParam || '5 mm';
             useStore.getState().addConstraint(c, { force: true });
           }
@@ -1252,7 +1348,91 @@ export default function PartViewport() {
       }
       // --- herramientas de dibujo ---
       const prev = tool === 'line' ? state.chain[state.chain.length - 1]?.p : tool === 'rect3' || tool === 'spline' ? state.clicks[state.clicks.length - 1]?.p : undefined;
-      const sn = snap(ev, raw, prev);
+      drawWithLocks(lockSnap(snap(ev, raw, prev)));
+    };
+    // ---------- Cotas flotantes (entrada directa de medidas al dibujar) ----------
+    /** Medidas vivas de la herramienta en curso: longitud/ángulo, ancho/alto, diámetro, radio */
+    const liveFields = (s: State, h: V2 | undefined): { key: string; label: string; v: number; unit: 'mm' | 'deg' }[] | null => {
+      if (s.mode !== 'sketch' || !h) return null;
+      const t = s.tool, c = state.clicks.map((x) => x.p);
+      if (t === 'line' && state.chain.length) { const f = state.chain[state.chain.length - 1].p; return [{ key: 'L', label: 'L', v: dist2(h, f), unit: 'mm' }, { key: 'A', label: '∠', v: ((Math.atan2(h[1] - f[1], h[0] - f[0]) / D2R) + 360) % 360, unit: 'deg' }]; }
+      if ((t === 'rect' || t === 'rectc') && c.length === 1) { const k = t === 'rectc' ? 2 : 1; return [{ key: 'W', label: 'An', v: k * Math.abs(h[0] - c[0][0]), unit: 'mm' }, { key: 'H', label: 'Al', v: k * Math.abs(h[1] - c[0][1]), unit: 'mm' }]; }
+      if ((t === 'circle' || t === 'npoly') && c.length === 1) return [{ key: 'D', label: 'Ø', v: 2 * dist2(h, c[0]), unit: 'mm' }];
+      if (t === 'arc' && c.length === 1) return [{ key: 'R', label: 'R', v: dist2(h, c[0]), unit: 'mm' }];
+      return null;
+    };
+    /** Aplica al punto del cursor las medidas escritas en las cotas flotantes */
+    const lockSnap = (sn: Snap): Snap => {
+      const L = state.locks, s = useStore.getState(), t = s.tool, c = state.clicks.map((x) => x.p);
+      if (!Object.keys(L).length) return sn;
+      const h = sn.p;
+      if (t === 'line' && state.chain.length) {
+        const f = state.chain[state.chain.length - 1].p;
+        const ang = L.A != null ? L.A * D2R : Math.atan2(h[1] - f[1], h[0] - f[0]);
+        const len = L.L ?? dist2(h, f);
+        return { p: [f[0] + len * Math.cos(ang), f[1] + len * Math.sin(ang)].map((x) => Number(x.toFixed(6))) as V2 };
+      }
+      if ((t === 'rect' || t === 'rectc') && c.length === 1) {
+        const k = t === 'rectc' ? 0.5 : 1, sx = Math.sign(h[0] - c[0][0]) || 1, sy = Math.sign(h[1] - c[0][1]) || 1;
+        return { p: [L.W != null ? c[0][0] + sx * L.W * k : h[0], L.H != null ? c[0][1] + sy * L.H * k : h[1]] };
+      }
+      if ((t === 'circle' || t === 'npoly' || t === 'arc') && c.length === 1) {
+        const r = t === 'arc' ? L.R : L.D != null ? L.D / 2 : undefined; if (r == null) return sn;
+        const a = Math.atan2(h[1] - c[0][1], h[0] - c[0][0]) || 0;
+        return { p: [c[0][0] + r * Math.cos(a), c[0][1] + r * Math.sin(a)] };
+      }
+      return sn;
+    };
+    /** Publica las cotas flotantes junto al cursor */
+    const publishTip = (s: State) => {
+      const h = state.hover?.p, f = liveFields(s, h);
+      if (!f || !h || !state.frame) { tipBus.set(null); return; }
+      const q = V.project(toWorld(state.frame, h[0], h[1]));
+      tipBus.set({ x: q.x + 18, y: q.y + 14, fields: f.map((x) => ({ ...x, locked: state.locks[x.key] != null, v: state.locks[x.key] ?? x.v })) });
+    };
+    /** Dibuja en el punto y, si se escribieron medidas, las deja como cotas (c1, c2…) de la entidad creada */
+    const drawWithLocks = (sn: Snap) => {
+      const L = { ...state.locks }, s0 = useStore.getState(), t = s0.tool;
+      const n0 = activeSketch(s0)?.entities.length ?? 0;
+      drawAt(sn);
+      state.locks = {};
+      const s1 = useStore.getState(), sk1 = activeSketch(s1);
+      const ne = sk1 && sk1.entities.length > n0 ? sk1.entities[sk1.entities.length - 1] : null;
+      if (ne && Object.keys(L).length) {
+        const fmtv = (v: number, u: string) => `${Number(v.toFixed(4))} ${u}`;
+        s1.sketchCommit((sk) => {
+          const ev2 = safeEval(useStore.getState());
+          const add = (kind: DimKind, a: GRef, b: GRef | undefined, val: string, pos: V2) => { const c = makeDim(sk, ev2, kind, a, b, pos, nextCName(useStore.getState().doc) + ''); const used = new Set((sk.constraints ?? []).map((x) => x.name)); let nm = c.name!; let k = +nm.slice(1); while (used.has(nm)) nm = `c${++k}`; c.name = nm; c.expr = val; (sk.constraints ??= []).push(c); };
+          if (ne.type === 'line' && t === 'line') {
+            const A: V2 = [ev2(ne.a[0]), ev2(ne.a[1])], B: V2 = [ev2(ne.b[0]), ev2(ne.b[1])], M: V2 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+            if (L.L != null) add('len', { e: ne.id }, undefined, fmtv(L.L, 'mm'), [M[0], M[1] + 4]);
+            if (L.A != null && Math.abs(((L.A % 90) + 90) % 90) > 1e-6) add('angle', { e: 'X' }, { e: ne.id }, fmtv((() => { const v = ((L.A % 360) + 360) % 360; return v > 180 ? 360 - v : v; })(), 'deg'), [B[0] + 6, B[1] + 6]);
+          }
+          if (ne.type === 'rect') {
+            const x = ev2(ne.x), y = ev2(ne.y), w = ev2(ne.w), h = ev2(ne.h);
+            if (L.W != null) add('len', { e: ne.id, k: 's0' }, undefined, fmtv(L.W, 'mm'), [x + w / 2, y - 6]);
+            if (L.H != null) add('len', { e: ne.id, k: 's1' }, undefined, fmtv(L.H, 'mm'), [x + w + 6, y + h / 2]);
+          }
+          if ((ne.type === 'circle' || ne.type === 'npoly') && L.D != null) { const cx = ev2(ne.cx), cy = ev2(ne.cy), r = L.D / 2; add('diameter', { e: ne.id }, undefined, fmtv(L.D, 'mm'), [cx + r * 1.2, cy + r * 1.2]); }
+          if (ne.type === 'arc' && L.R != null) { const cx = ev2(ne.cx), cy = ev2(ne.cy); add('radius', { e: ne.id }, undefined, fmtv(L.R, 'mm'), [cx + L.R * 1.2, cy + L.R * 1.2]); }
+        }, 'La cota escrita deja el boceto sin solución');
+      }
+      publishTip(useStore.getState());
+    };
+    tipBus.onEnter = (vals) => {
+      const s = useStore.getState();
+      for (const [k, v] of Object.entries(vals)) { let n = NaN; try { n = safeEval(s)(v.includes(' ') || /[a-z]/i.test(v) ? v : v + (k === 'A' ? ' deg' : ' mm')); } catch { /* */ } if (isFinite(n)) state.locks[k] = k === 'A' ? n : Math.abs(n); }
+      if (!state.hover) return;
+      drawWithLocks(lockSnap({ p: state.hover.p }));
+    };
+    tipBus.onLock = (k, v) => {
+      const s = useStore.getState(); let n = NaN; try { n = safeEval(s)(/[a-z ]/i.test(v) ? v : v + (k === 'A' ? ' deg' : ' mm')); } catch { /* */ }
+      if (isFinite(n)) state.locks[k] = k === 'A' ? n : Math.abs(n); else delete state.locks[k];
+      if (state.hover) { state.hover = lockSnap(state.hover); buildPreview(s); } publishTip(s);
+    };
+    tipBus.onCancel = () => { state.locks = {}; publishTip(useStore.getState()); };
+    const drawAt = (sn: Snap) => {
+      const s = useStore.getState(), tool = s.tool;
       const p = sn.p;
       if (tool === 'point') { const id = uid('pt'); addGeom([{ id, type: 'point', cx: r3(p[0]), cy: r3(p[1]) }], snapCons(sn, { e: id, k: 'c' })); return; }
       if (tool === 'text') { useStore.setState({ dialog: { kind: 'skop', op: 'text', params: { text: 'INV3D', size: '10 mm', rot: '0 deg', x: r3(p[0]), y: r3(p[1]) }, step: 0 } }); return; }
@@ -1390,8 +1570,9 @@ export default function PartViewport() {
         const changed = JSON.stringify(hp?.ref) !== JSON.stringify(state.hoverPick?.ref) || hp?.kind !== state.hoverPick?.kind;
         state.hoverPick = hp;
         const prev = t === 'line' ? state.chain[state.chain.length - 1]?.p : t === 'rect3' || t === 'spline' ? state.clicks[state.clicks.length - 1]?.p : undefined;
-        state.hover = drawing ? snap(ev, raw, prev) : { p: raw };
+        state.hover = drawing ? lockSnap(snap(ev, raw, prev)) : { p: raw };
         useStore.setState({ cursor: state.hover.p });
+        publishTip(s);
         if (changed) buildSketches(s); else buildPreview(s);
         cvs.style.cursor = !t && hp ? 'pointer' : t ? 'crosshair' : 'default';
       }
@@ -1400,8 +1581,10 @@ export default function PartViewport() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       const s = useStore.getState();
+      // escribir una medida mientras se dibuja: va a la cota flotante (como SolidWorks)
+      if (s.mode === 'sketch' && !e.ctrlKey && !e.altKey && !e.metaKey && /^[0-9.,\-]$/.test(e.key) && liveFields(s, state.hover?.p)) { e.preventDefault(); e.stopPropagation(); tipBus.type?.(e.key); return; }
       if (e.key === 'Enter' && s.tool === 'spline') finishSpline(false);
-      if (e.key === 'Escape' && s.mode === 'sketch' && (state.chain.length || state.clicks.length || state.picks.length)) { e.stopPropagation(); state.chain = []; state.chainIds = []; state.clicks = []; state.picks = []; buildPreview(s); }
+      if (e.key === 'Escape' && s.mode === 'sketch' && (state.chain.length || state.clicks.length || state.picks.length)) { e.stopPropagation(); state.chain = []; state.chainIds = []; state.clicks = []; state.picks = []; state.locks = {}; buildPreview(s); publishTip(s); }
     };
     const cvs = V.renderer.domElement;
     cvs.addEventListener('pointerdown', onDown);
@@ -1522,8 +1705,116 @@ export default function PartViewport() {
           <span>{tool === 'npoly' ? 'Centro y vértice' : 'Clic cerca del vértice entre dos líneas'}</span>
         </div>
       )}
+      {mode === 'sketch' && <DimTip />}
+      <FaceMenu />
       {hint && <div className="vp-hint">{hint}</div>}
       {tool && hints[tool] && <div className="vp-hint">{hints[tool]}</div>}
+    </div>
+  );
+}
+
+// ---------- Cotas flotantes al dibujar ----------
+type TipField = { key: string; label: string; v: number; unit: 'mm' | 'deg'; locked: boolean };
+const tipBus: {
+  set: (t: { x: number; y: number; fields: TipField[] } | null) => void;
+  type?: (ch: string) => void;
+  onEnter?: (vals: Record<string, string>) => void;
+  onLock?: (k: string, v: string) => void;
+  onCancel?: () => void;
+} = { set: () => {} };
+/** Cuadros de medida junto al cursor mientras se dibuja: se escribe el valor, Tab cambia de cuadro, Intro crea la entidad con esa medida (queda como cota c1, c2…), Esc anula. */
+function DimTip() {
+  const [tip, setTip] = useState<{ x: number; y: number; fields: TipField[] } | null>(null);
+  const [edit, setEdit] = useState<Record<string, string>>({});
+  const [focus, setFocus] = useState<string | null>(null);
+  const refs = useRef<Record<string, HTMLInputElement | null>>({});
+  const tipRef = useRef(tip); tipRef.current = tip;
+  const armed = useRef<string | null>(null);
+  useEffect(() => {
+    tipBus.set = (t) => { setTip(t); if (!t) { setEdit({}); setFocus(null); armed.current = null; } };
+    // primera tecla escrita sobre el visor: abre el primer cuadro; las siguientes (antes de que tenga el foco) se añaden
+    tipBus.type = (ch) => {
+      const f = tipRef.current?.fields[0]; if (!f) return;
+      const first = armed.current !== f.key; armed.current = f.key;
+      setEdit((e) => ({ ...e, [f.key]: (first ? '' : e[f.key] ?? '') + ch })); setFocus(f.key);
+      setTimeout(() => { const el = refs.current[f.key]; if (el && document.activeElement !== el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
+    };
+    return () => { tipBus.set = () => {}; tipBus.type = undefined; };
+  }, []);
+  if (!tip) return null;
+  const done = () => { const vals = { ...edit }; setEdit({}); setFocus(null); armed.current = null; (document.activeElement as HTMLElement)?.blur?.(); tipBus.onEnter?.(vals); };
+  return (
+    <div className="dim-tip" style={{ left: tip.x, top: tip.y }} onPointerDown={(e) => e.stopPropagation()}>
+      {tip.fields.map((f, i) => (
+        <label key={f.key} className={f.locked ? 'locked' : ''} title={f.unit === 'deg' ? 'Ángulo respecto a X (grados)' : 'Medida en mm (admite fórmulas y parámetros)'}>
+          <span>{f.label}</span>
+          <input ref={(el) => { refs.current[f.key] = el; }} value={focus === f.key || edit[f.key] != null ? edit[f.key] ?? '' : (Math.round(f.v * 100) / 100).toString()}
+            onFocus={() => { setFocus(f.key); setEdit((e) => (e[f.key] != null ? e : { ...e, [f.key]: (Math.round(f.v * 100) / 100).toString() })); }}
+            onChange={(e) => setEdit({ ...edit, [f.key]: e.target.value })}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') { e.preventDefault(); done(); }
+              else if (e.key === 'Tab') { e.preventDefault(); if (edit[f.key] != null) tipBus.onLock?.(f.key, edit[f.key]); const nx = tip.fields[(i + (e.shiftKey ? tip.fields.length - 1 : 1)) % tip.fields.length]; setFocus(nx.key); refs.current[nx.key]?.focus(); refs.current[nx.key]?.select(); }
+              else if (e.key === 'Escape') { setEdit({}); setFocus(null); armed.current = null; (e.target as HTMLInputElement).blur(); tipBus.onCancel?.(); }
+            }} />
+          <i>{f.unit === 'deg' ? '°' : 'mm'}</i>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+// ---------- Menú contextual de cara (modelo) ----------
+type FaceCtx = { x: number; y: number; point: V3; normal: V3; plane: PlaneRef | null; cyl: { o: V3; d: V3; r: number } | null; look: () => void };
+const faceMenuApi: { set?: (c: FaceCtx | null) => void } = {};
+/** Clic derecho sobre una cara: nuevo boceto, operaciones típicas y geometría de trabajo (como Inventor y SolidWorks) */
+function FaceMenu() {
+  const [c, setC] = useState<FaceCtx | null>(null);
+  useEffect(() => {
+    faceMenuApi.set = setC;
+    const off = (e: PointerEvent) => { if (!(e.target as HTMLElement).closest?.('.ctx.face-ctx')) setC(null); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setC(null); };
+    window.addEventListener('pointerdown', off, true); window.addEventListener('keydown', esc);
+    return () => { faceMenuApi.set = undefined; window.removeEventListener('pointerdown', off, true); window.removeEventListener('keydown', esc); };
+  }, []);
+  if (!c) return null;
+  const s = useStore.getState();
+  const run = (f: () => void) => () => { setC(null); f(); };
+  const withFaces = (kind: Parameters<typeof s.openFeatureDialog>[0]) => run(() => { s.openFeatureDialog(kind); useStore.getState().updateDraft({ faces: [c.point] } as never); });
+  /** Taladro en el punto: boceto en la cara con un punto y diálogo de taladro */
+  const holeHere = run(() => {
+    if (!c.plane || c.plane.kind !== 'custom') return;
+    const pl = c.plane, o = pl.origin, x = pl.xDir, n = pl.normal, y: V3 = [n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2], n[0] * x[1] - n[1] * x[0]];
+    const d: V3 = [c.point[0] - o[0], c.point[1] - o[1], c.point[2] - o[2]];
+    const u = d[0] * x[0] + d[1] * x[1] + d[2] * x[2], v = d[0] * y[0] + d[1] * y[1] + d[2] * y[2];
+    const st = useStore.getState(), sid = uid('s');
+    st.commit((doc) => { doc.features.push({ id: sid, name: nextName(doc, 'sketch'), type: 'sketch', plane: pl, entities: [{ id: uid('pt'), type: 'point', cx: String(+u.toFixed(3)), cy: String(+v.toFixed(3)) }] }); });
+    useStore.getState().openFeatureDialog('hole');
+    useStore.getState().updateDraft({ sketch: sid } as never);
+  });
+  const items: ([string, () => void] | '-')[] = [];
+  if (c.plane) items.push(['Nuevo boceto', run(() => { const st = useStore.getState(); if (st.mode === 'sketch') st.finishSketch(); st.startSketch(c.plane!); })]);
+  items.push(['Extrusión…', run(() => s.openFeatureDialog('extrude'))], ['Revolución…', run(() => s.openFeatureDialog('revolve'))]);
+  if (c.plane) items.push(['Taladro aquí…', holeHere]);
+  if (c.cyl) items.push(['Rosca…', withFaces('thread')]);
+  items.push('-');
+  items.push(['Empalme…', run(() => s.openFeatureDialog('fillet'))], ['Chaflán…', run(() => s.openFeatureDialog('chamfer'))]);
+  items.push(['Vaciado (quitar esta cara)…', withFaces('shell')], ['Inclinación…', withFaces('draft')], ['Engrosar / desfase…', withFaces('thicken')]);
+  items.push(['Patrón…', run(() => s.openFeatureDialog('pattern'))], ['Simetría…', run(() => s.openFeatureDialog('mirror'))]);
+  items.push('-');
+  if (c.plane) items.push(['Plano de trabajo en la cara', run(() => { s.openFeatureDialog('workplane'); useStore.getState().updateDraft({ base: c.plane, offset: '0 mm' } as never); })]);
+  if (c.cyl) items.push(['Eje de trabajo (eje del cilindro)', run(() => { const st = useStore.getState(); st.commit((doc) => { doc.features.push({ id: uid('f'), name: nextName(doc, 'workaxis'), type: 'workaxis', origin: c.cyl!.o.map((v) => String(v)) as never, dir: c.cyl!.d.map((v) => String(v)) as never }); }); })]);
+  items.push(['Punto de trabajo aquí', run(() => { const st = useStore.getState(); st.commit((doc) => { doc.features.push({ id: uid('f'), name: nextName(doc, 'workpoint'), type: 'workpoint', origin: c.point.map((v) => String(v)) as never }); }); })]);
+  items.push(['ePoint en esta cara…', run(() => { const st = useStore.getState(); st.open({ kind: 'epoint' }); useStore.setState({ epPick: c.cyl ? { point: c.point, dir: c.cyl.d, radius: +c.cyl.r.toFixed(3), axis: true, n: (st.epPick?.n ?? 0) + 1 } : { point: c.point, dir: c.normal, axis: false, n: (st.epPick?.n ?? 0) + 1 } }); })]);
+  items.push('-');
+  if (c.plane) items.push(['Mirar a (normal a la cara)', run(c.look)]);
+  items.push(['Medir…', run(() => s.setTool('measure'))]);
+  const W = 250, H = items.length * 27;
+  const left = Math.min(c.x, window.innerWidth - W - 8), top = Math.min(c.y, window.innerHeight - H - 8);
+  return (
+    <div className="ctx face-ctx" style={{ position: 'fixed', left, top, zIndex: 50 }} onContextMenu={(e) => e.preventDefault()}>
+      <div className="ctx-title">{c.plane ? 'Cara plana' : c.cyl ? `Cara cilíndrica · Ø${+(c.cyl.r * 2).toFixed(2)}` : 'Cara'}</div>
+      {items.map((it, i) => (it === '-' ? <hr key={i} /> : <button key={i} onClick={it[1]}>{it[0]}</button>))}
     </div>
   );
 }
