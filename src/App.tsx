@@ -109,7 +109,30 @@ function FolderBanner() {
   );
 }
 
-/** Pestañas de documentos abiertos. */
+/** Cierra un documento (pregunta si tiene cambios; la pieza usada por un ensamblaje solo se oculta). */
+async function closeDocAsk(id: string) {
+  const s = useStore.getState(), d = s.docs.find((x) => x.id === id); if (!d) return;
+  const dirty = id === s.active ? s.dirty : d.dirty;
+  const used = s.docs.some((o) => o.kind === 'assembly' && (s.docData(o.id) as any)?.occurrences?.some((x: any) => x.part === d.id));
+  // La pieza se cierra pero sigue cargada en memoria mientras la use el ensamblaje
+  if (used) { s.hideDocument(d.id); return; }
+  if (dirty && !(await s.ask(`${d.fileName} tiene cambios sin guardar. ¿Cerrarlo?`, 'Cerrar sin guardar'))) return;
+  s.closeDocument(d.id);
+}
+
+/** Aspa de cierre del fichero activo, en la esquina superior derecha del área gráfica (pieza, ensamblaje o dibujo). */
+function DocCloseX() {
+  const active = useStore((s) => s.active);
+  const name = useStore((s) => s.docs.find((d) => d.id === s.active)?.fileName);
+  if (!active || !name) return null;
+  return (
+    <button className="doc-closex" title={`Cerrar ${name}`} aria-label={`Cerrar ${name}`} onClick={() => closeDocAsk(active)}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden><path d="M1.5 1.5l9 9M10.5 1.5l-9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+    </button>
+  );
+}
+
+/** Pestañas de documentos abiertos (el cierre está en el aspa del área gráfica; clic central también cierra). */
 function DocTabs() {
   const s = useStore();
   const icon = { part: 'part', assembly: 'assembly', drawing: 'drawing' } as const;
@@ -119,16 +142,9 @@ function DocTabs() {
         const on = d.id === s.active;
         const dirty = on ? s.dirty : d.dirty;
         return (
-          <div key={d.id} role="tab" aria-selected={on} className={`doc-tab ${on ? 'on' : ''}`} onClick={() => s.activate(d.id)} title={d.fileName}>
+          <div key={d.id} role="tab" aria-selected={on} className={`doc-tab ${on ? 'on' : ''}`} onClick={() => s.activate(d.id)}
+            onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); closeDocAsk(d.id); } }} title={d.fileName}>
             <Icon name={icon[d.kind]} size={15} /><span>{d.fileName}{dirty ? ' *' : ''}</span>
-            <button className="doc-x" title="Cerrar" onClick={async (e) => {
-              e.stopPropagation();
-              const used = s.docs.some((o) => o.kind === 'assembly' && (s.docData(o.id) as any)?.occurrences?.some((x: any) => x.part === d.id));
-              // La pieza se cierra pero sigue cargada en memoria mientras la use el ensamblaje
-              if (used) { s.hideDocument(d.id); return; }
-              if (dirty && !(await s.ask(`${d.fileName} tiene cambios sin guardar. ¿Cerrarlo?`, 'Cerrar sin guardar'))) return;
-              s.closeDocument(d.id);
-            }}>×</button>
           </div>
         );
       })}
@@ -236,6 +252,7 @@ export default function App() {
           {kind === 'part' && <PartViewport key={active} />}
           {kind === 'assembly' && <AsmViewport key={active} />}
           {kind === 'drawing' && <DrawingView key={active} />}
+          <DocCloseX />
           <DocTabs />
         </section>
         <PropertyPanel />
