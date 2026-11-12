@@ -6,7 +6,7 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { V3 } from '../core/doc';
-import { useStore } from '../core/store';
+import { useStore, manualRange, manualX } from '../core/store';
 import type { MeshData } from '../core/cadClient';
 
 export const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#000';
@@ -362,9 +362,8 @@ export class View3D {
     const axOf = (p: string) => (p.startsWith('XY') ? 2 : p.startsWith('XZ') ? 1 : 0);
     const cap = ct.mode === 'manual' ? ct.plane.endsWith('c') || ct.plane === '*' : ct.plane.endsWith('c') || ct.plane === '*';
     if (ct.mode === 'manual') {
-      const ax = 'xyz'.indexOf(ct.dir[1]), hideNeg = ct.dir[0] === '-' ? !ct.flip : ct.flip;
-      const p0 = ct.pt[ax], end = hideNeg ? mx.getComponent(ax) : mn.getComponent(ax);
-      const X = p0 + ct.mpos * (end - p0);
+      const { ax, hideNeg } = manualRange(ct, mn.toArray(), mx.toArray());
+      const X = manualX(ct, mn.toArray(), mx.toArray());
       const n = new THREE.Vector3(); n.setComponent(ax, hideNeg ? 1 : -1);
       const pt = new THREE.Vector3(); pt.setComponent(ax, X);
       return { planes: [new THREE.Plane(n, -n.dot(pt))], cap };

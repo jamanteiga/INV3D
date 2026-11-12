@@ -35,14 +35,29 @@ export interface ClipTool {
   pt: [number, number, number]; normal: [number, number, number];
   /** paso de las flechas y espesor de la franja (mm) */
   step: number;
-  /** modo M: 0 = en el punto, 1 = al final del modelo por el lado visible */
+  /** modo M: parte visible del modelo (1 = 100 %, no se oculta nada; 0 = se oculta todo) */
   mpos: number;
+  /** modo M: ya se ha designado un punto 3D */
+  ptSet?: boolean;
   /** R: invierte el lado que se oculta */
   flip: boolean;
   /** mostrar el plano en el 3D */
   show: boolean;
 }
-export const CLIP0: ClipTool = { mode: 'plane', plane: 'XYc', pos: 0.5, dir: '-x', pt: [0, 0, 0], normal: [0, 0, 1], step: 100, mpos: 0, flip: false, show: true };
+export const CLIP0: ClipTool = { mode: 'plane', plane: 'XYc', pos: 0.5, dir: '-x', pt: [0, 0, 0], normal: [0, 0, 1], step: 100, mpos: 1, flip: false, show: true, ptSet: false };
+/** Modo M: coordenadas del plano en su eje para «nada oculto» (100 %) y «todo oculto» (0 %), con un pequeño margen */
+export function manualRange(ct: ClipTool, mn: number[], mx: number[]) {
+  const ax = 'xyz'.indexOf(ct.dir[1]), hideNeg = ct.dir[0] === '-' ? !ct.flip : ct.flip;
+  const m = Math.max(0.5, 0.005 * (mx[ax] - mn[ax])), lo = mn[ax] - m, hi = mx[ax] + m;
+  return { ax, hideNeg, none: hideNeg ? lo : hi, all: hideNeg ? hi : lo };
+}
+/** Modo M: coordenada del plano */
+export function manualX(ct: ClipTool, mn: number[], mx: number[]) { const r = manualRange(ct, mn, mx); return r.all + ct.mpos * (r.none - r.all); }
+/** Modo M: porcentaje visible que deja el plano en la coordenada X */
+export function manualMpos(ct: ClipTool, mn: number[], mx: number[], X: number) {
+  const r = manualRange(ct, mn, mx), d = r.none - r.all;
+  return Math.min(1, Math.max(0, Math.abs(d) < 1e-9 ? 1 : (X - r.all) / d));
+}
 export interface HudState {
   style: 'shaded' | 'hlr' | 'hlv';
   clipOff: number; clipFlip: boolean;
