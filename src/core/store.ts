@@ -3,6 +3,7 @@ import {
   newDoc, uid, nextName, consumedSketches, newSheetDoc, docParams,
   type PartDoc, type Feature, type PlaneRef, type SkEntity, type SketchF, type V3, type ConstraintType, type SkConstraint,
   syncModelParams,
+  syncCenterAxes,
 } from './doc';
 import { makeEval } from './expr';
 import { solve, applySolution, checkNew } from './sketch';
@@ -75,7 +76,7 @@ export type Tool = null
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
-  | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge' | 'femFace' | 'epPick' | 'epEdge'
+  | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge' | 'femFace' | 'epPick' | 'epEdge' | 'holeFace' | 'holeEdge1' | 'holeEdge2' | 'projFace' | 'projSurf'
   | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember' | 'place'
   | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum' | 'drwSectionPath' | 'drwBreakout';
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
@@ -87,7 +88,8 @@ export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' }
+  | { kind: 'projto'; mode: 'face' | 'surf' }
   | { kind: 'auxsketch'; init?: { pt?: string; ax?: string } }
   | { kind: 'asmaux'; aux: 'axis' | 'point' }
   | { kind: 'sketch3d'; id?: string }
@@ -134,6 +136,8 @@ export interface State {
   selCon: string | null;
   conType: ConstraintType;
   showCons: boolean;
+  /** estilo de la geometría nueva del boceto: normal, construcción (fina discontinua) o línea eje (trazo y punto) */
+  skStyle: 'normal' | 'construction' | 'center';
   skInfo: SketchInfo | null;
   /** Grados de libertad de los componentes del ensamblaje activo */
   asmDof: Record<string, number> | null;
@@ -150,6 +154,8 @@ export interface State {
   /** Última cara elegida para un ePoint (punto, dirección y, si es cilíndrica, radio) */
   epPick: { point: V3; dir: V3; radius?: number; axis: boolean; n: number } | null;
   /** Creación de ePoints: punto de la cara, centro de cara, círculo, 3 aristas (conducto rectangular) u oval (2 aristas) */
+  /** boceto origen para «Proyectar sobre cara/plano» y «Proyectar sobre superficie» */
+  projSrc: string | null;
   epMode: 'face' | 'facec' | 'circle' | 'edges3' | 'oval2';
   epEdges: number[];
   /** Detección de colisiones al mover componentes */
@@ -263,6 +269,12 @@ function lastSketch(doc: PartDoc, pred: (s: SketchF) => boolean): string {
 }
 const lastBody = (doc: PartDoc) => [...doc.features].reverse().find((f) => ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil'].includes(f.type))?.id;
 
+/** Aplica el estilo activo (construcción / línea eje) a una entidad nueva */
+export function styled(e: SkEntity, st: 'normal' | 'construction' | 'center'): SkEntity {
+  if (st === 'normal' || e.type === 'point' || e.type === 'text' || e.construction) return e;
+  if (st === 'center') return e.type === 'line' ? { ...e, center: true, construction: true } : e;
+  return { ...e, construction: true };
+}
 function makeSafeEval(doc: PartDoc) { const e = makeEval(docParams(doc)); return (x: string) => { try { return e(x); } catch { return NaN; } }; }
 /** Vuelve a resolver los bocetos con restricciones (p. ej. tras cambiar un parámetro). */
 function resolveAll(doc: PartDoc, skip?: string) {
@@ -303,7 +315,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, epMode: 'facec', epEdges: [],
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
@@ -521,7 +533,15 @@ export const useStore = create<State>((set, get) => ({
     set({ mode: 'sketch', sketchId: id, tool: 'line', selFeature: id, selEntity: null, view: { name: 'sketch', n: get().view.n + 1 } });
   },
   editSketch: (id) => set({ mode: 'sketch', sketchId: id, tool: null, selFeature: id, selEntity: null, selEntities: [], selCon: null, dialog: null, view: { name: 'sketch', n: get().view.n + 1 } }),
-  finishSketch: () => set({ mode: 'model', sketchId: null, tool: null, selEntity: null, selEntities: [], selCon: null, skInfo: null, view: { name: 'restore', n: get().view.n + 1 } }),
+  finishSketch: () => {
+    const s0 = get();
+    if (s0.sketchId) {
+      const id = s0.sketchId, ev = makeSafeEval(s0.doc);
+      const probe = structuredClone(s0.doc);
+      if (syncCenterAxes(probe, id, ev)) s0.commit((d) => { syncCenterAxes(d, id, ev); });
+    }
+    set({ mode: 'model', sketchId: null, tool: null, selEntity: null, selEntities: [], selCon: null, skInfo: null, view: { name: 'restore', n: get().view.n + 1 }, skStyle: 'normal' });
+  },
   setTool: (tool) => {
     const s = get();
     if (s.placing && tool !== 'place') { const pend = s.placing.occ; set({ asm: { ...s.asm, occurrences: s.asm.occurrences.filter((o) => o.id !== pend) }, placing: null }); }
@@ -531,6 +551,7 @@ export const useStore = create<State>((set, get) => ({
   addEntity: (e) => {
     const sid = get().sketchId;
     if (!sid) return;
+    e = styled(e, get().skStyle);
     get().commit((d) => { const s = d.features.find((f) => f.id === sid) as SketchF; s.entities.push(e); });
     set({ selEntity: e.id });
   },
@@ -564,7 +585,7 @@ export const useStore = create<State>((set, get) => ({
         case 'extrude': draft = { id, name, type: 'extrude', profile, distance: '10 mm', dir: 'normal', op: 'join' }; break;
         case 'revolve': {
           const sk = doc.features.find((f) => f.id === profile) as SketchF | undefined;
-          const line = sk?.entities.find((e) => e.type === 'line');
+          const line = sk?.entities.find((e) => e.type === 'line' && e.center) ?? sk?.entities.find((e) => e.type === 'line' && e.construction) ?? sk?.entities.find((e) => e.type === 'line');
           draft = { id, name, type: 'revolve', profile, axis: line?.id ?? 'sy', angle: '360 deg', op: 'join' }; break;
         }
         case 'fillet': draft = { id, name, type: 'fillet', radius: '2 mm', edges: { mode: 'picked', points: [] } }; break;
@@ -685,6 +706,8 @@ function toolFor(f: Feature): Tool {
   if ((f.type === 'fillet' || f.type === 'chamfer') && f.edges.mode === 'picked') return 'pickEdges';
   if (f.type === 'shell' || f.type === 'draft' || f.type === 'thicken' || f.type === 'thread' || f.type === 'combine' || f.type === 'movebody') return 'pickFaces';
   if (f.type === 'sm_flange') return 'pickFlangeEdge';
+  // taladro sin boceto con puntos: se coloca en una cara
+  if (f.type === 'hole' && !f.sketch && !f.face) return 'holeFace';
   return null;
 }
 

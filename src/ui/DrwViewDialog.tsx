@@ -78,7 +78,9 @@ export default function DrwViewDialog({ id, onClose }: { id: string; onClose: ()
         </>}
         <tr><td>Mostrar</td><td>
           <label className="check"><input type="checkbox" checked={v.hidden} onChange={(e) => up({ hidden: e.target.checked })} /> Aristas ocultas</label>
-          <label className="check"><input type="checkbox" checked={!!v.centers} onChange={(e) => up({ centers: e.target.checked })} /> Marcas de centro automáticas</label>
+          <label className="check"><input type="checkbox" checked={v.centers !== false} onChange={(e) => up({ centers: e.target.checked })} /> Marcas de centro automáticas</label>
+          <label className="check"><input type="checkbox" checked={v.axes !== false} onChange={(e) => up({ axes: e.target.checked })} /> Ejes de simetría, longitudinales y de taladros</label>
+          <label className="check"><input type="checkbox" checked={v.holeNotes !== false} onChange={(e) => up({ holeNotes: e.target.checked })} /> Notas automáticas de taladros roscados</label>
         </td></tr>
       </tbody></table>
       {kind === 'section' && <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => { onClose(); useStore.setState({ selItem: v.id }); drwActions.flipSection(); }}>Invertir dirección de la sección</button>}

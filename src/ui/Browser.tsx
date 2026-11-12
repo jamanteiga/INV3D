@@ -112,7 +112,7 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
         {kids.map((k) => row(k, depth + 1))}
         {s.sketchId === f.id && f.type === 'sketch' && f.entities.map((e) => (
           <div key={e.id} className={`tree-row ent ${s.selEntity === e.id ? 'sel' : ''}`} style={{ paddingLeft: 28 + depth * 16 }} onClick={() => s.set({ selEntity: e.id })}>
-            <span className="ent-dot" />{ENTITY_NAMES[e.type]}{(e.type === 'line' || e.type === 'arc') && e.construction ? ' (constr.)' : ''}
+            <span className="ent-dot" />{ENTITY_NAMES[e.type]}{(e.type === 'line' || e.type === 'arc') && (e.type === 'line' && e.center ? ' (eje)' : e.construction ? ' (constr.)' : '')}
           </div>
         ))}
       </div>

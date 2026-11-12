@@ -61,8 +61,9 @@ export interface ExtrudeF extends FBase {
   distance2?: string; taper?: string;
 }
 export interface RevolveF extends FBase { type: 'revolve'; profile: string; axis: string; angle: string; op: BoolOp }
-export interface FilletF extends FBase { type: 'fillet'; radius: string; edges: EdgeSel }
-export interface ChamferF extends FBase { type: 'chamfer'; distance: string; edges: EdgeSel }
+/** Empalme: aristas elegidas, caras planas (todas sus aristas) o todas; radio variable con «radius2» (radio final) */
+export interface FilletF extends FBase { type: 'fillet'; radius: string; edges: EdgeSel; faces?: V3[]; radius2?: string }
+export interface ChamferF extends FBase { type: 'chamfer'; distance: string; edges: EdgeSel; faces?: V3[] }
 export interface ImportF extends FBase { type: 'import'; fileName: string; step: string }
 export type HoleKind = import('./holes').HoleType;
 export interface HoleF extends FBase {
@@ -80,6 +81,10 @@ export interface HoleF extends FBase {
   nearCs?: boolean; nearCsDia?: string; nearCsAngle?: string;
   /** Heredado: tipo manual; avanzado: elemento del lado cercano y segundo diámetro */
   legacyKind?: 'simple' | 'cbore' | 'csink' | 'cdrill'; advNear?: 'none' | 'cbore' | 'csink'; step2Dia?: string; step2Depth?: string;
+  /** Dirección: automática (hacia el material) o la de la normal del boceto; flip la invierte */
+  dirMode?: 'auto' | 'normal'; flip?: boolean;
+  /** Taladro colocado en una cara: cara, aristas de referencia y distancias del centro a ellas */
+  face?: { point: V3; normal: V3; e1?: { a: V3; b: V3 }; e2?: { a: V3; b: V3 }; d1?: string; d2?: string };
 }
 export type AxisName = 'X' | 'Y' | 'Z';
 export interface PatternF extends FBase {
@@ -116,7 +121,8 @@ export interface PathPatternF extends FBase { type: 'pathpattern'; features: str
 /** Chapa: pestaña de contorno, dobladillo y punzonado */
 export interface SmContourF extends FBase { type: 'sm_contour'; profile: string; width: string; dir: 'normal' | 'reverse' | 'symmetric'; side: 'in' | 'out' }
 export interface SmPunchF extends FBase { type: 'sm_punch'; sketch: string; shape: 'round' | 'rect' | 'slot' | 'square'; d: string; w: string; h: string; rot: string }
-export interface WorkAxisF extends FBase { type: 'workaxis'; origin: E3; dir: E3 }
+/** Eje de trabajo; «link» = generado por una línea eje de un boceto (se recalcula al terminar el boceto) */
+export interface WorkAxisF extends FBase { type: 'workaxis'; origin: E3; dir: E3; link?: { sk: string; e: string } }
 export interface WorkPointF extends FBase { type: 'workpoint'; origin: E3 }
 export interface EdgeRef { p0: V3; p1: V3; n: V3; w: V3 }
 // ---------- Superficies, boceto 3D y chapa avanzada ----------
@@ -172,7 +178,7 @@ export interface PartDoc {
 
 // ---------- Parámetros de modelo c1, c2… (un parámetro por cada valor de cada operación y cada cota de boceto) ----------
 /** Campos de operación que nunca son valores (referencias, textos, modos) */
-const NOT_VALUE = new Set(['std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec']);
+const NOT_VALUE = new Set(['dirMode', 'std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec']);
 /** Nombre legible de cada campo (para la tabla de parámetros) */
 export const FIELD_NAMES: Record<string, string> = {
   distance: 'Distancia', distance2: 'Distancia 2', angle: 'Ángulo', radius: 'Radio', depth: 'Profundidad', dia: 'Diámetro', thickness: 'Espesor', offset: 'Desfase',
@@ -342,6 +348,32 @@ export function registerAux(m: WorkPlanes, f: Feature, ev: (s: string) => number
     m.set('ax:' + f.id, { origin: o, xDir: [1, 0, 0], yDir: [0, 1, 0], normal: n });
     m.set('pt:' + f.id, { origin: o, xDir: [1, 0, 0], yDir: [0, 1, 0], normal: n }); // el origen del eje también vale como punto
   }
+}
+
+/** Sincroniza los ejes de trabajo generados por las líneas eje («center») de un boceto. Devuelve si cambió algo. */
+export function syncCenterAxes(doc: PartDoc, skId: string, ev: (s: string) => number): boolean {
+  const sk = doc.features.find((f) => f.id === skId) as SketchF | undefined;
+  let changed = false;
+  const linked = doc.features.filter((f): f is WorkAxisF => f.type === 'workaxis' && f.link?.sk === skId);
+  const centers = sk ? sk.entities.filter((e) => e.type === 'line' && e.center) as Extract<SkEntity, { type: 'line' }>[] : [];
+  for (const w of linked) if (!centers.some((e) => e.id === w.link!.e)) { doc.features.splice(doc.features.indexOf(w), 1); changed = true; }
+  if (!sk || !centers.length) return changed;
+  let fr: Frame; try { fr = planeFrame(sk.plane, ev, resolveWorkPlanes(doc, ev)); } catch { return changed; }
+  const W = (u: number, v: number): V3 => v3.add(fr.origin, v3.add(v3.mul(fr.xDir, u), v3.mul(fr.yDir, v)));
+  const f6 = (x: number) => String(Math.round(x * 1e6) / 1e6);
+  for (const e of centers) {
+    const a = W(ev(e.a[0]), ev(e.a[1])), b = W(ev(e.b[0]), ev(e.b[1]));
+    if (![...a, ...b].every(isFinite) || v3.len(v3.sub(b, a)) < 1e-9) continue;
+    const o = a.map(f6) as E3, d = v3.norm(v3.sub(b, a)).map(f6) as E3;
+    const w = linked.find((x) => x.link!.e === e.id && doc.features.includes(x));
+    if (w) { if (w.origin.join() !== o.join() || w.dir.join() !== d.join()) { w.origin = o; w.dir = d; changed = true; } }
+    else {
+      const i = doc.features.indexOf(sk) + 1;
+      doc.features.splice(i, 0, { id: 'wa' + Math.random().toString(36).slice(2, 9), name: nextName(doc, 'workaxis'), type: 'workaxis', origin: o, dir: d, link: { sk: skId, e: e.id } });
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 export function workPlaneFrame(f: WorkPlaneF, ev: (s: string) => number, work: WorkPlanes): Frame {

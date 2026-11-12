@@ -1,5 +1,5 @@
 import FemPanel from './FemPanel';
-import TbTplDialog from './TbDialog';
+import TbTplDialog, { SheetTplDialog } from './TbDialog';
 import OccPropsDialog from './OccPropsDialog';
 import EPointPanel from './EPointPanel';
 import { partEPoints, EP_KIND_NAMES } from '../core/epoints';
@@ -29,7 +29,7 @@ import { openFile, newIpj, saveText, pickFile, loadPartForPlace } from '../core/
 import { cad, type FlatResult } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
 import { writeDxf } from '../core/dxf';
-import { asmActions, drwActions } from './actions';
+import { asmActions, drwActions, partActions } from './actions';
 import { bomRows, bomCsv, bomPartsOnly, bomTotal, type BomRow } from './bom';
 import { downloadXlsx, type Sheet } from '../core/xlsx';
 import { ILOGIC_RULE } from './ilogic';
@@ -188,7 +188,7 @@ function FeatureDialog() {
           <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
           <Row label="Eje"><select value={f.axis} onChange={(e) => up({ axis: e.target.value })}>
             <option value="sx">Eje X del boceto</option><option value="sy">Eje Y del boceto</option>
-            {lines.map((l, i) => <option key={l.id} value={l.id}>Línea {i + 1}{l.construction ? ' (constr.)' : ''}</option>)}
+            {lines.map((l, i) => <option key={l.id} value={l.id}>Línea {i + 1}{l.type === 'line' && l.center ? ' (eje)' : l.construction ? ' (constr.)' : ''}</option>)}
           </select></Row>
           <Row label="Paso"><Expr value={f.pitch} live autoFocus onCommit={(v) => up({ pitch: v })} /></Row>
           <Row label="Vueltas"><Expr value={f.turns} unit="ul" live onCommit={(v) => up({ turns: v })} /></Row>
@@ -300,11 +300,13 @@ function FeatureDialog() {
           : <Row label="Distancia"><Expr value={f.distance} live autoFocus onCommit={(v) => up({ distance: v })} /></Row>}
         <Row label="Aristas">
           <select value={f.edges.mode} onChange={(e) => up({ edges: { ...f.edges, mode: e.target.value as EdgeMode } })}>
-            <option value="picked">Seleccionadas en pantalla</option><option value="all">Todas las aristas</option><option value="circle">Aristas circulares</option>
+            <option value="picked">Aristas y caras seleccionadas</option><option value="all">Todas las aristas de la pieza</option><option value="circle">Aristas circulares</option>
             <option value="Z">Paralelas a Z</option><option value="X">Paralelas a X</option><option value="Y">Paralelas a Y</option>
           </select>
         </Row>
-        {f.edges.mode === 'picked' && <div className="pick-info"><b>{f.edges.points.length}</b> arista(s) seleccionada(s){f.edges.points.length > 0 && <button className="link" onClick={() => up({ edges: { mode: 'picked', points: [] } })}>Borrar</button>}</div>}
+        {f.edges.mode === 'picked' && <div className="pick-info"><b>{f.edges.points.length}</b> arista(s) y <b>{(f.faces ?? []).length}</b> cara(s) seleccionadas: clic en una arista la añade; clic en una cara plana añade todas sus aristas{(f.edges.points.length > 0 || (f.faces ?? []).length > 0) && <button className="link" onClick={() => up({ edges: { mode: 'picked', points: [] }, faces: [] })}>Borrar</button>}</div>}
+        {f.type === 'fillet' && <label className="check"><input type="checkbox" checked={!!f.radius2} onChange={(e) => up({ radius2: e.target.checked ? f.radius : undefined })} />Radio variable (del inicio al final de cada arista)</label>}
+        {f.type === 'fillet' && f.radius2 && <Row label="Radio final"><Expr value={f.radius2} live onCommit={(v) => up({ radius2: v })} /></Row>}
       </>)}
       {f.type === 'hole' && (() => {
         const sks = sketches.filter((x) => x.entities.some((e) => e.type === 'point' || e.type === 'circle'));
@@ -336,9 +338,20 @@ function FeatureDialog() {
           up(out);
         };
         const T = isTap ? threadByName(f.thread) : undefined;
+        const onFace = !!f.face || s.tool === 'holeFace';
         return (<>
+          <Row label="Colocación"><Seg value={onFace ? 'face' : 'sketch'} onChange={(v) => { if (v === 'face') { up({ face: f.face ?? undefined }); s.set({ tool: 'holeFace' }); } else { up({ face: undefined, sketch: f.sketch || sks[sks.length - 1]?.id || '' }); s.set({ tool: null }); } }} options={[['face', 'En cara'], ['sketch', 'Puntos de boceto']]} /></Row>
+          {onFace ? (<>
+            <div className="fem-row"><button className={`btn sm ${s.tool === 'holeFace' ? 'primary' : ''}`} onClick={() => s.set({ tool: s.tool === 'holeFace' ? null : 'holeFace' })}>{s.tool === 'holeFace' ? 'Clic en la cara, cerca del centro…' : f.face ? 'Cambiar cara / punto' : 'Elegir cara'}</button></div>
+            {f.face && (f.face.e1 ? (<>
+              <Row label="A arista 1"><Expr value={f.face.d1 ?? '10 mm'} live onCommit={(v) => up({ face: { ...f.face!, d1: v } })} /><button className={`btn sm ${s.tool === 'holeEdge1' ? 'primary' : ''}`} title="Elegir otra arista de referencia" onClick={() => s.set({ tool: s.tool === 'holeEdge1' ? null : 'holeEdge1' })}>⟲</button></Row>
+              <Row label="A arista 2"><Expr value={f.face.d2 ?? '10 mm'} live onCommit={(v) => up({ face: { ...f.face!, d2: v } })} /><button className={`btn sm ${s.tool === 'holeEdge2' ? 'primary' : ''}`} title="Elegir otra arista de referencia" onClick={() => s.set({ tool: s.tool === 'holeEdge2' ? null : 'holeEdge2' })}>⟲</button></Row>
+              <div className="pick-info">Centro del taladro acotado a dos aristas de la cara (⟲ para elegir otras).</div></>)
+              : <div className="pick-info">Centro en el punto elegido de la cara.</div>)}
+          </>) : (<>
           <Row label="Centros">{skSel(f.sketch, 'sketch', sks)}</Row>
-          <div className="pick-info">{n} centro(s): puntos y centros de círculo del boceto. El taladro va hacia el interior del plano del boceto.</div>
+          <div className="pick-info">{n} centro(s): puntos y centros de círculo del boceto. El taladro va hacia el lado con material.</div></>)}
+          <label className="check"><input type="checkbox" checked={!!f.flip} onChange={(e) => up({ flip: e.target.checked })} />Invertir dirección</label>
           <div className="plabel">Tipo de taladro</div>
           <div className="hole-types">
             {HOLE_TYPES.map(([k, l, t]) => <button key={k} className={K === k ? 'on' : ''} title={t} onClick={() => wiz({ kind: k })}><Icon name="hole" size={18} />{l}</button>)}
@@ -1136,7 +1149,8 @@ function DrwPanel() {
         <Row label="Escala"><select value={v.scale} onChange={(e) => upV({ scale: Number(e.target.value) })} disabled={!!v.parent && v.kind !== 'detail' && !v.ownScale} title="Doble clic sobre la vista para más opciones">{SCALES.map((x) => <option key={x} value={x}>{scaleLabel(x)}</option>)}</select></Row>
         {v.kind === 'detail' && v.detail && <Row label="Radio zona"><input type="number" value={v.detail.r} onChange={(e) => upV({ detail: { ...v.detail!, r: Math.max(2, Number(e.target.value)) } })} /></Row>}
         <label className="check"><input type="checkbox" checked={v.hidden} onChange={(e) => upV({ hidden: e.target.checked })} />Aristas ocultas</label>
-        <label className="check"><input type="checkbox" checked={!!v.centers} onChange={(e) => upV({ centers: e.target.checked })} />Marcas de centro automáticas</label>
+        <label className="check"><input type="checkbox" checked={v.centers !== false} onChange={(e) => upV({ centers: e.target.checked })} />Marcas de centro automáticas</label>
+        <label className="check"><input type="checkbox" checked={v.axes !== false} onChange={(e) => upV({ axes: e.target.checked })} />Ejes automáticos</label>
         {v.kind === 'section' && <button className="btn wide" onClick={drwActions.flipSection}>Invertir dirección de la sección</button>}
         {(v.breaks?.length || v.crop) && <button className="btn wide" onClick={drwActions.clearBreaks}>Quitar roturas y recorte</button>}
         {v.breakout && (<>
@@ -1634,6 +1648,39 @@ function KeysDialog({ onClose }: { onClose: () => void }) {
 }
 
 /** Referencias a objetos (tipo osnap de AutoCAD) */
+/** Proyectar la geometría de otro boceto (otra operación) sobre el boceto activo */
+function ProjSketchDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const sks = s.doc.features.filter((f) => f.type === 'sketch' && f.id !== s.sketchId && !f.suppressed);
+  const [id, setId] = useState(sks[sks.length - 1]?.id ?? '');
+  return (
+    <Modal title="Proyectar geometría de otra operación" onClose={onClose}>
+      {sks.length ? <Row label="Boceto"><select value={id} onChange={(e) => setId(e.target.value)}>{sks.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></Row>
+        : <p className="phelp">No hay otros bocetos en la pieza.</p>}
+      <p className="phelp">Las líneas se proyectan siempre como líneas; círculos y arcos se conservan si los planos son paralelos (si no, pasan a spline). Para proyectar aristas del sólido usa <b>Proyectar geometría</b> y haz clic en ellas.</p>
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!id} onClick={() => { onClose(); partActions.projectSketch(id); }}>Proyectar</button></div>
+    </Modal>
+  );
+}
+
+/** Proyectar un boceto sobre una cara plana / plano (nuevo boceto 2D) o sobre una superficie (boceto 3D) */
+function ProjToDialog({ onClose, mode }: { onClose: () => void; mode: 'face' | 'surf' }) {
+  const s = useStore();
+  const sks = s.doc.features.filter((f) => f.type === 'sketch' && !f.suppressed);
+  const [id, setId] = useState(sks[sks.length - 1]?.id ?? '');
+  const go = () => { onClose(); s.set({ projSrc: id }); s.setTool(mode === 'face' ? 'projFace' : 'projSurf'); };
+  return (
+    <Modal title={mode === 'face' ? 'Proyectar sobre cara o plano' : 'Proyectar sobre superficie'} onClose={onClose}>
+      {sks.length ? <Row label="Geometría (boceto)"><select value={id} onChange={(e) => setId(e.target.value)}>{sks.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></Row>
+        : <p className="phelp">No hay bocetos que proyectar.</p>}
+      <p className="phelp">{mode === 'face'
+        ? 'Después haz clic en una cara plana de la pieza o en un plano: se crea un boceto nuevo en ella con la geometría proyectada (referencia fija).'
+        : 'Después haz clic en la cara (curva o plana) de destino: la geometría se proyecta en la dirección normal de su boceto y queda como curvas de un boceto 3D.'}</p>
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!id} onClick={go}>Elegir {mode === 'face' ? 'cara o plano' : 'superficie'}</button></div>
+    </Modal>
+  );
+}
+
 function OsnapDialog({ onClose }: { onClose: () => void }) {
   useStore((s) => s.settings.osnap);
   const c = osCfg();
@@ -1867,6 +1914,9 @@ function DrwStyleDialog({ onClose }: { onClose: () => void }) {
           <Row label="Decimales"><input type="number" min={0} max={6} value={st.precision} onChange={(e) => up({ precision: Number(e.target.value) })} /></Row>
           <Row label="Separador"><select value={st.decSep} onChange={(e) => up({ decSep: e.target.value as ',' | '.' })}><option value=",">coma (12,5)</option><option value=".">punto (12.5)</option></select></Row>
           <label className="check"><input type="checkbox" checked={st.trailingZeros} onChange={(e) => up({ trailingZeros: e.target.checked })} />Ceros finales (12,50)</label>
+          <label className="check"><input type="checkbox" checked={!!st.altInch} disabled={st.units !== 'mm'} onChange={(e) => up({ altInch: e.target.checked })} />Pulgadas entre corchetes con fracciones (25,4 [1"])</label>
+          {st.altInch && <Row label="Fracción mínima"><select value={st.fracDen ?? 64} onChange={(e) => up({ fracDen: +e.target.value })}>{[2, 4, 8, 16, 32, 64, 128].map((n) => <option key={n} value={n}>1/{n}"</option>)}</select></Row>}
+          <label className="check"><input type="checkbox" checked={st.tolStack !== false} onChange={(e) => up({ tolStack: e.target.checked })} />Tolerancias «+a/-b» apiladas a la derecha de la cota</label>
         </div>
         <div>
           <div className="psec-title">Líneas y vistas</div>
@@ -1876,8 +1926,35 @@ function DrwStyleDialog({ onClose }: { onClose: () => void }) {
           <p className="phelp">La proyección decide qué vista se crea al proyectar a cada lado y el símbolo del cajetín. Las vistas ya colocadas no cambian.</p>
         </div>
       </div>
+      <DrwStyleLib />
       <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
     </Modal>
+  );
+}
+
+/** Estilos de dibujo personalizados: guardar con nombre, cargar y fijar el de los planos nuevos */
+const DRWSTYLE_KEY = 'inv3d.drwstyles', DRWSTYLE_DEF = 'inv3d.drwstyle.default';
+type NamedStyle = { name: string; std: NonNullable<DrawingDoc['std']>; style: Partial<DrawStyle> };
+const loadStyles = (): NamedStyle[] => { try { return JSON.parse(localStorage.getItem(DRWSTYLE_KEY) ?? '[]'); } catch { return []; } };
+function DrwStyleLib() {
+  const s = useStore();
+  const [lib, setLib] = useState(loadStyles);
+  const [name, setName] = useState('Mi estilo');
+  const save = (l: NamedStyle[]) => { setLib(l); try { localStorage.setItem(DRWSTYLE_KEY, JSON.stringify(l)); } catch { /* */ } };
+  const cur = (): NamedStyle => ({ name, std: s.drw.std ?? 'ISO', style: structuredClone(s.drw.style ?? {}) });
+  return (
+    <div className="psec">
+      <div className="psec-title">Estilos personalizados</div>
+      <div className="modal-btns" style={{ justifyContent: 'flex-start', margin: 0 }}>
+        <select value="" onChange={(e) => { const x = lib[+e.target.value]; if (x) { s.commitDrw((dd) => { dd.std = x.std; dd.style = structuredClone(x.style); }); setName(x.name); s.notify(`Estilo «${x.name}» aplicado`); } }}>
+          <option value="">Cargar estilo…</option>{lib.map((x, i) => <option key={i} value={i}>{x.name} ({x.std})</option>)}
+        </select>
+        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} style={{ width: 150 }} />
+        <button className="btn" onClick={() => { save([...lib.filter((x) => x.name !== name), cur()]); s.notify(`Estilo «${name}» guardado`); }}>Guardar</button>
+        {lib.some((x) => x.name === name) && <button className="btn" onClick={() => save(lib.filter((x) => x.name !== name))}>Borrar</button>}
+        <button className="btn" title="Los planos nuevos empezarán con este estilo" onClick={() => { try { localStorage.setItem(DRWSTYLE_DEF, JSON.stringify(cur())); s.notify(`Los planos nuevos usarán «${name}»`); } catch { /* */ } }}>Por defecto</button>
+      </div>
+    </div>
   );
 }
 
@@ -2869,8 +2946,11 @@ export function Modals() {
     case 'gen': return <GenDialog onClose={close} />;
     case 'fem': return <FemPanel onClose={close} />;
     case 'tbtpl': return <TbTplDialog onClose={close} />;
+    case 'sheettpl': return <SheetTplDialog onClose={close} />;
     case 'epoint': return <EPointPanel onClose={close} />;
     case 'osnap': return <OsnapDialog onClose={close} />;
+    case 'projsk': return <ProjSketchDialog onClose={close} />;
+    case 'projto': return <ProjToDialog onClose={close} mode={d.mode} />;
     case 'asmaux': return <AsmAuxPanel aux={(s.dialog as any).aux} onClose={close} />;
     case 'auxsketch': return <AuxSketchDialog onClose={close} init={(s.dialog as any).init} />;
     case 'drwviewprops': return <DrwViewPropsDialog key={(d as { view: string }).view} id={(d as { view: string }).view} onClose={close} />;

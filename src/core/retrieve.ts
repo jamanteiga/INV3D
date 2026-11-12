@@ -1,6 +1,7 @@
 // Cotas recuperadas del modelo: las cotas de los bocetos y las distancias de extrusión se proyectan
 // en la vista del plano y quedan asociadas (si cambia la pieza, la cota se mueve y cambia su valor).
-import { v3, planeFrame, toWorld, resolveWorkPlanes, docParams, type PartDoc, type SketchF, type V3, type ExtrudeF } from './doc';
+import { v3, planeFrame, toWorld, resolveWorkPlanes, docParams, type PartDoc, type SketchF, type V3, type ExtrudeF, type HoleF, type Frame } from './doc';
+import { threadByName } from './holes';
 import { makeEval } from './expr';
 import { refPoint, refLine, refCurve } from './sketch';
 import type { DDim, DView } from './drawing';
@@ -105,4 +106,49 @@ export function refreshModelDims(dims: DDim[], v: DView, all: ModelDim[]): DDim[
     }
     return { ...d, a: m.a, b: m.b, orphan: false };
   });
+}
+
+/** Notas automáticas de taladros roscados (ISO 6410): «2× M8x1,25-6H ↧12 / Ø6,8 ↧15» o «… pasante».
+ *  Solo en vistas que miran a lo largo del eje del taladro; la flecha apunta al primer agujero. */
+export function holeNotes(doc: PartDoc, v: DView, cam: Cam, pd: ProjData, g: ViewGeom, sep: ',' | '.' = ','): { id: string; a: P2; b: P2; text: string }[] {
+  const ev = evFor(doc), work = resolveWorkPlanes(doc, ev);
+  const toSheet = (P: V3): P2 => { const d = v3.sub(P, pd.center); return g.T([v3.dot(d, cam.x), v3.dot(d, cam.up)]); };
+  const n2 = (x: number) => String(Math.round(x * 100) / 100).replace('.', sep);
+  const out: { id: string; a: P2; b: P2; text: string }[] = [];
+  for (const f of doc.features) {
+    if (f.type !== 'hole' || f.suppressed) continue;
+    const h = f as HoleF;
+    if (h.kind !== 'tap' && h.kind !== 'ptap' && !(h.legacyKind === undefined && h.kind === 'legacy' && h.thread)) continue;
+    let fr: Frame; const cs: P2[] = [];
+    try {
+      if (h.face) {
+        const n0 = v3.norm(h.face.normal), P = h.face.point; let x = v3.cross([0, 0, 1], n0); if (v3.len(x) < 1e-6) x = [1, 0, 0]; x = v3.norm(x);
+        fr = { origin: P, xDir: x, normal: n0, yDir: v3.cross(n0, x) };
+        const F = h.face;
+        if (F.e1 && F.e2 && F.d1 && F.d2) {
+          const loc = (q: V3): P2 => { const d = v3.sub(q, P); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
+          const L = [F.e1, F.e2].map((e) => { const A = loc(e.a), B = loc(e.b); const u: P2 = [B[0] - A[0], B[1] - A[1]]; const l = Math.hypot(u[0], u[1]) || 1; let w: P2 = [-u[1] / l, u[0] / l]; if (-(A[0] * w[0] + A[1] * w[1]) < 0) w = [-w[0], -w[1]]; return { A, w }; });
+          const d = [ev(F.d1), ev(F.d2)];
+          const [a1, b1] = L[0].w, [a2, b2] = L[1].w, r1 = d[0] + L[0].A[0] * a1 + L[0].A[1] * b1, r2 = d[1] + L[1].A[0] * a2 + L[1].A[1] * b2, det = a1 * b2 - a2 * b1;
+          if (Math.abs(det) < 1e-9) continue;
+          cs.push([(r1 * b2 - r2 * b1) / det, (a1 * r2 - a2 * r1) / det]);
+        } else cs.push([0, 0]);
+      } else {
+        const sk = doc.features.find((x) => x.id === h.sketch) as SketchF | undefined; if (!sk) continue;
+        fr = planeFrame(sk.plane, ev, work);
+        for (const e of sk.entities) if (e.type === 'point' || e.type === 'circle') cs.push([ev(e.cx), ev(e.cy)]);
+      }
+    } catch { continue; }
+    if (!cs.length || Math.abs(v3.dot(v3.norm(fr.normal), cam.toward)) < 0.999) continue;
+    const th = threadByName(h.thread || h.size);
+    const desig = th ? th.name.replace(/(\d)\.(\d)/g, `$1${sep}$2`) : (h.thread || 'M?');
+    const cls = th && (th.std === 'M' || th.std === 'MF') ? '-6H' : th && (th.std === 'UNC' || th.std === 'UNF') ? '-2B' : '';
+    const drill = ev(h.dia), depth = ev(h.depth), tap = ev(h.tapDepth || h.depth);
+    const text = `${cs.length > 1 ? `${cs.length}× ` : ''}${desig}${cls}${h.through ? ' pasante' : ` ↧${n2(tap)} / Ø${n2(drill)} ↧${n2(depth)}`}`;
+    const C = toSheet(toWorld(fr, cs[0][0], cs[0][1]));
+    const rS = (th?.d ?? drill) / 2 * v.scale, k = Math.SQRT1_2;
+    const a: P2 = [C[0] + rS * k, C[1] + rS * k], b: P2 = [a[0] + 8, a[1] + 8];
+    out.push({ id: `hn:${v.id}:${f.id}`, a, b, text });
+  }
+  return out;
 }

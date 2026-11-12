@@ -135,7 +135,11 @@ export default function Ribbon() {
             <Col>
               <Small icon="slot" label="Ranura" active={tool === 'slot'} onClick={T('slot')} title="Ranura: centro 1, centro 2 y anchura" />
               <Small icon="pointtool" label="Punto" active={tool === 'point'} onClick={T('point')} title="Punto (centros de agujero)" />
-              <Small icon="projectgeom" label="Proyectar geometría" active={tool === 'projectGeom'} onClick={T('projectGeom')} disabled={!hasSolid && !s.ctxEdit} />
+              <Small icon="projectgeom" label="Proyectar geometría" active={tool === 'projectGeom'} onClick={T('projectGeom')} disabled={!hasSolid && !s.ctxEdit} title="Proyecta aristas del modelo (clic en ellas)" />
+            </Col>
+            <Col>
+              <Small icon="workaxis" label="Proyectar ejes" onClick={P.projectAxes} title="Proyecta los ejes principales X, Y, Z sobre el plano del boceto" />
+              <Small icon="projectgeom" label="Desde operación…" onClick={() => s.open({ kind: 'projsk' })} title="Proyecta la geometría de otro boceto" />
             </Col>
           </Group>
           <Group label="Modificar">
@@ -171,7 +175,8 @@ export default function Ribbon() {
             </div>
             <Col>
               <Small icon="showcons" label="Mostrar restricciones" active={s.showCons} onClick={() => s.set({ showCons: !s.showCons })} title="Mostrar u ocultar los símbolos de restricción (F8)" />
-              <Small icon="axis" label="Construcción" disabled={!s.selEntity} onClick={P.toggleConstruction} title="Geometría de construcción (no forma perfiles)" />
+              <Small icon="axis" label="Construcción" active={s.skStyle === 'construction'} onClick={P.toggleConstruction} title="Línea auxiliar fina y discontinua (no forma perfiles). Con selección la convierte; sin selección, lo siguiente que dibujes" />
+              <Small icon="workaxis" label="Línea eje" active={s.skStyle === 'center'} onClick={P.toggleCenterline} title="Línea eje (trazo y punto): no forma perfiles, sirve de eje de revolución y crea un eje de trabajo al terminar el boceto" />
             </Col>
           </Group>
           <Group label="Insertar"><Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} /></Group>
@@ -317,6 +322,15 @@ export default function Ribbon() {
               <Small icon="move" label="Mover cuerpo" disabled={!hasSolid} onClick={() => s.openFeatureDialog('movebody')} />
               <Small icon="copy2d" label="Copiar cuerpo" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('movebody'); s.updateDraft({ copy: true, name: 'Copiar cuerpo' }); }} />
             </Col>
+          </Group>
+          <Group label="Booleanas">
+            {([['join', 'Unión', 'Une cuerpos de la pieza: elige el cuerpo base y luego los cuerpos herramienta'], ['cut', 'Diferencia', 'Resta al cuerpo base los cuerpos herramienta'], ['intersect', 'Intersección', 'Deja solo el volumen común']] as const).map(([op, l, t]) => (
+              <Small key={op} icon="combine" label={l} disabled={!hasSolid} title={`${t}. Para tener varios cuerpos, crea las operaciones con «Nuevo cuerpo».`} onClick={() => { s.openFeatureDialog('combine'); s.updateDraft({ op, name: l }); }} />
+            ))}
+          </Group>
+          <Group label="Proyectar">
+            <Small icon="projectgeom" label="Sobre cara/plano" active={tool === 'projFace'} onClick={() => s.open({ kind: 'projto', mode: 'face' })} title="Proyecta un boceto sobre una cara plana o un plano (crea un boceto nuevo)" />
+            <Small icon="projectgeom" label="Sobre superficie" active={tool === 'projSurf'} disabled={!hasSolid} onClick={() => s.open({ kind: 'projto', mode: 'surf' })} title="Proyecta un boceto sobre una cara curva o plana como curvas 3D (boceto 3D)" />
           </Group>
           <Group label="Superficie">
             <Col>
@@ -485,7 +499,7 @@ export default function Ribbon() {
               <Small icon="breakout" label="Corte parcial" active={tool === 'drwBreakout'} onClick={T('drwBreakout')} title="Corte parcial (Break Out): rectángulo sobre la vista y profundidad" />
             </Col>
             <Col>
-              <Small icon="centermark" label="Marcas de centro auto." disabled={!D.selView()} active={!!D.selView()?.centers} onClick={D.autoCenters} />
+              <Small icon="centermark" label="Marcas de centro auto." disabled={!D.selView()} active={!!D.selView() && D.selView()?.centers !== false} onClick={D.autoCenters} />
               <Small icon="section" label="Invertir sección" disabled={D.selView()?.kind !== 'section'} onClick={D.flipSection} />
             </Col>
           </Group>
@@ -493,6 +507,7 @@ export default function Ribbon() {
             <Big icon="sheets" label="Nueva hoja" onClick={D.addSheet} title="Añade una hoja al plano (cambia de hoja en el navegador)" />
             <Big icon="style" label={`Estilos ${s.drw.std ?? 'ISO'}`} onClick={() => s.open({ kind: 'drwstyle' })} title="Gestor de estilos: norma ISO/DIN/ANSI, cotas, flechas, líneas y proyección" />
             <Big icon="revtable" label="Cajetín" onClick={() => s.open({ kind: 'tbtpl' })} title="Plantilla de cajetín: celdas, campos propios, biblioteca y plantilla por defecto" />
+            <Big icon="drawing" label="Plantillas de hoja" onClick={() => s.open({ kind: 'sheettpl' })} title="Zonas A-B-C / 1-2-3, plano completo, bordes, cajetín de revisiones y copyright (DXF/DWG)" />
             <div className="rb-grid sheets">
               {(['A4', 'A3', 'A2', 'A1', 'A0'] as const).map((z) => <button key={z} className={`rb-txt ${s.drw.sheet === z ? 'on' : ''}`} onClick={() => s.commitDrw((d) => { d.sheet = z; })}>{z}</button>)}
             </div>

@@ -1,6 +1,6 @@
 // Geometría de la hoja de plano: vistas (incluidas secciones y detalles), cotas, anotaciones, cajetín
 // y lista de piezas, como primitivas comunes para la pantalla (SVG) y las exportaciones (PDF, DXF, SVG).
-import { SHEETS, scaleLabel, drawStyle, DRAW_STD, tbTemplate, type DrawingDoc, type DView, type DDim, type DAnn, type DBreak, type GdtSym, type DrawStyle } from './drawing';
+import { SHEETS, ZONES, scaleLabel, drawStyle, DRAW_STD, tbTemplate, type SheetOverlay, type DrawingDoc, type DView, type DDim, type DAnn, type DBreak, type GdtSym, type DrawStyle } from './drawing';
 
 /** Estilo activo (lo fija buildSheet con la norma del plano). */
 let ST: DrawStyle = DRAW_STD.ISO;
@@ -56,6 +56,66 @@ export function detectCircles(polys: P2[][]): Circ[] {
     out.push({ c: C.c, r: C.r, full });
   }
   // Dos semicircunferencias del mismo círculo cuentan como completo
+  return out;
+}
+// ---------- Ejes automáticos (simetría, longitudinales y de taladros) ----------
+type Seg = [P2, P2];
+/** Segmentos rectos de las polilíneas (une tramos colineales consecutivos) */
+function straightSegs(polys: P2[][]): Seg[] {
+  const out: Seg[] = [];
+  for (const p of polys) {
+    let a = p[0];
+    for (let i = 1; i < p.length; i++) {
+      const b = p[i], nx = p[i + 1];
+      if (nx) { const u = sub(b, a), w = sub(nx, b); if (Math.abs(u[0] * w[1] - u[1] * w[0]) < 1e-6 * (len(u) * len(w) + 1e-12) && u[0] * w[0] + u[1] * w[1] > 0) continue; }
+      if (len(sub(b, a)) > 1e-6) out.push([a, b]);
+      a = b;
+    }
+  }
+  return out;
+}
+const distSeg = (p: P2, [a, b]: Seg) => { const ab = sub(b, a), L2 = ab[0] ** 2 + ab[1] ** 2; const t = L2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1]) / L2)) : 0; return len(sub(p, add(a, mul(ab, t)))); };
+const axisCache = new WeakMap<object, Map<string, P2[][]>>();
+/** Ejes en coordenadas de la vista (modelo 2D): ejes de simetría del contorno y ejes de cilindros/taladros vistos de perfil.
+ *  diams: diámetros de círculos de las otras vistas (para reconocer cilindros visibles). */
+export function autoAxes(pd: ProjData, diams: number[]): P2[][] {
+  const key = diams.map((d) => d.toFixed(3)).join(',');
+  const c0 = axisCache.get(pd)?.get(key); if (c0) return c0;
+  const out: P2[][] = [];
+  const [x0, y0, x1, y1] = pd.bbox, W = x1 - x0, H = y1 - y0, tol = Math.max(0.02, Math.hypot(W, H) * 2e-3);
+  const vis = straightSegs(pd.vis), hid = straightSegs(pd.hid);
+  // 1) Simetría respecto a la vertical y la horizontal por el centro del contorno
+  const pts: P2[] = [];
+  for (const p of [...pd.vis, ...pd.hid]) for (let i = 0; i < p.length; i += Math.max(1, Math.floor(p.length / 12))) pts.push(p[i]);
+  const sample = pts.length > 400 ? pts.filter((_, i) => i % Math.ceil(pts.length / 400) === 0) : pts;
+  const allSegs: Seg[] = []; for (const p of [...pd.vis, ...pd.hid]) for (let i = 1; i < p.length; i++) allSegs.push([p[i - 1], p[i]]);
+  const symOk = (mir: (q: P2) => P2) => sample.length >= 4 && sample.filter((q) => { const m = mir(q); return allSegs.some((sg) => distSeg(m, sg) < tol); }).length >= sample.length * 0.97;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  if (W > 1e-6 && H > 1e-6 && allSegs.length < 4000) {
+    if (symOk((q) => [2 * cx - q[0], q[1]])) out.push([[cx, y0], [cx, y1]]);
+    if (symOk((q) => [q[0], 2 * cy - q[1]])) out.push([[x0, cy], [x1, cy]]);
+  }
+  // 2) Ejes de cilindros y taladros de perfil: pares de segmentos paralelos que se solapan por completo
+  const pairAxes = (segs: Seg[], needDiam: boolean) => {
+    for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) {
+      const [a, b] = segs[i], [c, d] = segs[j];
+      const u = unit(sub(b, a)), v = unit(sub(d, c));
+      if (Math.abs(u[0] * v[1] - u[1] * v[0]) > 1e-4) continue;
+      const n: P2 = [-u[1], u[0]], sep = (c[0] - a[0]) * n[0] + (c[1] - a[1]) * n[1];
+      if (Math.abs(sep) < tol) continue;
+      const pa = [0, (b[0] - a[0]) * u[0] + (b[1] - a[1]) * u[1]].sort((p, q) => p - q), pc = [(c[0] - a[0]) * u[0] + (c[1] - a[1]) * u[1], (d[0] - a[0]) * u[0] + (d[1] - a[1]) * u[1]].sort((p, q) => p - q);
+      if (Math.abs(pa[0] - pc[0]) > tol || Math.abs(pa[1] - pc[1]) > tol) continue;
+      if (needDiam && !diams.some((D) => Math.abs(D - Math.abs(sep)) < Math.max(tol, D * 0.01))) continue;
+      const m0 = add(add(a, mul(u, pa[0])), mul(n, sep / 2)), m1 = add(add(a, mul(u, pa[1])), mul(n, sep / 2));
+      if (out.some((l) => distSeg(m0, [l[0], l[1]]) < tol && distSeg(m1, [l[0], l[1]]) < tol)) continue;
+      // sin segmento intermedio entre ambos (si no, son dos caras de un escalón)
+      out.push([m0, m1]);
+    }
+  };
+  if (hid.length < 600) pairAxes(hid, true);
+  if (vis.length < 600) pairAxes(vis, true);
+  if (!axisCache.has(pd)) axisCache.set(pd, new Map());
+  axisCache.get(pd)!.set(key, out);
   return out;
 }
 /** Encadena segmentos sueltos (x0,y0,x1,y1,…) en lazos. */
@@ -235,14 +295,41 @@ export function dimValue(d: DDim, v: DView): number {
   const L = d.kind === 'h' ? Math.abs(dx) : d.kind === 'v' ? Math.abs(dy) : Math.hypot(dx, dy);
   return L / v.scale;
 }
+/** Pulgadas como fracción reducida: 1.375 → 1 3/8" */
+export function inchFrac(mm: number, den = 64): string {
+  const inch = mm / 25.4, sg = inch < 0 ? '-' : '', a = Math.abs(inch);
+  let w = Math.floor(a), n = Math.round((a - w) * den), dd = den;
+  if (n === dd) { w++; n = 0; }
+  while (n && n % 2 === 0 && dd % 2 === 0) { n /= 2; dd /= 2; }
+  return `${sg}${n ? (w ? `${w} ${n}/${dd}` : `${n}/${dd}`) : w}"`;
+}
+/** Tolerancia apilada («+0,2/-0,1», «H7/g6», «0/-0,05») → [superior, inferior]; si no, null */
+export function tolParts(tol?: string): [string, string] | null {
+  if (!tol || !ST.tolStack && ST.tolStack !== undefined) return null;
+  const m = /^\s*([^/\s]+)\s*\/\s*([^/\s]+)\s*$/.exec(tol);
+  return m ? [m[1], m[2]] : null;
+}
 export function dimText(d: DDim, v: DView): string {
   if (d.text) return d.text;
+  const base = dimMain(d, v);
+  return d.tol && !tolParts(d.tol) ? `${base} ${d.tol}` : base;
+}
+/** Texto principal (sin tolerancia apilada) con la cota alternativa en pulgadas entre corchetes */
+export function dimMain(d: DDim, v: DView): string {
+  if (d.text) return d.text;
+  const alt = ST.altInch && ST.units === 'mm' && d.kind !== 'ang';
+  const s0 = dimTextRaw(d, v);
+  if (!alt) return s0;
+  const val = dimValue(d, v);
+  return `${s0} [${d.kind === 'd' ? 'Ø' : d.kind === 'r' ? 'R' : ''}${inchFrac(val, ST.fracDen || 64)}]`;
+}
+function dimTextRaw(d: DDim, v: DView): string {
   const val = dimValue(d, v);
   let base = d.kind === 'd' ? `Ø${fmtD(val)}` : d.kind === 'r' ? `R${fmtD(val)}` : d.kind === 'ang' ? `${fmt(val, 1).replace('.', ST.decSep)}°` : fmtD(val);
   // símbolo delante del valor (sustituye a Ø/R automáticos si se elige otro)
   if (d.prefix) base = d.prefix + base.replace(/^(Ø|R)/, d.prefix === 'Ø' || d.prefix === 'R' ? '' : '$1');
   if (d.suffix) base += d.suffix;
-  return d.tol ? `${base} ${d.tol}` : base;
+  return base;
 }
 const arrowTri = (P: P2, dir: P2, L = 3, W = 0.9): P2[] => { const u = unit(dir), n: P2 = [-u[1], u[0]]; const b = sub(P, mul(u, L)); return [P, add(b, mul(n, W)), sub(b, mul(n, W))]; };
 /** Terminaciones de cota según la norma: llena, abierta, trazo oblicuo o punto. */
@@ -449,6 +536,58 @@ export function titleBlockGeometry(drw: DrawingDoc) {
   };
 }
 
+// ---------- Marco, zonas y plantillas importadas ----------
+const ZONE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+/** Rectángulos de las partes de la hoja (para doble clic): cajetín, revisiones, copyright */
+export function sheetParts(drw: DrawingDoc): { kind: 'tb' | 'rev' | 'copy' | 'sheet'; x: number; y: number; w: number; h: number }[] {
+  const [W, H] = SHEETS[drw.sheet];
+  const out: ReturnType<typeof sheetParts> = [];
+  const tbOn = !drw.sheetTpl?.hideTb, tpl = tbTemplate(drw);
+  if (tbOn) out.push({ kind: 'tb', x: W - 10 - tpl.w, y: 10, w: tpl.w, h: tpl.h });
+  const tbH = tbOn ? tpl.h : 0;
+  if (drw.revTpl) out.push({ kind: 'rev', x: W - 10 - drw.revTpl.w, y: 10 + tbH, w: drw.revTpl.w, h: drw.revTpl.h });
+  const c = drw.copyright;
+  if (c) {
+    const revH = drw.revTpl?.h ?? 0;
+    const x = c.corner === 'bl' || c.corner === 'tl' ? 12 : W - 12 - c.w;
+    const y = c.corner === 'tl' || c.corner === 'tr' ? H - 12 - c.h : c.corner === 'br' ? 12 + tbH + revH : 12;
+    out.push({ kind: 'copy', x, y, w: c.w, h: c.h });
+  }
+  return out;
+}
+function overlayPrims(o: SheetOverlay, x0: number, y0: number, drw: DrawingDoc, cls = 'tb'): Prim[] {
+  const P: Prim[] = [];
+  for (const l of o.geo.lines) P.push({ t: 'pl', cls, pts: l.map(([x, y]) => [x0 + x, y0 + y] as P2) });
+  for (const t of o.geo.texts) P.push({ t: 'txt', cls: 'tbv', x: x0 + t.x, y: y0 + t.y, h: t.h, text: t.text, rot: t.rot || undefined });
+  for (const l of o.labels ?? []) { const text = tbValue(drw, l.field); if (text) P.push({ t: 'txt', cls: 'tbv', x: x0 + l.x, y: y0 + l.y, h: l.h, text, rot: l.rot || undefined, anchor: l.anchor }); }
+  return P;
+}
+export function frameAndOverlays(drw: DrawingDoc): Prim[] {
+  const [W, H] = SHEETS[drw.sheet];
+  const P: Prim[] = [];
+  if (drw.sheetTpl) P.push(...overlayPrims(drw.sheetTpl, 0, 0, drw, 'frame'));
+  else if (drw.borderTpl) P.push(...overlayPrims(drw.borderTpl, 0, 0, drw, 'frame'));
+  else {
+    P.push({ t: 'pl', cls: 'frame', pts: [[10, 10], [W - 10, 10], [W - 10, H - 10], [10, H - 10], [10, 10]] });
+    // marcas de centrado
+    P.push({ t: 'pl', cls: 'frame', pts: [[W / 2, 0], [W / 2, 5]] }, { t: 'pl', cls: 'frame', pts: [[W / 2, H - 5], [W / 2, H]] }, { t: 'pl', cls: 'frame', pts: [[0, H / 2], [5, H / 2]] }, { t: 'pl', cls: 'frame', pts: [[W - 5, H / 2], [W, H / 2]] });
+    if (drw.zones !== false) {
+      // separadores a partes iguales: números de izquierda a derecha (arriba y abajo), letras de arriba abajo (izquierda y derecha)
+      const [nx, ny] = ZONES[drw.sheet], dx = (W - 20) / nx, dy = (H - 20) / ny, th = 3;
+      P.push({ t: 'pl', cls: 'tb', pts: [[5, 5], [W - 5, 5], [W - 5, H - 5], [5, H - 5], [5, 5]] });
+      for (let i = 0; i <= nx; i++) { const x = 10 + i * dx; if (i > 0 && i < nx) P.push({ t: 'pl', cls: 'tb', pts: [[x, 5], [x, 10]] }, { t: 'pl', cls: 'tb', pts: [[x, H - 10], [x, H - 5]] }); }
+      for (let j = 0; j <= ny; j++) { const y = 10 + j * dy; if (j > 0 && j < ny) P.push({ t: 'pl', cls: 'tb', pts: [[5, y], [10, y]] }, { t: 'pl', cls: 'tb', pts: [[W - 10, y], [W - 5, y]] }); }
+      for (let i = 0; i < nx; i++) { const x = 10 + (i + 0.5) * dx, t = String(i + 1); P.push({ t: 'txt', cls: 'zone', x, y: 7.5 - th * 0.36, h: th, text: t, anchor: 'middle' }, { t: 'txt', cls: 'zone', x, y: H - 7.5 - th * 0.36, h: th, text: t, anchor: 'middle' }); }
+      for (let j = 0; j < ny; j++) { const y = H - 10 - (j + 0.5) * dy - th * 0.36, t = ZONE_LETTERS[j] ?? '?'; P.push({ t: 'txt', cls: 'zone', x: 7.5, y, h: th, text: t, anchor: 'middle' }, { t: 'txt', cls: 'zone', x: W - 7.5, y, h: th, text: t, anchor: 'middle' }); }
+    }
+  }
+  for (const part of sheetParts(drw)) {
+    if (part.kind === 'rev' && drw.revTpl) P.push(...overlayPrims(drw.revTpl, part.x, part.y, drw));
+    if (part.kind === 'copy' && drw.copyright) P.push(...overlayPrims(drw.copyright, part.x, part.y, drw, 'thin'));
+  }
+  return P;
+}
+
 // ---------- Hoja completa ----------
 export interface SheetInput {
   drw: DrawingDoc;
@@ -471,17 +610,29 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
   ST = drawStyle(drw);
   const [W, H] = SHEETS[drw.sheet];
   const P: Prim[] = [];
-  P.push({ t: 'pl', cls: 'frame', pts: [[10, 10], [W - 10, 10], [W - 10, H - 10], [10, H - 10], [10, 10]] });
-  P.push({ t: 'pl', cls: 'frame', pts: [[W / 2, 0], [W / 2, 10]] }, { t: 'pl', cls: 'frame', pts: [[W / 2, H - 10], [W / 2, H]] }, { t: 'pl', cls: 'frame', pts: [[0, H / 2], [10, H / 2]] }, { t: 'pl', cls: 'frame', pts: [[W - 10, H / 2], [W, H / 2]] });
+  P.push(...frameAndOverlays(drw));
   // Vistas
   for (const v of drw.views) {
     const g = geomOf(drw, proj, v); if (!g) continue;
     if (g.cut.length) P.push({ t: 'fill', cls: 'hatch', loops: g.cut, id: v.id });
     for (const l of g.hid) P.push({ t: 'pl', cls: 'hid', pts: l, id: v.id });
     for (const l of g.vis) P.push({ t: 'pl', cls: 'vis', pts: l, id: v.id });
-    if (v.centers) for (const c of g.circles) if (c.full && c.r > 0.8) {
-      const r = c.r + 2.5;
+    if (v.centers !== false) for (const c of g.circles) if (c.full && c.r > 0.8) {
+      const r = c.r + ST.centerExt;
       P.push({ t: 'pl', cls: 'center', pts: [[c.c[0] - r, c.c[1]], [c.c[0] + r, c.c[1]]], id: v.id }, { t: 'pl', cls: 'center', pts: [[c.c[0], c.c[1] - r], [c.c[0], c.c[1] + r]], id: v.id });
+    }
+    // ejes de simetría, longitudinales y de taladros (automáticos)
+    if (v.axes !== false && v.kind !== 'iso' && v.dir !== 'iso' && v.kind !== 'detail' && v.kind !== 'flat') {
+      const pd = proj(v);
+      if (pd) {
+        const diams: number[] = [];
+        for (const o of drw.views) if (o.source === v.source && o.id !== v.id && o.kind !== 'detail') { const q = proj(o); for (const c of q?.circles ?? []) if (c.full) diams.push(c.r * 2); }
+        for (const l of autoAxes(pd, [...new Set(diams.map((x) => Math.round(x * 1000) / 1000))])) {
+          const A = g.T(l[0]), B = g.T(l[1]), u = unit(sub(B, A));
+          if (len(sub(B, A)) < 1) continue;
+          P.push({ t: 'pl', cls: 'center', pts: [sub(A, mul(u, ST.centerExt)), add(B, mul(u, ST.centerExt))], id: v.id });
+        }
+      }
     }
     if (g.clip) P.push({ t: 'circ', cls: 'thin', c: g.clip.c, r: g.clip.r, id: v.id });
     // Centro de gravedad (símbolo de cuadrantes alternos) si la vista lo tiene activado
@@ -540,7 +691,17 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     const g = dimGeometry(d, v);
     for (const l of g.lines) P.push({ t: 'pl', cls: 'dim', pts: l, id: d.id });
     P.push({ t: 'fill', cls: 'arrow', loops: g.arrows, id: d.id });
-    P.push({ t: 'txt', cls: 'dimt', x: g.mid[0], y: g.mid[1], h: ST.dimTextH, text: g.text, rot: g.ang, anchor: 'middle', id: d.id });
+    const tp = d.text ? null : tolParts(d.tol);
+    if (!tp) { P.push({ t: 'txt', cls: 'dimt', x: g.mid[0], y: g.mid[1], h: ST.dimTextH, text: g.text, rot: g.ang, anchor: 'middle', id: d.id }); continue; }
+    // tolerancia apilada a la derecha de la cota principal (desviación superior arriba, inferior abajo, 70 % de altura)
+    const h = ST.dimTextH, a = (g.ang * Math.PI) / 180, u: P2 = [Math.cos(a), Math.sin(a)], n: P2 = [-u[1], u[0]];
+    const wMain = g.text.length * h * 0.56, wTol = Math.max(tp[0].length, tp[1].length) * h * 0.7 * 0.56;
+    const c0 = sub(g.mid, mul(u, wTol / 2)); // centra el conjunto
+    P.push({ t: 'txt', cls: 'dimt', x: c0[0], y: c0[1], h, text: g.text, rot: g.ang, anchor: 'middle', id: d.id });
+    const r0 = add(c0, mul(u, wMain / 2 + 0.6));
+    const up = add(r0, mul(n, h * 0.45)), lo = add(r0, mul(n, -h * 0.22));
+    P.push({ t: 'txt', cls: 'dimt', x: up[0], y: up[1], h: h * 0.7, text: tp[0], rot: g.ang, anchor: 'start', id: d.id });
+    P.push({ t: 'txt', cls: 'dimt', x: lo[0], y: lo[1], h: h * 0.7, text: tp[1], rot: g.ang, anchor: 'start', id: d.id });
   }
   // Anotaciones
   for (const a of drw.anns ?? []) {
@@ -575,6 +736,7 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
   }
   for (const n of drw.notes) P.push({ t: 'txt', cls: 'note', x: n.x, y: n.y, h: n.size, text: n.text, id: n.id });
   // Cajetín
+  if (drw.sheetTpl?.hideTb) return finishSheet(P, drw, bom);
   const tb = titleBlockGeometry(drw);
   for (const c of tb.cells) {
     P.push({ t: 'pl', cls: 'tb', pts: [[c.x, c.y], [c.x + c.w, c.y], [c.x + c.w, c.y + c.h], [c.x, c.y + c.h], [c.x, c.y]] });
@@ -590,6 +752,9 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
   P.push({ t: 'circ', cls: 'tb', c: [cx, sy], r: 2.6 }, { t: 'circ', cls: 'tb', c: [cx, sy], r: 1.2 });
   P.push({ t: 'pl', cls: 'tb', pts: [[kx, sy + 2.6], [kx + 5, sy + 1.6], [kx + 5, sy - 1.6], [kx, sy - 2.6], [kx, sy + 2.6]] });
   }
+  return finishSheet(P, drw, bom);
+}
+function finishSheet(P: Prim[], _drw: DrawingDoc, bom: SheetInput['bom']): Prim[] {
   if (bom) for (const [i, row] of bom.entries()) for (const c of row.cells) {
     P.push({ t: 'pl', cls: 'tb', pts: [[c.x, c.y], [c.x + c.w, c.y], [c.x + c.w, c.y + 6], [c.x, c.y + 6], [c.x, c.y]] });
     P.push({ t: 'txt', cls: i === bom.length - 1 ? 'tbb' : 'tbv', x: c.x + 1.2, y: c.y + 1.8, h: 2.5, text: c.text, bold: i === bom.length - 1 });

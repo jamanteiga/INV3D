@@ -1,10 +1,10 @@
 // Reconstrucción de piezas (incluida chapa) sobre OpenCascade vía replicad.
 import {
-  Plane, draw, drawRectangle, drawCircle, drawEllipse, drawText, loadFont, importSTEP, compoundShapes, genericSweep, makeHelix, FaceFinder, getOC, cast, measureShapeVolumeProperties,
+  Plane, draw, drawRectangle, drawCircle, drawEllipse, drawText, loadFont, importSTEP, compoundShapes, genericSweep, makeHelix, FaceFinder, EdgeFinder, getOC, cast, measureShapeVolumeProperties,
   makeLine, makeBSplineApproximation, assembleWire, makeNonPlanarFace, makeAx1, loft, makeSolid, Vector,
 } from 'replicad';
 import { openSegments, findLoops, loopPolyline, polyArea, pointInPoly, type Seg } from '../core/sketch';
-import type { Drawing, Shape3D, EdgeFinder } from 'replicad';
+import type { Drawing, Shape3D } from 'replicad';
 import { makeEval } from '../core/expr';
 import {
   docParams, planeFrame, entityOutline, npolyPoints, toWorld, v3, workPlaneFrame, registerAux, splineBeziers,
@@ -574,19 +574,44 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
       return { solid: (prof.sketchOnPlane(makePlane(fr)) as any).revolve(dir, { origin, angle: ang }), op: f.op };
     }
     case 'hole': {
-      const sk = getSk(f.sketch);
-      const fr = planeFrame(sk.plane, ev, work);
-      const centers: V2[] = [];
-      for (const e of sk.entities) {
-        if (e.type === 'point') centers.push([ev(e.cx), ev(e.cy)]);
-        else if (e.type === 'circle') centers.push([ev(e.cx), ev(e.cy)]);
+      let fr: Frame; const centers: V2[] = [];
+      if (f.face) {
+        // en una cara: centro a las distancias d1 y d2 de las dos aristas de referencia
+        const F = f.face, n0 = v3.norm(F.normal as V3), P = F.point as V3;
+        let x = v3.cross([0, 0, 1], n0); if (v3.len(x) < 1e-6) x = [1, 0, 0]; x = v3.norm(x);
+        fr = { origin: P, xDir: x, normal: n0, yDir: v3.cross(n0, x) };
+        const loc = (q: V3): V2 => { const d = v3.sub(q, P); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
+        if (F.e1 && F.e2 && F.d1 && F.d2) {
+          const L = [F.e1, F.e2].map((e) => { const A = loc(e.a as V3), B = loc(e.b as V3); const u: V2 = [B[0] - A[0], B[1] - A[1]]; const l = Math.hypot(u[0], u[1]) || 1; let w: V2 = [-u[1] / l, u[0] / l]; if (-(A[0] * w[0] + A[1] * w[1]) < 0) w = [-w[0], -w[1]]; return { A, w }; });
+          const d = [ev(F.d1), ev(F.d2)];
+          // (C − A_i)·w_i = d_i
+          const [a1, b1] = L[0].w, [a2, b2] = L[1].w, r1 = d[0] + L[0].A[0] * a1 + L[0].A[1] * b1, r2 = d[1] + L[1].A[0] * a2 + L[1].A[1] * b2;
+          const det = a1 * b2 - a2 * b1; if (Math.abs(det) < 1e-9) throw new Error('Las aristas de referencia son paralelas');
+          centers.push([(r1 * b2 - r2 * b1) / det, (a1 * r2 - a2 * r1) / det]);
+        } else centers.push([0, 0]);
+      } else {
+        const sk = getSk(f.sketch);
+        fr = planeFrame(sk.plane, ev, work);
+        for (const e of sk.entities) {
+          if (e.type === 'point') centers.push([ev(e.cx), ev(e.cy)]);
+          else if (e.type === 'circle') centers.push([ev(e.cx), ev(e.cy)]);
+        }
       }
-      if (!centers.length) throw new Error(`${sk.name} no tiene puntos para los agujeros`);
+      if (!centers.length) throw new Error('El boceto no tiene puntos para los agujeros');
       let through = 1000;
       if (shape) { const b = shape.boundingBox.bounds; through = v3.len(v3.sub(b[1] as V3, b[0] as V3)) * 2 + 10; }
+      // dirección: hacia el lado con material (como Inventor/SolidWorks); «flip» la invierte
+      let n = fr.normal;
+      if (shape && f.dirMode !== 'normal') {
+        const vol = (dir: V3) => { try { return measureShapeVolumeProperties(shape!.clone().intersect(holeTool(f, toWorld(fr, centers[0][0], centers[0][1]), dir, ev, through, fr.xDir))).volume; } catch { return 0; } };
+        const a = vol(n), b = vol(v3.mul(n, -1));
+        if (b > a * 1.0001) n = v3.mul(n, -1);
+        if (Math.max(a, b) < 1e-9) throw new Error('El taladro no toca la pieza: el boceto está fuera del material');
+      }
+      if (f.flip) n = v3.mul(n, -1);
       let tool: Shape3D | null = null;
       for (const c of centers) {
-        const t = holeTool(f, toWorld(fr, c[0], c[1]), fr.normal, ev, through, fr.xDir);
+        const t = holeTool(f, toWorld(fr, c[0], c[1]), n, ev, through, fr.xDir);
         tool = tool ? tool.fuse(t) : t;
       }
       return { solid: tool!, op: 'cut' };
@@ -649,7 +674,19 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
   }
 }
 
-export interface PartBuild { shape: Shape3D | null; status: Record<string, FeatStatus>; surfaces: Shape3D | null }
+export interface PartBuild { shape: Shape3D | null; status: Record<string, FeatStatus>; surfaces: Shape3D | null; owners?: Map<string, string> }
+/** Firma de una cara que no cambia al recortarla: plano (normal y distancia) o tipo de superficie y centro.
+ *  Sirve para saber qué operación creó cada cara (doble clic → editar la operación). */
+export function faceSig(fc: any): string {
+  const r = (x: number, k = 3) => (Math.round(x * 10 ** k) / 10 ** k).toFixed(k);
+  const xyz = (v: any): [number, number, number] => (Array.isArray(v) ? [v[0], v[1], v[2]] : [v.x, v.y, v.z]);
+  try {
+    const t = String(fc.geomType);
+    const c = xyz(fc.center);
+    if (t === 'PLANE') { const n = xyz(fc.normalAt()); return `P${r(n[0])},${r(n[1])},${r(n[2])},${r(n[0] * c[0] + n[1] * c[1] + n[2] * c[2], 2)}`; }
+    return `${t}${r(c[0], 1)},${r(c[1], 1)},${r(c[2], 1)}`;
+  } catch { return ''; }
+}
 
 export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild> {
   const ev = makeEval(docParams(doc));
@@ -661,8 +698,10 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
   };
   let shape: Shape3D | null = null;
   const feats = upTo !== undefined ? doc.features.slice(0, upTo) : doc.features;
+  const owners = new Map<string, string>();
   for (const f of feats) {
     if (f.suppressed) { status[f.id] = { ok: true }; continue; }
+    const before: Shape3D | null = shape;
     try {
       switch (f.type) {
         case 'sketch':
@@ -737,16 +776,22 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
           shape = shape ? shape.fuse(s) : s;
           break;
         }
-        case 'fillet': {
+        case 'fillet': case 'chamfer': {
           if (!shape) throw new Error('No hay sólido');
-          const r = ev(f.radius); if (!(r > 0)) throw new Error('Radio no válido');
-          shape = shape.fillet(r, edgeFilter(f.edges) as any);
-          break;
-        }
-        case 'chamfer': {
-          if (!shape) throw new Error('No hay sólido');
-          const r = ev(f.distance); if (!(r > 0)) throw new Error('Distancia no válida');
-          shape = shape.chamfer(r, edgeFilter(f.edges) as any);
+          const r = ev(f.type === 'fillet' ? f.radius : f.distance); if (!(r > 0)) throw new Error(f.type === 'fillet' ? 'Radio no válido' : 'Distancia no válida');
+          const r2 = f.type === 'fillet' && f.radius2 ? ev(f.radius2) : NaN;
+          const R: any = f.type === 'fillet' && r2 > 0 && Math.abs(r2 - r) > 1e-9 ? [r, r2] : r; // radio variable: inicial → final
+          const faces = f.faces ?? [];
+          if (faces.length) {
+            // aristas de las caras elegidas + aristas elegidas una a una
+            const sel: any[] = [];
+            for (const p of faces) for (const fc of new FaceFinder().containsPoint(p).find(shape) as any[]) sel.push(...fc.edges);
+            if (f.edges.mode === 'picked' && f.edges.points.length) { const fd = new EdgeFinder(); edgeFilter(f.edges)(fd); sel.push(...(fd.find(shape) as any[])); }
+            else if (f.edges.mode !== 'picked') { const fd = new EdgeFinder(); edgeFilter(f.edges)(fd); sel.push(...(fd.find(shape) as any[])); }
+            if (!sel.length) throw new Error('No se encuentran aristas en las caras elegidas');
+            const fn = (e: any) => (sel.some((x) => x.isSame(e)) ? R : 0);
+            shape = f.type === 'fillet' ? shape.fillet(fn as any) : shape.chamfer(((e: any) => (sel.some((x) => x.isSame(e)) ? r : 0)) as any);
+          } else shape = f.type === 'fillet' ? shape.fillet(R, edgeFilter(f.edges) as any) : shape.chamfer(r, edgeFilter(f.edges) as any);
           break;
         }
         case 'split': {
@@ -901,12 +946,14 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
         }
       }
       status[f.id] = status[f.id] ?? { ok: true };
+      // caras nuevas de esta operación
+      if (shape && shape !== before) { try { for (const fc of (shape as any).faces) { const k = faceSig(fc); if (k && !owners.has(k)) owners.set(k, f.id); } } catch { /* sin caras */ } }
     } catch (e) {
       status[f.id] = { ok: false, error: (e as Error)?.message || 'Error de geometría (OpenCascade)' };
     }
   }
   const surfs = [...ctx.surfaces.values()];
-  return { shape, status, surfaces: surfs.length ? (surfs.length === 1 ? surfs[0] : compoundShapes(surfs) as unknown as Shape3D) : null };
+  return { shape, status, surfaces: surfs.length ? (surfs.length === 1 ? surfs[0] : compoundShapes(surfs) as unknown as Shape3D) : null, owners };
 }
 
 /** Desarrollo de chapa (cara base + pestañas en sus aristas). Devuelve trayectorias SVG en el plano de la cara. */

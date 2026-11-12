@@ -1,7 +1,7 @@
 import HeadsUp from './HeadsUp';
 import { updateCog } from './cog';
 import ClipBar from './ClipBar';
-import { insertPoint, partEPoints, epRef, epJoint, type EPoint } from '../core/epoints';
+import { insertPoint, partEPoints, activeEPoints, epRef, epJoint, type EPoint } from '../core/epoints';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -755,6 +755,16 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
     <div className="ctx" style={{ left: ctx.x, top: ctx.y, position: 'fixed' }} onContextMenu={(e) => e.preventDefault()}>
       <div className="ctx-title">{ctx.label}</div>
       {items.map(([l, f]) => <button key={l} onClick={f}>Restringir · {l}</button>)}
+      {occ && (() => {
+        const pd = s.docData(occ.part) as PartDoc | null;
+        const eps = pd?.format === 'inv3d.part' ? activeEPoints(pd).filter((x) => x.kind !== 'composite') : [];
+        if (!eps.length) return <button disabled title="Crea ePoints en la pieza (Modelo 3D › ePoint) o con el menú contextual de una cara">Restringir por ePoint (la pieza no tiene)</button>;
+        return eps.map((x) => (
+          <button key={x.id} title="Elige después el ePoint del otro componente: se crea la unión adecuada (coincidencia o inserción)"
+            onClick={() => { close(); useStore.setState({ epConnect: { occ: occ.id, ep: x.id, label: `${occ.name} · ePoint ${x.name}` }, selItem: occ.id, hud: { ...useStore.getState().hud, epoints: true } }); }}>
+            Restringir por ePoint · {x.name}</button>
+        ));
+      })()}
       <hr />
       {orig.map((o) => <button key={o.key} onClick={() => start(isAxis ? 'mate' : 'flush', {}, { ref: o.ref, label: `Ensamblaje · ${o.label}` })}>{isAxis ? 'Coaxial con' : 'Al ras con'} {o.label} del ensamblaje</button>)}
       {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}

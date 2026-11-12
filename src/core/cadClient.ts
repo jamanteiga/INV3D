@@ -15,6 +15,8 @@ export interface RegenResult {
   status: Record<string, { ok: boolean; error?: string }>;
   props: MassProps | null;
   ms: number;
+  /** operación que creó cada grupo de caras de la malla */
+  faceFeat?: string[];
 }
 export interface AsmResult {
   parts: Record<string, { key: string; mesh?: MeshData; props: MassProps | null; ok: boolean; error?: string }>;

@@ -4,7 +4,7 @@ const partOf = (s: ReturnType<typeof useStore.getState>, id: string): PartDoc | 
 import { docGetter } from '../core/store';
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
 import { useStore, type SkOp } from '../core/store';
-import { uid, v3, newDoc, MATERIALS, type V3, type SketchF, type PartDoc } from '../core/doc';
+import { uid, v3, newDoc, MATERIALS, planeFrame, resolveWorkPlanes, docParams, entityOutline, type V3, type SketchF, type PartDoc, type SkEntity, type Frame } from '../core/doc';
 import { IDENTITY, auxName, solveAssembly, patternPoses, mirrorPose, xfPoint, q as qq, q, type Occurrence, type FrameMember, type BoltGroup, type EndType, type Xform } from '../core/asm';
 import { CONTENT } from '../core/content';
 import { makeEval, fmt } from '../core/expr';
@@ -20,16 +20,90 @@ import type { CandLine } from './AsmViewport';
 
 const S = () => useStore.getState();
 
+function P_style(st: 'construction' | 'center') {
+  const s = S();
+  const sk = s.doc.features.find((f) => f.id === s.sketchId) as SketchF | undefined;
+  const ids = s.selEntities.length ? s.selEntities : s.selEntity ? [s.selEntity] : [];
+  if (!sk) return;
+  if (!ids.length) { s.set({ skStyle: s.skStyle === st ? 'normal' : st }); return; }
+  const first = sk.entities.find((x) => x.id === ids[0]);
+  const on = st === 'center' ? !(first && first.type === 'line' && first.center) : !(first?.construction && !(first.type === 'line' && first.center));
+  s.sketchCommit((k) => {
+    for (const x of k.entities) {
+      if (!ids.includes(x.id) || x.type === 'point' || x.type === 'text') continue;
+      if (st === 'center') { if (x.type !== 'line') continue; x.center = on; x.construction = on; }
+      else { x.center = false; x.construction = on; }
+    }
+  });
+}
+
 export const partActions = {
   startSketch: () => { const s = S(); if (s.mode === 'sketch') s.finishSketch(); s.setTool(s.tool === 'pickPlane' ? null : 'pickPlane'); },
-  toggleConstruction: () => {
+  /** Con selección: cambia el estilo de lo seleccionado. Sin selección: estilo para la geometría que se dibuje a continuación */
+  toggleConstruction: () => P_style('construction'),
+  toggleCenterline: () => P_style('center'),
+  /** Proyecta toda la geometría de otro boceto (otra operación) sobre el boceto activo, como referencia fija */
+  projectSketch: (srcId: string) => {
     const s = S();
     const sk = s.doc.features.find((f) => f.id === s.sketchId) as SketchF | undefined;
-    const e = sk?.entities.find((x) => x.id === s.selEntity);
-    const ids = s.selEntities.length ? s.selEntities : e ? [e.id] : [];
-    if (!ids.length) return s.notify('Selecciona geometría', 'error');
-    const on = !sk!.entities.find((x) => x.id === ids[0])?.construction;
-    s.sketchCommit((k) => { for (const x of k.entities) if (ids.includes(x.id)) x.construction = on; });
+    const src = s.doc.features.find((f) => f.id === srcId) as SketchF | undefined;
+    if (!sk || !src || src.type !== 'sketch') return;
+    const ev = (x: string) => { try { return makeEval(docParams(s.doc))(x); } catch { return NaN; } };
+    const W = resolveWorkPlanes(s.doc, ev);
+    let A: Frame, B: Frame; try { A = planeFrame(src.plane, ev, W); B = planeFrame(sk.plane, ev, W); } catch { return s.notify('Plano no válido', 'error'); }
+    const f3 = (x: number) => String(Math.round(x * 1000) / 1000);
+    const toB = (u: number, v: number): [number, number] => { const P = v3.add(A.origin, v3.add(v3.mul(A.xDir, u), v3.mul(A.yDir, v))); const d = v3.sub(P, B.origin); return [v3.dot(d, B.xDir), v3.dot(d, B.yDir)]; };
+    const par = Math.abs(Math.abs(v3.dot(A.normal, B.normal)) - 1) < 1e-6, flip = v3.dot(A.normal, B.normal) < 0;
+    const ang = (p: [number, number], c: [number, number]) => Math.atan2(p[1] - c[1], p[0] - c[0]) * 180 / Math.PI;
+    const out: SkEntity[] = [];
+    for (const e of src.entities) {
+      if (e.type === 'text') continue;
+      if (e.type === 'point') { const p = toB(ev(e.cx), ev(e.cy)); out.push({ id: uid('pp'), type: 'point', cx: f3(p[0]), cy: f3(p[1]), ref: true } as SkEntity); continue; }
+      if (e.type === 'line') { const a = toB(ev(e.a[0]), ev(e.a[1])), b = toB(ev(e.b[0]), ev(e.b[1])); if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-6) continue; out.push({ id: uid('pl'), type: 'line', a: [f3(a[0]), f3(a[1])], b: [f3(b[0]), f3(b[1])], ref: true, construction: e.construction, center: e.center } as SkEntity); continue; }
+      if (par && e.type === 'circle') { const c = toB(ev(e.cx), ev(e.cy)); out.push({ id: uid('pc'), type: 'circle', cx: f3(c[0]), cy: f3(c[1]), d: f3(ev(e.d)), ref: true, construction: e.construction } as SkEntity); continue; }
+      if (par && e.type === 'arc') {
+        const cx = ev(e.cx), cy = ev(e.cy), r = ev(e.r), a0 = ev(e.a0) * Math.PI / 180, a1 = ev(e.a1) * Math.PI / 180;
+        const c = toB(cx, cy), p0 = toB(cx + r * Math.cos(a0), cy + r * Math.sin(a0)), p1 = toB(cx + r * Math.cos(a1), cy + r * Math.sin(a1));
+        const [s0, s1] = flip ? [ang(p1, c), ang(p0, c)] : [ang(p0, c), ang(p1, c)];
+        out.push({ id: uid('pa'), type: 'arc', cx: f3(c[0]), cy: f3(c[1]), r: f3(r), a0: f3(s0), a1: f3(s1), ref: true, construction: e.construction } as SkEntity); continue;
+      }
+      let o; try { o = entityOutline(e, ev); } catch { continue; }
+      const pts = o.pts.map((q) => toB(q[0], q[1]));
+      if (pts.length < 2) continue;
+      if (o.closed || pts.length > 2) {
+        // polígonos y rectángulos: segmentos; curvas: spline por puntos
+        const curve = e.type === 'spline' || e.type === 'ellipse' || e.type === 'circle' || e.type === 'arc' || e.type === 'slot';
+        if (!curve) { const n = pts.length; for (let i = 0; i < (o.closed ? n : n - 1); i++) { const a = pts[i], b = pts[(i + 1) % n]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1e-6) out.push({ id: uid('pl'), type: 'line', a: [f3(a[0]), f3(a[1])], b: [f3(b[0]), f3(b[1])], ref: true, construction: e.construction } as SkEntity); } continue; }
+        const step = Math.max(1, Math.floor(pts.length / 32)), sp = pts.filter((_, i) => i % step === 0);
+        out.push({ id: uid('ps'), type: 'spline', pts: sp.map((p) => [f3(p[0]), f3(p[1])] as [string, string]), closed: o.closed, ref: true, construction: e.construction } as SkEntity);
+      }
+    }
+    if (!out.length) return s.notify('Nada que proyectar', 'error');
+    s.sketchCommit((k) => { k.entities.push(...out); });
+    s.notify(`Proyectadas ${out.length} entidades de «${src.name}» (referencia fija)`);
+  },
+  /** Proyecta los ejes principales X, Y, Z (y el origen) sobre el plano del boceto como geometría de referencia */
+  projectAxes: () => {
+    const s = S();
+    const sk = s.doc.features.find((f) => f.id === s.sketchId) as SketchF | undefined;
+    if (!sk) return;
+    const ev = (x: string) => { try { return makeEval(docParams(s.doc))(x); } catch { return NaN; } };
+    let fr: Frame; try { fr = planeFrame(sk.plane, ev, resolveWorkPlanes(s.doc, ev)); } catch { return s.notify('Plano del boceto no válido', 'error'); }
+    const L = 100, f3 = (x: number) => String(Math.round(x * 1000) / 1000);
+    const uv = (p: V3): [number, number] => { const d = v3.sub(p, fr.origin); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
+    const ents: SkEntity[] = [];
+    for (const [n, ax] of [['X', [1, 0, 0]], ['Y', [0, 1, 0]], ['Z', [0, 0, 1]]] as [string, V3][]) {
+      const a = uv(v3.mul(ax, -L)), b = uv(v3.mul(ax, L));
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-6) {
+        // eje normal al plano: se proyecta como punto
+        ents.push({ id: uid('pax'), type: 'point', cx: f3(a[0]), cy: f3(a[1]), ref: true } as SkEntity); continue;
+      }
+      if (sk.entities.some((e) => e.type === 'line' && e.ref && e.center && (e as any).axis === n)) continue;
+      ents.push({ id: uid('pax'), type: 'line', a: [f3(a[0]), f3(a[1])], b: [f3(b[0]), f3(b[1])], ref: true, center: true, construction: true, axis: n } as SkEntity);
+    }
+    if (!ents.length) return s.notify('Los ejes ya están proyectados');
+    s.sketchCommit((k) => { k.entities.push(...ents); });
+    s.notify(`Ejes proyectados: ${ents.length}`);
   },
   skop: (op: SkOp) => {
     const s = S();
@@ -583,7 +657,7 @@ export const drwActions = {
     revs.push({ rev: next, desc: '', date: new Date().toLocaleDateString('es-ES'), by: '' });
     d.title.revision = next;
   }),
-  autoCenters: () => { const s = S(); const v = selView(); if (!v) return s.notify('Selecciona una vista', 'error'); s.commitDrw((d) => { const t = d.views.find((x) => x.id === v.id)!; t.centers = !t.centers; }); },
+  autoCenters: () => { const s = S(); const v = selView(); if (!v) return s.notify('Selecciona una vista', 'error'); s.commitDrw((d) => { const t = d.views.find((x) => x.id === v.id)!; t.centers = t.centers === false; }); },
   flipSection: () => {
     const s = S(); const v = selView(); if (!v || v.kind !== 'section' || !v.section) return;
     s.commitDrw((d) => {

@@ -1,7 +1,7 @@
 // Comandos con atajo de teclado personalizable (Herramientas › Atajos de teclado).
 // Cada comando tiene un contexto (dónde vale), sus atajos por defecto y la acción.
 import { useStore, type State } from '../core/store';
-import { asmActions } from './actions';
+import { asmActions, partActions } from './actions';
 import { saveDoc, openFile } from '../core/files';
 import { toggleOsnap } from './osnap';
 import { toggleClipTool } from './ClipBar';
@@ -60,12 +60,18 @@ export const COMMANDS: Command[] = [
   { id: 'part.pattern', label: 'Patrón', ctx: 'model', keys: [], run: feat('pattern') },
   { id: 'part.mirror', label: 'Simetría', ctx: 'model', keys: [], run: feat('mirror') },
   { id: 'part.workplane', label: 'Plano de trabajo (P1…)', ctx: 'model', keys: [], run: feat('workplane') },
+  { id: 'part.projface', label: 'Proyectar sobre cara/plano', ctx: 'model', keys: [], run: (s) => s.open({ kind: 'projto', mode: 'face' }) },
+  { id: 'part.projsurf', label: 'Proyectar sobre superficie', ctx: 'model', keys: [], run: (s) => s.open({ kind: 'projto', mode: 'surf' }) },
   { id: 'part.workaxis', label: 'Eje de trabajo (E1…)', ctx: 'model', keys: [], run: feat('workaxis') },
   { id: 'part.workpoint', label: 'Punto de trabajo (pt1…)', ctx: 'model', keys: [], run: feat('workpoint') },
   { id: 'part.epoint', label: 'ePoints de la pieza', ctx: 'model', keys: [], run: (s) => s.open({ kind: 'epoint' }) },
   { id: 'part.measure', label: 'Medir', ctx: 'part', keys: [], run: tool('measure') },
   // Boceto
   { id: 'sk.line', label: 'Línea', ctx: 'sketch', keys: ['L'], run: tool('line') },
+  { id: 'sk.construction', label: 'Construcción (línea auxiliar)', ctx: 'sketch', keys: [], run: () => partActions.toggleConstruction() },
+  { id: 'sk.centerline', label: 'Línea eje', ctx: 'sketch', keys: [], run: () => partActions.toggleCenterline() },
+  { id: 'sk.projaxes', label: 'Proyectar ejes principales', ctx: 'sketch', keys: [], run: () => partActions.projectAxes() },
+  { id: 'sk.projsk', label: 'Proyectar geometría de otra operación', ctx: 'sketch', keys: [], run: (s) => s.open({ kind: 'projsk' }) },
   { id: 'sk.rect', label: 'Rectángulo', ctx: 'sketch', keys: ['R'], run: tool('rect') },
   { id: 'sk.circle', label: 'Círculo', ctx: 'sketch', keys: ['C'], run: tool('circle') },
   { id: 'sk.poly', label: 'Polígono', ctx: 'sketch', keys: ['P'], run: tool('npoly') },

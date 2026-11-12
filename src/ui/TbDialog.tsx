@@ -1,10 +1,11 @@
+import type React from "react";
 import { useMemo, useState } from 'react';
 import { useStore } from '../core/store';
-import { TB_PRESETS, TB_FIELDS, tbTemplate, type TbTemplate, type TbCell, type TbLabel } from '../core/drawing';
+import { TB_PRESETS, TB_FIELDS, SHEETS, ZONES, tbTemplate, type TbTemplate, type TbCell, type TbLabel, type SheetOverlay, type Corner } from '../core/drawing';
 import { dxfToGeo, dwgToGeo, dgnToGeo, normalizeGeo, fieldForTag } from '../core/cad2d';
 import { tbValue } from '../core/sheet';
 import { saveText, pickFile } from '../core/files';
-import { Modal } from './Panels';
+import { Modal, Row } from './Panels';
 
 const LIB_KEY = 'inv3d.tbtpls';
 export const DEF_KEY = 'inv3d.tbtpl.default';
@@ -195,6 +196,73 @@ export default function TbTplDialog({ onClose }: { onClose: () => void }) {
         <button className="btn" onClick={asDefault} title="Plantilla por defecto de los planos nuevos">Por defecto</button>
         <button className="btn primary" disabled={errs.length > 0} onClick={apply}>Aplicar al plano</button>
       </div>
+    </Modal>
+  );
+}
+
+/** Lee un DXF/DWG/DGN como dibujo de hoja (líneas, textos y atributos → etiquetas enlazadas a campos) */
+async function readOverlay(f: File, scale: number): Promise<SheetOverlay> {
+  const ext = f.name.split('.').pop()!.toLowerCase();
+  const raw = ext === 'dxf' ? dxfToGeo(await f.text()) : ext === 'dwg' ? await dwgToGeo(await f.arrayBuffer()) : dgnToGeo(await f.arrayBuffer());
+  const n = normalizeGeo(raw, scale || 1);
+  return {
+    name: f.name.replace(/\.[^.]+$/, ''), source: f.name, w: Math.round(n.w * 100) / 100, h: Math.round(n.h * 100) / 100,
+    geo: { lines: n.geo.lines, texts: n.geo.texts.map(({ x, y, h, text, rot }) => ({ x, y, h, text, rot })) },
+    labels: n.geo.tags.map((t) => ({ x: t.x, y: t.y, h: t.h, rot: t.rot || 0, field: fieldForTag(t.tag), label: t.tag })),
+  };
+}
+
+/** Plantillas de la hoja: zonas, plano completo, bordes, cajetín principal, cajetín de revisiones y copyright */
+export function SheetTplDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const d = s.drw;
+  const [W, H] = SHEETS[d.sheet];
+  const [scale, setScale] = useState(1);
+  const imp = async (key: 'sheetTpl' | 'borderTpl' | 'revTpl' | 'copyright') => {
+    const f = await pickFile('.dxf,.dwg,.dgn'); if (!f) return;
+    try {
+      const o = await readOverlay(f, scale);
+      s.commitDrw((dd) => {
+        if (key === 'copyright') dd.copyright = { ...o, corner: dd.copyright?.corner ?? 'bl' };
+        else if (key === 'sheetTpl') dd.sheetTpl = { ...o, hideTb: dd.sheetTpl?.hideTb ?? true };
+        else dd[key] = o;
+      });
+      const warn = (key === 'sheetTpl' || key === 'borderTpl') && (Math.abs(o.w - W) > 2 || Math.abs(o.h - H) > 2) ? ` · ojo: el formato ${d.sheet} mide ${W} × ${H}` : '';
+      s.notify(`${f.name}: ${o.geo.lines.length} líneas, ${o.geo.texts.length} textos, ${o.labels?.length ?? 0} atributos (${Math.round(o.w)} × ${Math.round(o.h)} mm)${warn}`);
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
+  const rm = (key: 'sheetTpl' | 'borderTpl' | 'revTpl' | 'copyright') => s.commitDrw((dd) => { delete dd[key]; });
+  const Item = ({ k, label, help, children }: { k: 'sheetTpl' | 'borderTpl' | 'revTpl' | 'copyright'; label: string; help: string; children?: React.ReactNode }) => (
+    <div className="psec" style={{ marginBottom: 8 }}>
+      <div className="psec-title">{label}</div>
+      <p className="phelp" style={{ margin: '2px 0 6px' }}>{help}</p>
+      <div className="modal-btns" style={{ justifyContent: 'flex-start', margin: 0 }}>
+        <span className="ro" style={{ minWidth: 180 }}>{d[k] ? `${d[k]!.source ?? d[k]!.name} · ${Math.round(d[k]!.w)} × ${Math.round(d[k]!.h)} mm` : 'Ninguno'}</span>
+        <button className="btn" onClick={() => imp(k)}>Importar DXF / DWG…</button>
+        {d[k] && <button className="btn" onClick={() => rm(k)}>Quitar</button>}
+        {children}
+      </div>
+    </div>
+  );
+  return (
+    <Modal title="Plantillas de hoja" onClose={onClose} wide>
+      <label className="check"><input type="checkbox" checked={d.zones !== false} onChange={(e) => s.commitDrw((dd) => { dd.zones = e.target.checked; })} />Separadores de zona en los bordes (1, 2, 3… y A, B, C…) · {d.sheet}: {ZONES[d.sheet][0]} × {ZONES[d.sheet][1]}</label>
+      <Row label="Escala al importar"><input className="num" type="number" value={scale} onChange={(e) => setScale(+e.target.value || 1)} style={{ width: 70 }} /><span className="ro" style={{ marginLeft: 6 }}>1000 si el dibujo está en metros</span></Row>
+      <Item k="sheetTpl" label="Plano completo" help="Dibujo de la hoja entera (marco, zonas y cajetín) colocado en la esquina inferior izquierda; sustituye al marco generado. Los atributos se enlazan a los campos del cajetín.">
+        {d.sheetTpl && <label className="check"><input type="checkbox" checked={!!d.sheetTpl.hideTb} onChange={(e) => s.commitDrw((dd) => { if (dd.sheetTpl) dd.sheetTpl.hideTb = e.target.checked; })} />Incluye el cajetín (oculta el de INV3D)</label>}
+      </Item>
+      <Item k="borderTpl" label="Bordes" help="Solo el marco y las zonas; el cajetín sigue siendo la plantilla de cajetín." />
+      <div className="psec" style={{ marginBottom: 8 }}>
+        <div className="psec-title">Cajetín de datos principales</div>
+        <div className="modal-btns" style={{ justifyContent: 'flex-start', margin: 0 }}><span className="ro" style={{ minWidth: 180 }}>{tbTemplate(d).name}</span><button className="btn" onClick={() => s.open({ kind: 'tbtpl' })}>Editar / importar…</button><span className="ro">(también con doble clic sobre el cajetín)</span></div>
+      </div>
+      <Item k="revTpl" label="Cajetín de revisiones" help="Se coloca encima del cajetín principal, alineado a la derecha. La tabla de revisiones (Anotar › Tabla › Revisiones) sigue disponible." />
+      <Item k="copyright" label="Copyright" help="Bloque de texto o logotipo desde un DXF/DWG, en la esquina que elijas dentro del marco.">
+        {d.copyright && <select value={d.copyright.corner} onChange={(e) => s.commitDrw((dd) => { if (dd.copyright) dd.copyright.corner = e.target.value as Corner; })}>
+          <option value="bl">Abajo a la izquierda</option><option value="br">Abajo a la derecha (sobre el cajetín)</option><option value="tl">Arriba a la izquierda</option><option value="tr">Arriba a la derecha</option>
+        </select>}
+      </Item>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
     </Modal>
   );
 }

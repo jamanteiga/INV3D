@@ -20,7 +20,7 @@ const TOOL_MSG: Record<string, string> = {
   arc3: 'Arco: punto inicial, punto final y punto intermedio', arctan: 'Arco tangente: desde el extremo de una línea', rect3: 'Rectángulo: dos puntos de un lado y la anchura',
   rectc: 'Rectángulo: centro y esquina', circle3: 'Círculo: tres puntos', ellipse: 'Elipse: centro, eje mayor y eje menor', text: 'Texto: clic para colocar',
   skdim: 'Cota: geometría y posición del texto', constrain: 'Restricción: selecciona la geometría', trim: 'Recortar', extend: 'Alargar',
-  fillet2d: 'Empalme: clic cerca del vértice', chamfer2d: 'Chaflán: clic cerca del vértice', projectGeom: 'Proyectar aristas del modelo', measure: 'Medir: clic en aristas',
+  fillet2d: 'Empalme: clic cerca del vértice', chamfer2d: 'Chaflán: clic cerca del vértice', projectGeom: 'Proyectar aristas del modelo', projFace: 'Clic en cara plana o plano', projSurf: 'Clic en la superficie de destino', measure: 'Medir: clic en aristas',
   line: 'Línea: clic en puntos sucesivos · cerrar en el primer punto crea un contorno · doble clic o Esc termina',
   rect: 'Rectángulo: clic en dos esquinas opuestas', circle: 'Círculo: centro y radio', npoly: 'Polígono: centro y vértice',
   arc: 'Arco: centro, punto inicial y punto final (sentido antihorario)', slot: 'Ranura: centro 1, centro 2 y anchura', point: 'Punto: clic para colocar',

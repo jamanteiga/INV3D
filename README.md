@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.24
+## Versión 0.25
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,18 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.25**
+- **Plano**: doble clic sobre el cajetín abre su plantilla. **Separadores de zona** en todos los formatos (1, 2, 3… y A, B, C…, a partes iguales: A4 6×4, A3 8×6, A2 12×8, A1 16×12, A0 24×16). **Colocar vistas › Plantillas de hoja**: importar desde DXF/DWG el **plano completo**, los **bordes**, el **cajetín de revisiones** y el **copyright** (en la esquina elegida); el cajetín principal sigue en *Cajetín*.
+- **Estilos de dibujo**: estilos personalizados con nombre (guardar, cargar, por defecto para planos nuevos); cotas con nº de decimales, **pulgadas entre corchetes en fracciones** (25,4 [1"]) y **tolerancias +a/-b apiladas a la derecha** de la cota.
+- **Anotación automática** en las vistas: marcas de centro de taladros, **ejes de simetría**, ejes longitudinales de cilindros y ejes de taladros vistos de perfil; **nota de taladro roscado** según ISO 6410 (p. ej. `M8x1,25-6H ↧12 / Ø6,8 ↧15`). Se quitan por vista (clic derecho o propiedades).
+- **Agujero**: corta siempre hacia el material (antes podía quedarse en un círculo pintado) con *Invertir dirección*; colocación **en cara** (clic en la cara y distancias del centro a dos aristas).
+- **Booleanas** (Modelo 3D › Booleanas): unión, diferencia e intersección entre cuerpos de la pieza.
+- **Empalme**: arista a arista, cara plana (todas sus aristas), todas las aristas de la pieza y **radio variable**.
+- **Boceto**: **Línea eje** (trazo y punto; eje de revolución y crea un eje de trabajo al terminar el boceto), **Construcción** fina y discontinua (con selección la convierte, sin selección se aplica a lo siguiente que se dibuje), **Proyectar ejes** principales y **Proyectar desde operación** (geometría de otro boceto).
+- **Proyectar** (Modelo 3D › Proyectar): *Sobre cara/plano* (boceto nuevo con la geometría proyectada) y *Sobre superficie* (curvas 3D sobre la cara, en un boceto 3D).
+- **Doble clic** en una cara, arista o curva del 3D abre la operación que la creó.
+- **Ensamblaje**: clic derecho sobre un componente › *Restringir por ePoint · …* y después el ePoint del otro componente.
 
 **Novedades 0.24**
 - **Guardado**: tras el primer guardado (o al abrir un fichero con Archivo › Abrir) se guarda en el mismo fichero sin preguntar; *Guardar como* sigue preguntando. **Autoguardado** cada 2 min de los documentos ya guardados (Herramientas › Opciones: intervalo en minutos).

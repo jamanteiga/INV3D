@@ -8,7 +8,7 @@ import {
 import type { Shape3D } from 'replicad';
 import { v3, MATERIALS, type PartDoc, type V3 } from '../core/doc';
 import type { AsmDoc } from '../core/asm';
-import { buildPart, flatPattern, ensureFont, type FeatStatus } from './part';
+import { buildPart, faceSig, flatPattern, ensureFont, type FeatStatus } from './part';
 import { buildAsmGeometry, xfShape, cutHolesLocal } from './asm';
 
 let ready: Promise<void> | null = null;
@@ -78,14 +78,14 @@ function props(shape: Shape3D) {
 }
 
 // ---- Caché de piezas por contenido ----
-interface PartEntry { shape: Shape3D | null; status: Record<string, FeatStatus>; props: ReturnType<typeof props>; surfaces?: Shape3D | null }
+interface PartEntry { shape: Shape3D | null; status: Record<string, FeatStatus>; props: ReturnType<typeof props>; surfaces?: Shape3D | null; owners?: Map<string, string> }
 const partCache = new Map<string, PartEntry>();
 async function getPart(doc: PartDoc): Promise<{ key: string; entry: PartEntry }> {
   const key = hashStr(JSON.stringify(doc));
   let entry = partCache.get(key);
   if (!entry) {
     const b = await buildPart(doc);
-    entry = { shape: b.shape, status: b.status, props: b.shape ? props(b.shape) : null, surfaces: b.surfaces };
+    entry = { shape: b.shape, status: b.status, props: b.shape ? props(b.shape) : null, surfaces: b.surfaces, owners: b.owners };
     partCache.set(key, entry);
     if (partCache.size > 60) partCache.delete(partCache.keys().next().value!);
   }
@@ -186,15 +186,22 @@ self.onmessage = async (ev: MessageEvent) => {
     if (type === 'regen') {
       const t0 = performance.now();
       const doc = ev.data.doc as PartDoc;
-      let shape: Shape3D | null, status: Record<string, FeatStatus>, surfaces: Shape3D | null;
-      if (ev.data.upTo !== undefined) { const b = await buildPart(doc, ev.data.upTo); shape = b.shape; status = b.status; surfaces = b.surfaces; }
-      else { const { entry } = await getPart(doc); shape = entry.shape; status = entry.status; surfaces = entry.surfaces ?? null; }
+      let shape: Shape3D | null, status: Record<string, FeatStatus>, surfaces: Shape3D | null, owners: Map<string, string> | undefined;
+      if (ev.data.upTo !== undefined) { const b = await buildPart(doc, ev.data.upTo); shape = b.shape; status = b.status; surfaces = b.surfaces; owners = b.owners; }
+      else { const { entry } = await getPart(doc); shape = entry.shape; status = entry.status; surfaces = entry.surfaces ?? null; owners = entry.owners; }
       if (!ev.data.preview) { lastPart = shape; lastSurf = surfaces; }
       let surfMesh: unknown = null; const transfer: Transferable[] = [];
       if (surfaces) { try { const sm = meshShape(surfaces); surfMesh = sm.mesh; transfer.push(...sm.transfer); } catch { /* sin malla */ } }
       if (!shape) return post({ id, ok: true, result: { mesh: null, surfMesh, status, props: null, ms: performance.now() - t0 } }, transfer);
       const { mesh, transfer: tr } = meshShape(shape);
-      return post({ id, ok: true, result: { mesh, surfMesh, status, props: props(shape), ms: performance.now() - t0 } }, [...transfer, ...tr]);
+      // operación que creó cada cara (por grupo de caras de la malla)
+      let faceFeat: string[] | undefined;
+      if (owners && !ev.data.preview) { try {
+        // faceId de la malla = hashCode de la cara
+        const byHash = new Map<number, string>(); for (const fc of (shape as any).faces) byHash.set(fc.hashCode, owners.get(faceSig(fc)) ?? '');
+        faceFeat = mesh.faceGroups.map((g: { faceId: number }) => byHash.get(g.faceId) ?? '');
+      } catch { /* sin caras */ } }
+      return post({ id, ok: true, result: { mesh, surfMesh, status, props: props(shape), ms: performance.now() - t0, faceFeat } }, [...transfer, ...tr]);
     }
     if (type === 'asm') {
       const { result, transfer } = await regenAsm(ev.data.asm, ev.data.parts, ev.data.have ?? []);

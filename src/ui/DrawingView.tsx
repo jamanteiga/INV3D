@@ -11,8 +11,8 @@ import { v3, uid, type PartDoc, type V3 } from '../core/doc';
 import type { AsmDoc } from '../core/asm';
 import { fmt } from '../core/expr';
 import { bomRows } from './bom';
-import { modelDims, refreshModelDims, type ModelDim } from '../core/retrieve';
-import { buildSheet, dimGeometry, geomOf, detectCircles, chainSegments, breakMap, tbHeight, BREAK_GAP, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
+import { modelDims, refreshModelDims, holeNotes, type ModelDim } from '../core/retrieve';
+import { buildSheet, sheetParts, dimGeometry, geomOf, detectCircles, chainSegments, breakMap, tbHeight, BREAK_GAP, type ProjData, type Prim, type ViewGeom } from '../core/sheet';
 
 export type { ProjData };
 const projStore = new WeakMap<object, Map<string, Promise<ProjData>>>();
@@ -124,8 +124,23 @@ export function viewModelDims(s: State, drw: DrawingDoc, v: DView): ModelDim[] {
   if (!pd || !g) return [];
   try { return modelDims(src, v, viewCamera(v), pd, g); } catch { return []; }
 }
+/** Notas automáticas de taladros roscados en las vistas que miran a lo largo del taladro */
+function withHoleNotes(s: State, drw: DrawingDoc): DrawingDoc {
+  const extra: DAnn[] = [];
+  const sep = drawStyle(drw).decSep;
+  for (const v of drw.views) {
+    if (v.holeNotes === false || v.kind === 'detail' || v.kind === 'flat' || v.dir === 'iso') continue;
+    const src = s.docData(v.source) as PartDoc | null;
+    if (!src || src.format !== 'inv3d.part' || !src.features.some((f) => f.type === 'hole')) continue;
+    const pd = projNow(s)(v), g = pd && geomOf(drw, projNow(s), v);
+    if (!pd || !g) continue;
+    try { for (const n of holeNotes(src, v, viewCamera(v), pd, g, sep)) extra.push({ id: n.id, kind: 'hole', pts: [n.a, n.b], text: n.text }); } catch { /* */ }
+  }
+  return extra.length ? { ...drw, anns: [...(drw.anns ?? []), ...extra] } : drw;
+}
 /** Plano con las cotas asociativas recalculadas a partir del modelo actual. */
-export function withModelDims(s: State, drw: DrawingDoc): DrawingDoc {
+export function withModelDims(s: State, drw0: DrawingDoc): DrawingDoc {
+  const drw = withHoleNotes(s, drw0);
   if (!drw.dims.some((d) => d.ref)) return drw;
   let dims = drw.dims;
   for (const v of drw.views) if (dims.some((d) => d.ref && d.view === v.id)) dims = refreshModelDims(dims, v, viewModelDims(s, drw, v));
@@ -428,7 +443,13 @@ export default function DrawingView() {
     if (tool) return;
     const hitId = (e.target as Element).closest?.('[data-id]')?.getAttribute('data-id');
     const p = toSheet(e as unknown as React.PointerEvent);
-    const v = (hitId && drw.views.find((x) => x.id === hitId)) || viewAt(p);
+    const hv = hitId ? drw.views.find((x) => x.id === hitId) : undefined;
+    if (!hv) {
+      // doble clic sobre el cajetín → plantilla del cajetín; revisiones / copyright → plantillas de hoja
+      const part = sheetParts(drw).find((q) => p[0] >= q.x && p[0] <= q.x + q.w && p[1] >= q.y && p[1] <= q.y + q.h);
+      if (part) { useStore.getState().open(part.kind === 'tb' ? { kind: 'tbtpl' } : { kind: 'sheettpl' }); return; }
+    }
+    const v = hv || viewAt(p);
     if (v) useStore.getState().open({ kind: 'drwviewprops', view: v.id });
   };
   const onMove = (e: React.PointerEvent) => {
@@ -513,7 +534,7 @@ export default function DrawingView() {
   const pl = (pts: P2[]) => pts.map((q) => `${q[0].toFixed(3)},${Y(q[1]).toFixed(3)}`).join(' ');
   const loopsPath = (loops: P2[][]) => loops.map((l) => 'M' + l.map((q) => `${q[0].toFixed(3)} ${Y(q[1]).toFixed(3)}`).join('L') + 'Z').join('');
   const CLS: Record<string, string> = { vis: 'ln-vis', hid: 'ln-hid', frame: 'sh-frame', dim: 'ln-dim', center: 'ln-center', thin: 'ln-thin', thick: 'ln-thick', ann: 'ln-ann', cutline: 'ln-cut', cutend: 'ln-thick', detailc: 'ln-detail', tb: 'tb-cell' };
-  const TCLS: Record<string, string> = { vlabel: 'view-label', 'vlabel big': 'view-label big', dimt: 'dim-text', annt: 'ann-text', note: 'note-text', tbl: 'tb-label', tbv: 'tb-val', tbb: 'tb-big' };
+  const TCLS: Record<string, string> = { vlabel: 'view-label', 'vlabel big': 'view-label big', dimt: 'dim-text', annt: 'ann-text', note: 'note-text', tbl: 'tb-label', tbv: 'tb-val', tbb: 'tb-big', zone: 'tb-val' };
   const viewClip = (id?: string) => { const v = id ? drw.views.find((x) => x.id === id) : null; return v?.kind === 'detail' ? `url(#clip-${v.id})` : undefined; };
   void viewClip;
   const hints = tool ? TOOL_HINT[tool] : null;
@@ -595,7 +616,9 @@ export default function DrawingView() {
           <div className="ctx" style={{ position: 'fixed', left: Math.min(vmenu.x, window.innerWidth - 230), top: Math.min(vmenu.y, window.innerHeight - 120), zIndex: 50 }}>
             <div className="ctx-title">{v.name}</div>
             <button onClick={() => { useStore.getState().commitDrw((d) => { const t = d.views.find((x) => x.id === v.id); if (t) t.showCog = !t.showCog; }); close(); }}>{v.showCog ? '✓ ' : ''}Ver/ocultar CDG</button>
-            <button onClick={() => { useStore.getState().commitDrw((d) => { const t = d.views.find((x) => x.id === v.id); if (t) t.centers = !t.centers; }); close(); }}>{v.centers ? '✓ ' : ''}Marcas de centro</button>
+            <button onClick={() => { useStore.getState().commitDrw((d) => { const t = d.views.find((x) => x.id === v.id); if (t) t.centers = t.centers === false; }); close(); }}>{v.centers !== false ? '✓ ' : ''}Marcas de centro</button>
+            <button onClick={() => { useStore.getState().commitDrw((d) => { const t = d.views.find((x) => x.id === v.id); if (t) t.axes = t.axes === false; }); close(); }}>{v.axes !== false ? '✓ ' : ''}Ejes automáticos</button>
+            <button onClick={() => { useStore.getState().commitDrw((d) => { const t = d.views.find((x) => x.id === v.id); if (t) t.holeNotes = t.holeNotes === false; }); close(); }}>{v.holeNotes !== false ? '✓ ' : ''}Notas de taladros roscados</button>
             <button onClick={() => { close(); useStore.getState().open({ kind: 'drwviewprops', view: v.id }); }}>Propiedades de la vista…</button>
           </div>
         </>);

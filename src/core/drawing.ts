@@ -47,6 +47,10 @@ export interface DView {
   detail?: { c: P2d; r: number; /** contorno continuo (por defecto, discontinuo) */ solid?: boolean };
   /** Marcas de centro automáticas en círculos */
   centers?: boolean;
+  /** Ejes automáticos de simetría, longitudinales y de taladros (por defecto sí) */
+  axes?: boolean;
+  /** Notas automáticas de taladros roscados (por defecto sí) */
+  holeNotes?: boolean;
   /** Mostrar el centro de gravedad del modelo en esta vista */
   showCog?: boolean;
   /** Escala propia (no sigue a la de la vista padre) */
@@ -138,6 +142,15 @@ export const TB_PRESETS: TbTemplate[] = [
     { x: 0, y: 0, w: 30, h: 8, label: 'Dibujado', field: 'designer' }, { x: 30, y: 0, w: 22, h: 8, label: 'Fecha', field: 'date' }, { x: 52, y: 0, w: 18, h: 8, label: 'Escala', field: 'scale' }, { x: 70, y: 0, w: 14, h: 8, label: 'Hoja', field: '#sheet' }, { x: 84, y: 0, w: 20, h: 8, label: 'Rev.', field: 'revision' },
   ] },
 ];
+/** Dibujo importado de la hoja (plano completo, bordes, cajetín de revisiones, copyright) en mm desde su esquina inferior izquierda */
+export interface SheetOverlay {
+  name: string; w: number; h: number; source?: string;
+  geo: { lines: [number, number][][]; texts: { x: number; y: number; h: number; text: string; rot?: number }[] };
+  labels?: TbLabel[];
+}
+export type Corner = 'bl' | 'br' | 'tl' | 'tr';
+/** Número de zonas (columnas numeradas × filas con letras) de cada formato, ~50 mm por zona (ISO 5457) */
+export const ZONES: Record<SheetSize, [number, number]> = { A4: [6, 4], A3: [8, 6], A2: [12, 8], A1: [16, 12], A0: [24, 16] };
 export const tbTemplate = (d: Pick<DrawingDoc, 'tbTpl'>): TbTemplate => d.tbTpl ?? TB_PRESETS[0];
 
 export interface DrawingDoc {
@@ -158,6 +171,13 @@ export interface DrawingDoc {
   std?: 'ISO' | 'DIN' | 'ANSI';
   /** Estilo personalizado sobre la norma */
   style?: Partial<DrawStyle>;
+  /** Separadores de zona en los bordes (1, 2, 3… y A, B, C…); por defecto sí */
+  zones?: boolean;
+  /** Plantillas importadas: plano completo (sustituye marco, zonas y, si hideTb, el cajetín), bordes, cajetín de revisiones y copyright */
+  sheetTpl?: SheetOverlay & { hideTb?: boolean };
+  borderTpl?: SheetOverlay;
+  revTpl?: SheetOverlay;
+  copyright?: SheetOverlay & { corner: Corner };
   /** Varias hojas: la activa vive en los campos de arriba; pages guarda todas (la activa puede estar desfasada). */
   pages?: SheetPage[];
   page?: number;
@@ -173,6 +193,10 @@ export interface DrawStyle {
   projection: 'first' | 'third';
   hatchAngle: number; hatchStep: number;
   centerExt: number;
+  /** Cota alternativa en pulgadas entre corchetes, como fracción (denominador máximo fracDen) */
+  altInch?: boolean; fracDen?: number;
+  /** Tolerancias «+a/-b» apiladas a la derecha de la cota (si no, en línea) */
+  tolStack?: boolean;
 }
 export const DRAW_STD: Record<'ISO' | 'DIN' | 'ANSI', DrawStyle> = {
   ISO: { textH: 3.5, dimTextH: 3.5, font: 'Arial', arrow: 'closed', arrowL: 3, arrowW: 1, extGap: 1, extOver: 2, decSep: ',', precision: 2, trailingZeros: false, units: 'mm', thick: 0.5, thin: 0.25, projection: 'first', hatchAngle: 45, hatchStep: 2.5, centerExt: 2.5 },
@@ -198,12 +222,14 @@ export function loadPage(d: DrawingDoc, i: number) {
 
 /** Plantilla de cajetín elegida como predeterminada (Plantilla de cajetín › Por defecto) */
 function defaultTb(): TbTemplate | null { try { const t = typeof localStorage !== 'undefined' ? localStorage.getItem('inv3d.tbtpl.default') : null; return t ? JSON.parse(t) : null; } catch { return null; } }
+function defaultStyle(): Partial<DrawingDoc> { try { const t = typeof localStorage !== 'undefined' ? localStorage.getItem('inv3d.drwstyle.default') : null; if (!t) return {}; const x = JSON.parse(t); return { std: x.std, style: x.style ?? {} }; } catch { return {}; } }
 export function newDrawing(): DrawingDoc {
   return {
     format: 'inv3d.drawing', version: 1, sheet: 'A3', views: [], dims: [], notes: [], anns: [],
     title: { title: '', partNumber: '', material: '', designer: '', checker: '', date: new Date().toLocaleDateString('es-ES'), company: '', revision: 'A', scale: '1:1', generalTol: 'ISO 2768-m' },
     bom: null, tables: [], revisions: [{ rev: 'A', desc: 'Primera edición', date: new Date().toLocaleDateString('es-ES'), by: '' }],
     ...(defaultTb() ? { tbTpl: defaultTb()! } : {}),
+    ...defaultStyle(),
   };
 }
 export function validateDrawing(x: unknown): DrawingDoc {
