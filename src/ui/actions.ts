@@ -137,7 +137,7 @@ export const asmActions = {
   },
   /** Colocar: el primer componente queda fijo en el origen; después cada copia sigue al cursor y se suelta con un clic.
    *  Esc o clic derecho terminan. X/Y/Z giran 90° la copia pendiente. */
-  startPlace: (partId: string, extras: string[] = []) => {
+  startPlace: (partId: string, extras: string[] = [], firstAt?: { pos: [number, number, number]; grounded: boolean; label?: string }) => {
     const s = S();
     if (s.kind !== 'assembly') return;
     const e = s.docs.find((d) => d.id === partId); if (!e) return;
@@ -148,13 +148,16 @@ export const asmActions = {
     const occ = uid('o');
     s.commitAsm((a) => {
       if (first) {
-        a.occurrences.push({ id: uid('o'), name: nextName(a), part: partId, xf: { ...IDENTITY }, grounded: true });
-        for (const x of extras) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { ...IDENTITY }, grounded: true });
+        // primer componente: por su ePoint (u origen) en las coordenadas indicadas (por defecto 0,0,0)
+        const xf0 = firstAt ? { pos: [...firstAt.pos] as [number, number, number], quat: [0, 0, 0, 1] as [number, number, number, number] } : { ...IDENTITY };
+        const g = firstAt ? firstAt.grounded : true;
+        a.occurrences.push({ id: uid('o'), name: nextName(a), part: partId, xf: xf0, grounded: g });
+        for (const x of extras) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { pos: [...xf0.pos], quat: [...xf0.quat] }, grounded: g });
       }
       a.occurrences.push({ id: occ, name: nextName(a), part: partId, xf: { pos: [0, 0, 0], quat: [0, 0, 0, 1] } });
     });
     useStore.setState({ placing: { part: partId, occ, quat: [0, 0, 0, 1], extras }, tool: 'place', selItem: null, dialog: null });
-    s.notify(first ? `${base}: primer componente fijo en el origen. Clic para colocar más copias · Esc para terminar` : `${base}: clic para colocar · X/Y/Z gira 90° · Esc o clic derecho para terminar`);
+    s.notify(first ? `${base}: primer componente ${firstAt?.label ?? 'fijo en el origen'}. Clic para colocar más copias · Esc para terminar` : `${base}: clic para colocar · X/Y/Z gira 90° · Esc o clic derecho para terminar`);
   },
   /** Suelta la copia pendiente en la posición indicada y prepara la siguiente. */
   dropPlace: (xf: Xform) => {

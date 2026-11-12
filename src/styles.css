@@ -654,3 +654,11 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .cb-pt { min-width: 22px; width: 22px; font-size: 14px; }
 .cb-hint { position: absolute; left: 0; top: calc(100% + 4px); padding: 3px 8px; background: #fffbe6; border: 1px solid #e6d58c; border-radius: 2px; font-size: 11.5px; white-space: nowrap; color: #4a3d00; pointer-events: none; }
 @media (max-width: 900px) { .clipbar { flex-wrap: wrap; max-width: calc(100% - 16px); } .cb-slider { width: 70px; } }
+
+/* Colocar primer componente */
+.fp-opts { display: flex; flex-direction: column; gap: 7px; margin: 4px 0 10px; }
+.fp-r { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.fp-r select { min-width: 0; max-width: 100%; }
+.fp-xyz { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 6px; }
+.fp-xyz label { display: flex; align-items: center; gap: 6px; }
+.fp-xyz input { width: 100%; min-width: 0; }

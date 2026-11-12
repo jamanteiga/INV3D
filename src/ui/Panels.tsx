@@ -2,6 +2,7 @@ import FemPanel from './FemPanel';
 import TbTplDialog from './TbDialog';
 import OccPropsDialog from './OccPropsDialog';
 import EPointPanel from './EPointPanel';
+import { partEPoints, EP_KIND_NAMES } from '../core/epoints';
 import DrwViewPropsDialog from './DrwViewDialog';
 import { tbTemplate, TB_FIELDS, type SheetSize } from '../core/drawing';
 import { GenDialog } from './MachineDialog';
@@ -1014,7 +1015,7 @@ function AsmSummary() {
       <Row label="Tornillos"><span className="ro">{r?.bolts.reduce((a, x) => a + x.count, 0) ?? 0}</span></Row>
       <Row label="Masa total"><span className="ro strong">{fmt(mass, 2)} kg</span></Row>
       {r && Object.keys(r.errors).length > 0 && <Err text={`${Object.keys(r.errors).length} elemento(s) con error; pasa el ratón por el icono rojo del navegador`} />}
-      {!s.asm.occurrences.length && !s.asm.frames.length && <p className="phelp">Ensamblaje vacío. <b>Colocar (P)</b> inserta piezas abiertas o desde disco (la primera queda fija en el origen); <b>Restringir (J)</b> las relaciona; <b>Diseño › Insertar perfil</b> crea estructura sobre líneas de esqueleto (<b>Ensamblar › Línea 3D</b>).</p>}
+      {!s.asm.occurrences.length && !s.asm.frames.length && <p className="phelp">Ensamblaje vacío. <b>Colocar (P)</b> inserta piezas abiertas o desde disco (la primera se coloca por su ePoint de inserción en 0, 0, 0 o donde indiques); <b>Restringir (J)</b> las relaciona; <b>Diseño › Insertar perfil</b> crea estructura sobre líneas de esqueleto (<b>Ensamblar › Línea 3D</b>).</p>}
     </div>
   );
 }
@@ -1329,13 +1330,16 @@ function PlaceDialog({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<FolderEntry[]>([]);
   const [q, setQ] = useState('');
   useEffect(() => { if (s.folder.state === 'granted') listFolder().then((f) => setFiles(f.filter((x) => /\.(i3p|i3a|step|stp)$/i.test(x.name)))).catch(() => setFiles([])); }, [s.folder.state]);
-  const go = (pid: string | null) => { if (!pid) return; onClose(); asmActions.startPlace(pid); };
+  // Ensamblaje vacío: antes de colocar el primer componente se elige su punto de inserción y el destino
+  const [first, setFirst] = useState<string | null>(null);
+  const go = (pid: string | null) => { if (!pid) return; if (!s.asm.occurrences.length) { setFirst(pid); return; } onClose(); asmActions.startPlace(pid); };
+  if (first) return <FirstPlaceStep pid={first} onBack={() => setFirst(null)} onClose={onClose} />;
   const browse = async () => { const f = await pickFile('.i3p,.i3a,.json,.step,.stp,.zip'); if (f) go(await loadPartForPlace(f)); };
   const fromFolder = async (path: string) => { try { const { readFromFolder } = await import('../core/persist'); go(await loadPartForPlace(await readFromFolder(path))); } catch (e) { s.notify((e as Error).message, 'error'); } };
   const shown = files.filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase())).slice(0, 200);
   return (
     <Modal title="Colocar componente" onClose={onClose}>
-      <p className="phelp">El primer componente queda <b>fijo en el origen</b>. Las demás copias siguen al cursor: <b>clic</b> para soltar (puedes soltar varias), <b>X/Y/Z</b> giran 90°, <b>Esc</b> o clic derecho termina. Después relaciónalas con <b>Restringir (J)</b>.</p>
+      <p className="phelp">En un ensamblaje vacío, el primer componente se coloca por su <b>ePoint de inserción</b>, otro ePoint o su origen, en las coordenadas que indiques (por defecto <b>0, 0, 0</b>). Las demás copias siguen al cursor: <b>clic</b> para soltar (puedes soltar varias), <b>X/Y/Z</b> giran 90°, <b>Esc</b> o clic derecho termina. Después relaciónalas con <b>Restringir (J)</b>.</p>
       <div className="modal-btns" style={{ marginTop: 0 }}>
         <button className="btn primary" onClick={browse}>Examinar… (.i3p, .i3a, STEP)</button>
         <button className="btn" onClick={() => { onClose(); asmActions.createPart(); }}>Crear pieza nueva</button>
@@ -1363,6 +1367,57 @@ function PlaceDialog({ onClose }: { onClose: () => void }) {
         </div>
       </>)}
       <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button></div>
+    </Modal>
+  );
+}
+
+/** Primer componente de un ensamblaje vacío: punto de la pieza (ePoint de inserción, otro ePoint u origen) y coordenadas de destino. */
+function FirstPlaceStep({ pid, onBack, onClose }: { pid: string; onBack: () => void; onClose: () => void }) {
+  const s = useStore();
+  const d = s.docs.find((x) => x.id === pid);
+  const isPart = d?.kind === 'part';
+  const eps = isPart ? partEPoints(s.docData(pid) as PartDoc).filter((e) => e.kind !== 'composite') : [];
+  const opts: { id: string; label: string; p: [number, number, number] }[] = [
+    ...eps.map((e, i) => ({ id: e.id, label: i === 0 ? `${e.name} (ePoint de inserción por defecto)` : `${e.name} · ${EP_KIND_NAMES[e.kind]}`, p: e.point as [number, number, number] })),
+    { id: '__origin', label: 'Origen de la pieza', p: [0, 0, 0] },
+  ];
+  const [mode, setMode] = useState<'def' | 'other' | 'origin'>(eps.length ? 'def' : 'origin');
+  const others = opts.slice(1, -1);
+  const [other, setOther] = useState(others[0]?.id ?? '');
+  const [dest, setDest] = useState<string[]>(['0', '0', '0']);
+  const [grounded, setGrounded] = useState(true);
+  const ref = mode === 'def' ? opts[0] : mode === 'other' ? (others.find((o) => o.id === other) ?? opts[0]) : opts[opts.length - 1];
+  const D = dest.map((v) => parseFloat(v.replace(',', '.')) || 0) as [number, number, number];
+  const ok = () => {
+    const pos = D.map((v, i) => Math.round((v - ref.p[i]) * 1e6) / 1e6) as [number, number, number];
+    const where = `en (${D.map((v) => +v.toFixed(3)).join(', ')})`;
+    onClose();
+    asmActions.startPlace(pid, [], { pos, grounded, label: `${mode === 'origin' ? 'por su origen' : `por «${ref.label.replace(/ \(.*\)$/, '').replace(/ · .*$/, '')}»`} ${where}${grounded ? ', fijo' : ''}` });
+  };
+  return (
+    <Modal title="Colocar primer componente" onClose={onClose}>
+      <p className="phelp"><b>{d?.fileName}</b> es el primer componente del ensamblaje: elige qué punto de la pieza se lleva a las coordenadas de destino.</p>
+      <div className="plabel">Punto de inserción de la pieza</div>
+      <div className="fp-opts">
+        <label className="fp-r"><input type="radio" name="fp" disabled={!eps.length} checked={mode === 'def'} onChange={() => setMode('def')} /> ePoint de inserción de la pieza <span className="muted">(por defecto{eps[0] && eps[0].name !== 'ePoint de inserción' ? ` · ${eps[0].name}` : ''})</span></label>
+        <label className="fp-r"><input type="radio" name="fp" disabled={!others.length} checked={mode === 'other'} onChange={() => setMode('other')} /> Otro ePoint
+          <select value={other} disabled={mode !== 'other' || !others.length} onChange={(e) => setOther(e.target.value)}>
+            {others.length ? others.map((o) => <option key={o.id} value={o.id}>{o.label}</option>) : <option value="">La pieza no tiene más ePoints</option>}
+          </select>
+        </label>
+        <label className="fp-r"><input type="radio" name="fp" checked={mode === 'origin'} onChange={() => setMode('origin')} /> Origen de la pieza</label>
+      </div>
+      <div className="plabel">Coordenadas de destino en el ensamblaje (mm)</div>
+      <div className="fp-xyz">
+        {(['X', 'Y', 'Z'] as const).map((L, i) => (
+          <label key={L}>{L} <input value={dest[i]} onChange={(e) => { const v = [...dest]; v[i] = e.target.value; setDest(v); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') ok(); }} /></label>
+        ))}
+      </div>
+      <p className="phelp">Punto de la pieza: ({ref.p.map((v) => +(+v).toFixed(3)).join(', ')}) → destino ({D.map((v) => +v.toFixed(3)).join(', ')}).</p>
+      <label className="fp-r"><input type="checkbox" checked={grounded} onChange={(e) => setGrounded(e.target.checked)} /> Fijo (anclado en esa posición)</label>
+      <div className="modal-btns"><button className="btn" onClick={onBack}>← Volver</button><span className="grow" />
+        <button className="btn" onClick={onClose}>Cancelar</button>
+        <button className="btn primary" onClick={ok}>Aceptar</button></div>
     </Modal>
   );
 }
