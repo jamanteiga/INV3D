@@ -29,7 +29,7 @@ export interface AsmResult {
   view?: AsmDoc;
 }
 export interface FlatResult { paths: string[]; bends: { a: V2; b: V2; label: string }[]; t: number; r: number; k: number }
-export interface Projection { visible: string[]; hidden: string[]; center: V3; cut: number[]; anchors?: { id: string; c: [number, number]; r: [number, number, number, number]; z: number }[] }
+export interface Projection { visible: string[]; hidden: string[]; center: V3; cut: number[]; anchors?: { id: string; c: [number, number]; r: [number, number, number, number]; z: number }[]; /** centro de gravedad (modelo) y en la vista */ cog?: V3; cogUV?: [number, number] }
 export type ProjSource = { kind: 'part'; doc: PartDoc } | { kind: 'asm'; asm: AsmDoc; parts: Record<string, PartDoc> };
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };

@@ -74,7 +74,7 @@ export function getProjection(s: State, v: DView): Promise<ProjData> | null {
       const vis = flip(r.visible.flatMap((d) => flattenPath(d)));
       const hid = flip(r.hidden.flatMap((d) => flattenPath(d)));
       const cut = chainSegments(r.cut ?? []);
-      const data: ProjData = { vis, hid, cut, bbox: bboxOf([...vis, ...hid]), circles: detectCircles(vis), center: r.center, anchors: r.anchors };
+      const data: ProjData = { vis, hid, cut, bbox: bboxOf([...vis, ...hid]), circles: detectCircles(vis), center: r.center, anchors: r.anchors, cog: r.cogUV, cog3: r.cog };
       resolved.set(pr, data);
       return data;
     });
@@ -168,6 +168,7 @@ export default function DrawingView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const [W, H] = SHEETS[drw.sheet];
   const [vb, setVb] = useState<[number, number, number, number]>([-10, -10, W + 20, H + 20]);
+  const [vmenu, setVmenu] = useState<{ x: number; y: number; id: string } | null>(null);
   useEffect(() => setVb([-10, -10, W + 20, H + 20]), [W, H]);
   const [clicks, setClicks] = useState<{ view?: string; pts: P2[]; refs: any[] }>({ pts: [], refs: [] });
   const [cursor, setCursor] = useState<P2 | null>(null);
@@ -520,7 +521,17 @@ export default function DrawingView() {
   return (
     <div className="drawing-host">
       <svg ref={svgRef} className="sheet-svg" viewBox={vb.join(' ')} preserveAspectRatio="xMidYMid meet"
-        onPointerDown={onDown} onDoubleClick={onDbl} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={(e) => { e.preventDefault(); if (tool === 'drwBaseline') finishBaseline(); else if (tool === 'drwSectionPath') finishPath(); else reset(); }}
+        onPointerDown={onDown} onDoubleClick={onDbl} onPointerMove={onMove} onPointerUp={onUp} onWheel={onWheel} onContextMenu={(e) => {
+          e.preventDefault();
+          if (tool === 'drwBaseline') finishBaseline(); else if (tool === 'drwSectionPath') finishPath();
+          else if (tool) reset();
+          else {
+            // clic derecho sobre una vista: menú con Ver/ocultar CDG
+            const hitId = (e.target as Element).closest?.('[data-id]')?.getAttribute('data-id');
+            const v = (hitId && drw.views.find((x) => x.id === hitId)) || viewAt(toSheet(e as unknown as React.PointerEvent));
+            if (v) setVmenu({ x: e.clientX, y: e.clientY, id: v.id });
+          }
+        }}
         style={{ cursor: tool ? 'crosshair' : 'default' }}>
         <defs>
           <pattern id="hatch45" patternUnits="userSpaceOnUse" width="2.5" height="2.5" patternTransform="rotate(45)">
@@ -576,6 +587,19 @@ export default function DrawingView() {
         {(tool === 'drwDimA' || (tool === 'drwAux' && !clicks.refs.length)) && cursor && (() => { const sg = segAt(cursor); return sg ? <polyline points={pl([sg.a, sg.b])} className="snap-seg" /> : null; })()}
       </svg>
       {hints && <div className="vp-hint">{hints[Math.min(tool === 'drwDimA' ? clicks.refs.length + (clicks.refs.length === 2 ? 0 : 0) : clicks.pts.length, hints.length - 1)]}</div>}
+      {vmenu && (() => {
+        const v = drw.views.find((x) => x.id === vmenu.id); if (!v) return null;
+        const close = () => setVmenu(null);
+        return (<>
+          <div className="ctx-shade" onPointerDown={close} onContextMenu={(e) => { e.preventDefault(); close(); }} />
+          <div className="ctx" style={{ position: 'fixed', left: Math.min(vmenu.x, window.innerWidth - 230), top: Math.min(vmenu.y, window.innerHeight - 120), zIndex: 50 }}>
+            <div className="ctx-title">{v.name}</div>
+            <button onClick={() => { useStore.getState().commitDrw((d) => { const t = d.views.find((x) => x.id === v.id); if (t) t.showCog = !t.showCog; }); close(); }}>{v.showCog ? '✓ ' : ''}Ver/ocultar CDG</button>
+            <button onClick={() => { useStore.getState().commitDrw((d) => { const t = d.views.find((x) => x.id === v.id); if (t) t.centers = !t.centers; }); close(); }}>{v.centers ? '✓ ' : ''}Marcas de centro</button>
+            <button onClick={() => { close(); useStore.getState().open({ kind: 'drwviewprops', view: v.id }); }}>Propiedades de la vista…</button>
+          </div>
+        </>);
+      })()}
       {!drw.views.length && <div className="drw-empty">Hoja vacía. Usa <b>Vista base</b> en la cinta para colocar una pieza o un ensamblaje abierto.</div>}
     </div>
   );

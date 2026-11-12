@@ -29,6 +29,8 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
 
+**Centro de gravedad (CDG)**: en pieza y ensamblaje, **Vista › Aspecto › Ver/ocultar CDG** (o la barra de vista › Ocultar/mostrar › Centro de gravedad): símbolo con coordenadas y masa según el material de cada pieza. En el dibujo, **clic derecho sobre una vista › Ver/ocultar CDG** (por vista).
+
 **Novedades 0.23**
 - **ePoints activables**: clic derecho sobre un ePoint en el árbol de la pieza (o dentro de la pieza en el árbol del ensamblaje) → *Activar / Desactivar*; los desactivados (gris) no se conectan ni se ofrecen al colocar. También *Nuevo ePoint*, *Duplicar* y *Usar como ePoint de inserción*; en la ventana de ePoints, casilla de activo, ⧉ duplicar y **＋ Nuevo**.
 - **eFamily** (antes familia por tabla) y **eOperaciones** (operaciones reutilizables): Herramientas › Tabla eFamily / eOperaciones.

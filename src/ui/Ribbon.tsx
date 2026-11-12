@@ -582,6 +582,7 @@ export default function Ribbon() {
           <Group label="Aspecto">
             <Big icon="edges" label="Aristas" active={s.showEdges} onClick={() => s.set({ showEdges: !s.showEdges })} title="Sombreado con aristas" />
             <Big icon="iso" label="Alámbrico" active={s.wire} onClick={() => s.set({ wire: !s.wire, showEdges: true })} />
+            {(k === 'part' || k === 'assembly') && <Big icon="workpoint" label="Ver/ocultar CDG" active={!!s.hud.cog} onClick={() => s.set({ hud: { ...s.hud, cog: !s.hud.cog } })} title="Centro de gravedad de la pieza o del ensamblaje (con su masa según el material)" />}
           </Group>
           <Group label="Vista de corte">
             <Big icon="section" label="Modo de recorte" active={!!s.clipTool} onClick={() => toggleClipTool()} title="Barra de recorte: plano, franja o manual (punto y sentido ±X/±Y/±Z), con la cara cortada rellena" />

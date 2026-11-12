@@ -681,3 +681,4 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .hole-types { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 2px 0 8px; }
 .hole-types button { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--panel); color: var(--fg-2); font-size: 11.5px; text-align: left; cursor: pointer; }
 .hole-types button.on { border-color: var(--accent); color: var(--fg); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.ctx-shade { position: fixed; inset: 0; z-index: 49; }

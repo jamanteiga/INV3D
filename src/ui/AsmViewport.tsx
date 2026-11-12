@@ -1,4 +1,5 @@
 import HeadsUp from './HeadsUp';
+import { updateCog } from './cog';
 import ClipBar from './ClipBar';
 import { insertPoint } from '../core/epoints';
 import { useEffect, useRef, useState } from 'react';
@@ -84,7 +85,7 @@ export default function AsmViewport() {
 
   useEffect(() => {
     const V = new View3D(host.current!, cubeHost.current!);
-    V.onFrame = () => { V.triad.visible = useStore.getState().hud.triad; };
+    V.onFrame = () => { const st = useStore.getState(); V.triad.visible = st.hud.triad; updateCog(V, st, 'asm'); };
     (window as unknown as { __v3d: View3D }).__v3d = V; // ayuda de depuración / pruebas
     const { scene, camera } = V;
     const modelGroup = new THREE.Group(); scene.add(modelGroup);

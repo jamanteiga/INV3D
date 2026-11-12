@@ -615,6 +615,47 @@ export class View3D {
     };
   }
   stopPick() { this.pickOff?.(); }
+  // ---------- Centro de gravedad (CDG) ----------
+  private cogObj?: THREE.Group;
+  private cogLabel = '';
+  /** Muestra el símbolo de CDG (esfera de octantes blanco/negro) con su rótulo, o lo oculta (null) */
+  setCog(p: [number, number, number] | null, label = '') {
+    if (!p) { if (this.cogObj?.visible) { this.cogObj.visible = false; this.request(); } return; }
+    if (!this.cogObj) {
+      const g = new THREE.Group(); g.renderOrder = 25;
+      const mats = [0x111111, 0xffffff].map((c) => new THREE.MeshBasicMaterial({ color: c, depthTest: false, transparent: true }));
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(7, 12, 6, (i * Math.PI) / 2, Math.PI / 2, (j * Math.PI) / 2, Math.PI / 2), mats[(i + j) % 2]);
+        m.renderOrder = 25; m.raycast = () => {}; g.add(m);
+      }
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(7, 0.7, 6, 32), new THREE.MeshBasicMaterial({ color: 0x111111, depthTest: false, transparent: true }));
+      ring.renderOrder = 26; ring.raycast = () => {}; g.add(ring);
+      const spr = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
+      spr.center.set(-0.06, 0.5); spr.renderOrder = 27; spr.raycast = () => {}; spr.name = 'lbl'; g.add(spr);
+      // tamaño constante en pantalla y el anillo mirando a la cámara
+      (g.children[0] as THREE.Mesh).onBeforeRender = () => { g.scale.setScalar(this.worldPerPx()); ring.quaternion.copy(this.camera.quaternion); };
+      this.scene.add(g); this.cogObj = g;
+    }
+    this.cogObj.visible = true;
+    this.cogObj.position.set(...p);
+    if (label !== this.cogLabel) {
+      this.cogLabel = label;
+      const lines = label.split('\n'), c = document.createElement('canvas'), k = 2;
+      const ctx0 = c.getContext('2d')!; ctx0.font = `600 ${12 * k}px system-ui, sans-serif`;
+      const w = Math.ceil(Math.max(...lines.map((l) => ctx0.measureText(l).width)) + 14 * k), h = (lines.length * 15 + 8) * k;
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d')!;
+      ctx.fillStyle = 'rgba(255,253,232,0.94)'; ctx.strokeStyle = '#8a7a2a'; ctx.lineWidth = k;
+      ctx.beginPath(); ctx.roundRect(k / 2, k / 2, w - k, h - k, 4 * k); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#222'; ctx.textBaseline = 'top';
+      lines.forEach((l, i) => { ctx.font = `${i === 0 ? 700 : 500} ${12 * k}px system-ui, sans-serif`; ctx.fillText(l, 7 * k, (4 + i * 15) * k); });
+      const spr = this.cogObj.getObjectByName('lbl') as THREE.Sprite;
+      (spr.material.map as THREE.Texture | null)?.dispose();
+      spr.material.map = new THREE.CanvasTexture(c); spr.material.needsUpdate = true;
+      spr.scale.set(w / k, h / k, 1);
+    }
+    this.request();
+  }
   /** Hay una designación de punto en curso (los visores no seleccionan con el clic) */
   get picking() { return !!this.pickOff; }
   /** Marca fija (punto elegido en la ventana «Punto 3D») */

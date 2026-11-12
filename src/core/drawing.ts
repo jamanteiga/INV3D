@@ -47,6 +47,8 @@ export interface DView {
   detail?: { c: P2d; r: number; /** contorno continuo (por defecto, discontinuo) */ solid?: boolean };
   /** Marcas de centro automáticas en círculos */
   centers?: boolean;
+  /** Mostrar el centro de gravedad del modelo en esta vista */
+  showCog?: boolean;
   /** Escala propia (no sigue a la de la vista padre) */
   ownScale?: boolean;
 }

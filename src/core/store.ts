@@ -63,6 +63,8 @@ export interface HudState {
   style: 'shaded' | 'hlr' | 'hlv';
   clipOff: number; clipFlip: boolean;
   origin: boolean; sketches: boolean; triad: boolean; cube: boolean;
+  /** mostrar el centro de gravedad (CDG) */
+  cog?: boolean;
   scene: 'grad' | 'white' | 'studio' | 'dark' | 'blue';
 }
 const HUD0: HudState = { style: 'shaded', clipOff: 0, clipFlip: false, origin: true, sketches: true, triad: true, cube: true, scene: 'grad' };

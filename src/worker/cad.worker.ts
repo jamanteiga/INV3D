@@ -6,7 +6,7 @@ import {
   measureShapeVolumeProperties, measureShapeSurfaceProperties,
 } from 'replicad';
 import type { Shape3D } from 'replicad';
-import { v3, type PartDoc, type V3 } from '../core/doc';
+import { v3, MATERIALS, type PartDoc, type V3 } from '../core/doc';
 import type { AsmDoc } from '../core/asm';
 import { buildPart, flatPattern, ensureFont, type FeatStatus } from './part';
 import { buildAsmGeometry, xfShape, cutHolesLocal } from './asm';
@@ -247,6 +247,22 @@ self.onmessage = async (ev: MessageEvent) => {
       let shape = await sourceShape(ev.data.source);
       const dir = v3.norm(ev.data.dir as V3), x = v3.norm(ev.data.x as V3);
       const up = v3.cross(dir, x);
+      // Centro de gravedad del modelo completo (antes de cortes); en ensamblajes, ponderado por la densidad de cada pieza
+      let cog: V3 | null = null;
+      try {
+        const dens = (mat?: string) => MATERIALS.find((m) => m.name === mat)?.density ?? 7850;
+        if (ev.data.source.kind === 'part') cog = measureShapeVolumeProperties(shape).centerOfMass as V3;
+        else {
+          let M = 0; const acc: V3 = [0, 0, 0];
+          for (const it of lastAsm) {
+            const vp = measureShapeVolumeProperties(it.shape); if (!(vp.volume > 0)) continue;
+            const occ = (ev.data.source.asm as AsmDoc).occurrences.find((o) => o.id === it.id || o.id === it.id?.split('/')[0]);
+            const m = vp.volume * dens((ev.data.source.parts as Record<string, PartDoc>)[occ?.part ?? '']?.iProperties.material);
+            const c = vp.centerOfMass as V3; M += m; for (let k = 0; k < 3; k++) acc[k] += c[k] * m;
+          }
+          if (M > 0) cog = acc.map((v) => v / M) as V3;
+        }
+      } catch { /* sin volumen */ }
       const cutSegs: number[] = [];
       let secC: V3 | null = null;
       const secEdges = (sh: Shape3D, face: unknown) => {
@@ -339,7 +355,8 @@ self.onmessage = async (ev: MessageEvent) => {
       const cut: number[] = [];
       for (let i = 0; i + 2 < cutSegs.length; i += 3) { const d = v3.sub([cutSegs[i], cutSegs[i + 1], cutSegs[i + 2]], c); cut.push(v3.dot(d, x), v3.dot(d, up)); }
       void secC;
-      const result = { visible: flat(visible.toSVGPaths()), hidden: flat(hidden.toSVGPaths()), center: c, cut, anchors };
+      const cogUV = cog ? [v3.dot(v3.sub(cog, c), x), v3.dot(v3.sub(cog, c), up)] as [number, number] : undefined;
+      const result = { visible: flat(visible.toSVGPaths()), hidden: flat(hidden.toSVGPaths()), center: c, cut, anchors, cog: cog ?? undefined, cogUV };
       projCache.set(key, result);
       if (projCache.size > 60) projCache.delete(projCache.keys().next().value!);
       return post({ id, ok: true, result });

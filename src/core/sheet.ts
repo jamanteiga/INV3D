@@ -19,7 +19,7 @@ import { fmt } from './expr';
 
 export interface Circ { c: P2; r: number; full: boolean }
 export interface Bend { a: P2; b: P2; label: string }
-export interface ProjData { vis: P2[][]; hid: P2[][]; cut: P2[][]; bbox: [number, number, number, number]; circles: Circ[]; center: V3; bends?: Bend[]; flat?: { t: number; r: number; k: number }; anchors?: { id: string; c: P2; r: [number, number, number, number]; z: number }[] }
+export interface ProjData { vis: P2[][]; hid: P2[][]; cut: P2[][]; bbox: [number, number, number, number]; circles: Circ[]; center: V3; bends?: Bend[]; flat?: { t: number; r: number; k: number }; anchors?: { id: string; c: P2; r: [number, number, number, number]; z: number }[]; /** centro de gravedad en coordenadas de la vista y del modelo */ cog?: P2; cog3?: V3 }
 
 export type Prim =
   | { t: 'pl'; cls: string; pts: P2[]; id?: string }
@@ -484,6 +484,11 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
       P.push({ t: 'pl', cls: 'center', pts: [[c.c[0] - r, c.c[1]], [c.c[0] + r, c.c[1]]], id: v.id }, { t: 'pl', cls: 'center', pts: [[c.c[0], c.c[1] - r], [c.c[0], c.c[1] + r]], id: v.id });
     }
     if (g.clip) P.push({ t: 'circ', cls: 'thin', c: g.clip.c, r: g.clip.r, id: v.id });
+    // Centro de gravedad (símbolo de cuadrantes alternos) si la vista lo tiene activado
+    if (v.showCog) {
+      const pd = v.kind === 'detail' ? (() => { const pv = drw.views.find((x) => x.id === v.parent); return pv ? proj(pv) : null; })() : proj(v);
+      if (pd?.cog) P.push(...cogSymbol(g.T(pd.cog), v.id, pd.cog3));
+    }
     for (const l of g.brk ?? []) P.push({ t: 'pl', cls: 'thin', pts: l, id: v.id });
     for (const [i, b] of (g.bends ?? []).entries()) {
       P.push({ t: 'pl', cls: 'center', pts: [b.a, b.b], id: v.id });
@@ -656,5 +661,17 @@ export function hatchLines(loops: P2[][], step = ST.hatchStep): P2[][] {
       out.push([[(u + w0) * k, (u - w0) * k], [(u + w1) * k, (u - w1) * k]]);
     }
   }
+  return out;
+}
+
+/** Símbolo de centro de gravedad: círculo con dos cuadrantes rellenos, ejes y rótulo «CDG» con sus coordenadas */
+export function cogSymbol(C: P2, id?: string, c3?: V3): Prim[] {
+  const r = 3, out: Prim[] = [];
+  const quad = (a0: number): P2[] => { const pts: P2[] = [C]; for (let i = 0; i <= 8; i++) { const a = a0 + (i / 8) * (Math.PI / 2); pts.push([C[0] + r * Math.cos(a), C[1] + r * Math.sin(a)]); } pts.push(C); return pts; };
+  out.push({ t: 'fill', cls: 'cog', loops: [quad(0)], id }, { t: 'fill', cls: 'cog', loops: [quad(Math.PI)], id });
+  out.push({ t: 'circ', cls: 'thick', c: C, r, id });
+  out.push({ t: 'pl', cls: 'thin', pts: [[C[0] - r - 1.5, C[1]], [C[0] + r + 1.5, C[1]]], id }, { t: 'pl', cls: 'thin', pts: [[C[0], C[1] - r - 1.5], [C[0], C[1] + r + 1.5]], id });
+  out.push({ t: 'txt', cls: 'annt', x: C[0] + r + 2, y: C[1] + r + 3.2, h: 2.5, text: 'CDG', anchor: 'start', id, bold: true });
+  if (c3) out.push({ t: 'txt', cls: 'annt', x: C[0] + r + 2, y: C[1] + r + 0.3, h: 2, text: `(${c3.map((v) => Math.round(v * 10) / 10).join('; ')})`, anchor: 'start', id });
   return out;
 }

@@ -111,6 +111,7 @@ export default function HeadsUp({ kind }: { kind: 'part' | 'asm' }) {
             {kind === 'part' && <label className="hu-row"><input type="checkbox" checked={hud.origin} onChange={(e) => setHud({ origin: e.target.checked })} /> Planos, ejes y puntos de trabajo</label>}
             {kind === 'part' && <label className="hu-row"><input type="checkbox" checked={hud.sketches} onChange={(e) => setHud({ sketches: e.target.checked })} /> Bocetos</label>}
             <label className="hu-row"><input type="checkbox" checked={hud.triad} onChange={(e) => setHud({ triad: e.target.checked })} /> Triedro de ejes</label>
+            <label className="hu-row"><input type="checkbox" checked={!!hud.cog} onChange={(e) => setHud({ cog: e.target.checked })} /> Centro de gravedad (CDG)</label>
             <label className="hu-row"><input type="checkbox" checked={hud.cube} onChange={(e) => setHud({ cube: e.target.checked })} /> Cubo de vistas</label>
             <label className="hu-row"><input type="checkbox" checked={s.showEdges} disabled={s.wire || hud.style !== 'shaded'} onChange={(e) => s.set({ showEdges: e.target.checked })} /> Aristas</label>
           </div>

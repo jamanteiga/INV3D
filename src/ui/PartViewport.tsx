@@ -1,6 +1,7 @@
 import { femColor } from './FemPanel';
 import { partEPoints } from '../core/epoints';
 import { threadByName, threadPitch } from '../core/holes';
+import { updateCog } from './cog';
 import { osCfg, showSnapHint, OS_PRIO, intersect, perpFoot, tangentPts, quadrants, type OsMode, type Prim } from './osnap';
 import HeadsUp from './HeadsUp';
 import ClipBar from './ClipBar';
@@ -150,6 +151,7 @@ export default function PartViewport() {
     V.onFrame = () => {
       const s = useStore.getState();
       V.triad.visible = s.mode !== 'sketch' && s.hud.triad;
+      updateCog(V, s, 'part');
       originGroup.visible = s.hud.origin || s.tool === 'pickPlane' || s.tool === 'pickWorkBase' || s.mode === 'sketch';
       sketchGroup.visible = s.mode === 'sketch' || s.hud.sketches || !!(s.dialog && 'draft' in s.dialog);
       if (snapMarker.visible) { snapMarker.quaternion.copy(camera.quaternion); snapMarker.scale.setScalar(V.worldPerPx() * 6); }
