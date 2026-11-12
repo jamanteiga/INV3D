@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toggleOsnap } from './ui/osnap';
+import { runShortcut } from './ui/commands';
 import { useStore, activeSketch, startCad } from './core/store';
 import { iconThemeOf } from './core/persist';
 import Ribbon from './ui/Ribbon';
@@ -169,18 +170,12 @@ export default function App() {
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       const s = useStore.getState();
       const k = e.key.toLowerCase();
-      if (s.placing && (e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) asmActions.finishPlace();
-      if (e.ctrlKey || e.metaKey) {
-        if (k === 'z') { e.preventDefault(); s.undo(); }
-        else if (k === 'y') { e.preventDefault(); s.redo(); }
-        else if (k === 's') { e.preventDefault(); saveDoc(e.shiftKey); }
-        else if (k === 'o') { e.preventDefault(); openFile(); }
-        else if (k === 'n') { e.preventDefault(); s.open({ kind: 'newdoc' }); }
-        return;
-      }
+      // atajos con Ctrl: valen aunque haya un diálogo abierto
+      if (e.ctrlKey || e.metaKey) { runShortcut(e); return; }
       if (s.confirmBox || (s.dialog && !('draft' in s.dialog) && s.dialog.kind !== 'skop')) return;
       if (e.key === 'Escape') {
         if (s.menuOpen) return s.set({ menuOpen: false });
+        if (s.epConnect) return s.set({ epConnect: null });
         if (s.dialog) return s.closeDialog();
         if (s.tool === 'place') return asmActions.finishPlace();
         if (s.tool) return s.setTool(null);
@@ -189,9 +184,6 @@ export default function App() {
         if (s.mode === 'present') return s.set({ mode: 'model', explodeT: 0 });
         return s.set({ selFeature: null, selItem: null });
       }
-      if (e.key === 'F3') { e.preventDefault(); return toggleOsnap(); }
-      if (e.key === 'F6') { e.preventDefault(); return s.setView('home'); }
-      if (e.key === 'Home') return s.setView('fit');
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (s.kind === 'part') {
           if (s.mode === 'sketch' && s.selCon) return s.deleteConstraint(s.selCon);
@@ -214,26 +206,9 @@ export default function App() {
           });
         }
       }
-      if (s.kind === 'part' && s.mode === 'sketch') {
-        if (e.key === 'F8' || e.key === 'F9') { e.preventDefault(); return s.set({ showCons: !s.showCons }); }
-        if (s.dialog) return;
-        const map: Record<string, typeof s.tool> = { l: 'line', r: 'rect', c: 'circle', p: 'npoly', a: 'arc3', d: 'skdim', x: 'trim', t: 'text' };
-        if (map[k]) { e.preventDefault(); s.setTool(map[k]); }
-        return;
-      }
-      if (s.dialog) return;
-      // preventDefault: la tecla no debe llegar al campo que recibe el foco al abrir el diálogo
-      if (s.kind === 'part') {
-        if (k === 's') { e.preventDefault(); s.setTool('pickPlane'); }
-        else if (k === 'e') { e.preventDefault(); s.openFeatureDialog('extrude'); }
-        else if (k === 'r') { e.preventDefault(); s.openFeatureDialog('revolve'); }
-        else if (k === 'h' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('hole'); }
-        else if (k === 'f' && s.result?.mesh) { e.preventDefault(); s.openFeatureDialog('fillet'); }
-      } else if (s.kind === 'assembly') {
-        if (s.tool === 'place' && (k === 'x' || k === 'y' || k === 'z')) { e.preventDefault(); return asmActions.rotatePlace(k === 'x' ? 0 : k === 'y' ? 1 : 2); }
-        if (k === 'p') { e.preventDefault(); s.open({ kind: 'place' }); }
-        else if (k === 'j') { e.preventDefault(); asmActions.openJoint(); }
-      } else if (k === 'd') { e.preventDefault(); s.setTool('drwDim'); }
+      if (s.dialog && !(s.kind === 'part' && s.mode === 'sketch' && (e.key === 'F8' || e.key === 'F9'))) return;
+      // resto de atajos: personalizables en Herramientas › Atajos de teclado
+      runShortcut(e);
     };
     window.addEventListener('keydown', onKey);
     const onBefore = (e: BeforeUnloadEvent) => { const s = useStore.getState(); if (s.dirty || s.docs.some((d) => d.dirty)) e.preventDefault(); };

@@ -27,6 +27,37 @@ interface Glyph { id: string; x: number; y: number; g: string; title: string; se
 type Pick = { kind: 'point' | 'line' | 'curve' | 'entity'; ref: GRef; p: V2 };
 interface Snap { p: V2; ref?: GRef; mid?: GRef; on?: GRef; hv?: 'h' | 'v'; mode?: OsMode }
 
+/** ePoint a partir de aristas: círculo (centro y eje), 3 aristas de una boca rectangular o 2 lados rectos de un oval.
+ *  La dirección apunta hacia fuera de la pieza. */
+function epFromEdges(mode: string, edges: number[][], body: THREE.Vector3): { point: V3; dir: V3; radius?: number; axis: boolean } | null {
+  const pts = (a: number[]) => { const out: THREE.Vector3[] = []; for (let i = 0; i + 2 < a.length; i += 3) out.push(new THREE.Vector3(a[i], a[i + 1], a[i + 2])); return out; };
+  const out = (c: THREE.Vector3, n: THREE.Vector3) => { if (n.dot(c.clone().sub(body)) < 0) n.negate(); return n; };
+  const r4 = (v: THREE.Vector3, k = 4) => vArr(v, k);
+  if (mode === 'circle') {
+    const W = pts(edges[0]); if (W.length < 3) return null;
+    const A = W[0], B = W[Math.floor(W.length / 3)], C = W[Math.floor((2 * W.length) / 3)];
+    const ab = B.clone().sub(A), ac = C.clone().sub(A), n = ab.clone().cross(ac); if (n.lengthSq() < 1e-12) return null;
+    const c = A.clone().add(n.clone().cross(ab).multiplyScalar(ac.lengthSq()).add(ac.clone().cross(n).multiplyScalar(ab.lengthSq())).divideScalar(2 * n.lengthSq()));
+    const R = c.distanceTo(A); if (W.some((p) => Math.abs(p.distanceTo(c) - R) > Math.max(0.02 * R, 0.01))) return null;
+    return { point: r4(c), dir: vArr(out(c, n.normalize()), 6), radius: Math.round(R * 1000) / 1000, axis: true };
+  }
+  // aristas rectas: extremos, punto medio y dirección
+  const L = edges.map((e) => { const W = pts(e); const a = W[0], b = W[W.length - 1]; return { a, b, m: a.clone().add(b).multiplyScalar(0.5), d: b.clone().sub(a).normalize(), len: a.distanceTo(b) }; });
+  if (L.some((l) => !(l.len > 1e-6))) return null;
+  if (mode === 'oval2') {
+    const [A, B] = L; if (Math.abs(A.d.dot(B.d)) < 0.95) return null;
+    const c = A.m.clone().add(B.m).multiplyScalar(0.5), n = A.d.clone().cross(B.m.clone().sub(A.m)); if (n.lengthSq() < 1e-9) return null;
+    return { point: r4(c), dir: vArr(out(c, n.normalize()), 6), axis: false };
+  }
+  // 3 aristas: el par más paralelo son lados opuestos; la tercera da el plano de la boca
+  let pi = 0, pj = 1, best = -1;
+  for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) { const v = Math.abs(L[i].d.dot(L[j].d)); if (v > best) { best = v; pi = i; pj = j; } }
+  if (best < 0.95) return null;
+  const k = 3 - pi - pj, c = L[pi].m.clone().add(L[pj].m).multiplyScalar(0.5);
+  const n = L[pi].d.clone().cross(L[k].d); if (n.lengthSq() < 1e-6) return null;
+  return { point: r4(c), dir: vArr(out(c, n.normalize()), 6), axis: false };
+}
+
 /** Textura de rosca cosmética (como Inventor): hélice oscura con cresta clara, una vuelta por paso */
 const threadTex: Record<string, THREE.CanvasTexture> = {};
 function threadTexture(left = false): THREE.CanvasTexture {
@@ -216,6 +247,7 @@ export default function PartViewport() {
       if (s.mode !== 'sketch') {
         const sz = Math.max(2, V.bbox.getSize(new THREE.Vector3()).length() * 0.025);
         for (const e of partEPoints(s.doc)) {
+          if (e.hidden) continue;
           if (e.kind === 'composite') continue;
           const col = e.inactive ? 0x9aa0a6 : e.isDefault ? 0xf08c00 : e.kind === 'insert' ? 0x1673d0 : 0x2f9a4c; // gris = desactivado
           const sph = new THREE.Mesh(new THREE.SphereGeometry(sz * 0.45, 16, 12), new THREE.MeshBasicMaterial({ color: col, depthTest: false }));
@@ -333,9 +365,11 @@ export default function PartViewport() {
         if (s.tool === 'femFace' && hoverFace >= 0 && hoverFace < fm.faceGroups.length) overlayGroup.add(faceOverlay(fm, hoverFace, css('--hover'), 0.35));
       }
       if (s.tool === 'epPick' && state.mesh && hoverFace >= 0 && hoverFace < state.mesh.faceGroups.length) overlayGroup.add(faceOverlay(state.mesh, hoverFace, css('--hover'), 0.4));
-      if (m && state.hoverEdge >= 0 && state.hoverEdge < m.edgeGroups.length && (s.tool === 'pickEdges' || s.tool === 'pickFlangeEdge' || s.tool === 'projectGeom' || s.tool === 'measure')) {
+      if (m && state.hoverEdge >= 0 && state.hoverEdge < m.edgeGroups.length && (s.tool === 'pickEdges' || s.tool === 'pickFlangeEdge' || s.tool === 'projectGeom' || s.tool === 'measure' || s.tool === 'epEdge')) {
         overlayGroup.add(V.segs(groupPts(state.hoverEdge, m), V.lineMat(css('--hover'), 4, false, false)));
       }
+      // aristas ya elegidas para el ePoint
+      if (s.tool === 'epEdge' && state.mesh) for (const gi of s.epEdges) if (gi < state.mesh.edgeGroups.length) overlayGroup.add(V.segs(groupPts(gi, state.mesh), V.lineMat(css('--accent'), 4, false, false)));
       V.request();
     };
 
@@ -1229,11 +1263,30 @@ export default function PartViewport() {
         buildOverlay(s);
         return;
       }
+      if (s.tool === 'epEdge' && state.mesh) {
+        const m = state.mesh;
+        const gi = V.nearestEdge(ev, m, null, occluders())?.group ?? -1; if (gi < 0) return;
+        const sel = s.epEdges.includes(gi) ? s.epEdges.filter((x) => x !== gi) : [...s.epEdges, gi];
+        const need = s.epMode === 'circle' ? 1 : s.epMode === 'oval2' ? 2 : 3;
+        if (sel.length < need) { useStore.setState({ epEdges: sel }); buildOverlay(useStore.getState()); return; }
+        const res = epFromEdges(s.epMode, sel.map((g) => groupPts(g, m)), V.bbox.getCenter(new THREE.Vector3()));
+        if (!res) { s.notify(s.epMode === 'circle' ? 'Esa arista no es circular' : 'No se reconoce la forma: elige aristas rectas de los lados', 'error'); useStore.setState({ epEdges: [] }); return; }
+        useStore.setState({ epPick: { ...res, n: (s.epPick?.n ?? 0) + 1 }, tool: null, epEdges: [] });
+        return;
+      }
       if (s.tool === 'epPick') {
         const fh = faceHit(ev); if (!fh) return;
         const m = fh.mesh, g = m.faceGroups[fh.group];
         if (fh.planar) {
-          useStore.setState({ epPick: { point: vArr(fh.point, 4), dir: vArr(fh.normal, 6), axis: false, n: (s.epPick?.n ?? 0) + 1 }, tool: null });
+          // centro de la cara (centroide por áreas) o el punto del clic
+          let P = fh.point.clone();
+          if (s.epMode !== 'face') {
+            const acc = new THREE.Vector3(), A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(); let ar = 0;
+            const vtx = (i: number, o: THREE.Vector3) => o.set(m.vertices[i * 3], m.vertices[i * 3 + 1], m.vertices[i * 3 + 2]);
+            for (let i = g.start; i < g.start + g.count; i += 3) { vtx(m.triangles[i], A); vtx(m.triangles[i + 1], B); vtx(m.triangles[i + 2], C); const a2 = B.clone().sub(A).cross(C.clone().sub(A)).length() / 2; ar += a2; acc.addScaledVector(A.clone().add(B).add(C).divideScalar(3), a2); }
+            if (ar > 0) P = acc.divideScalar(ar);
+          }
+          useStore.setState({ epPick: { point: vArr(P, 4), dir: vArr(fh.normal, 6), axis: false, n: (s.epPick?.n ?? 0) + 1 }, tool: null });
         } else {
           // cara cilíndrica: eje a partir de las normales, centro por tres puntos y extremo más cercano al clic
           const vs: THREE.Vector3[] = [], ns: THREE.Vector3[] = [];
@@ -1548,8 +1601,8 @@ export default function PartViewport() {
         setHint(lbl ? `${lbl}` : 'Elige un plano o una cara plana');
         return;
       }
-      if (s.tool === 'pickEdges' || s.tool === 'pickFlangeEdge' || s.tool === 'projectGeom' || s.tool === 'measure') {
-        const m = s.tool === 'projectGeom' || s.tool === 'measure' ? state.mesh : pickMesh(); if (!m) return;
+      if (s.tool === 'pickEdges' || s.tool === 'pickFlangeEdge' || s.tool === 'projectGeom' || s.tool === 'measure' || s.tool === 'epEdge') {
+        const m = s.tool === 'projectGeom' || s.tool === 'measure' || s.tool === 'epEdge' ? state.mesh : pickMesh(); if (!m) return;
         const gi = V.nearestEdge(ev, m, null, s.tool === 'projectGeom' ? [] : occluders())?.group ?? -1;
         if (gi !== state.hoverEdge) { state.hoverEdge = gi; buildOverlay(s); }
         return;

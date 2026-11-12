@@ -1,7 +1,7 @@
 import HeadsUp from './HeadsUp';
 import { updateCog } from './cog';
 import ClipBar from './ClipBar';
-import { insertPoint } from '../core/epoints';
+import { insertPoint, partEPoints, epRef, epJoint, type EPoint } from '../core/epoints';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -119,6 +119,54 @@ export default function AsmViewport() {
         const m = new THREE.Mesh(new THREE.SphereGeometry(size * 0.012, 12, 8), new THREE.MeshBasicMaterial({ color: '#e8a33d', depthTest: false }));
         m.position.set(...w.origin); m.renderOrder = 5; m.userData = { label: w.name }; refGroup.add(m);
       }
+      // ePoints de los componentes (visibles por defecto): se eligen en las restricciones y para conectar
+      const occX = (id: string) => s.asmResult?.xf[id] ?? s.asm.occurrences.find((o) => o.id === id)?.xf;
+      const rotD = (X: Xform, d: V3) => vArr(new THREE.Vector3(...d).applyQuaternion(new THREE.Quaternion(...X.quat)).normalize(), 6);
+      if (s.hud.epoints !== false || joint) for (const o of s.asm.occurrences) {
+        if (o.suppressed || (s.placing && o.id === s.placing.occ)) continue;
+        const pd = s.docData(o.part) as PartDoc | null; if (!pd || pd.format !== 'inv3d.part') continue;
+        const X = occX(o.id); if (!X) continue;
+        for (const e of partEPoints(pd)) {
+          if (e.inactive || e.hidden || e.kind === 'composite') continue;
+          const pW = xfPoint(X, e.point), dW = rotD(X, e.dir);
+          const col = s.epConnect?.occ === o.id && s.epConnect.ep === e.id ? '#e03131' : e.isDefault ? '#f08c00' : e.kind === 'insert' ? '#1673d0' : '#2f9a4c';
+          const r = size * 0.011;
+          const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.95 }));
+          m.position.set(...pW); m.renderOrder = 9;
+          m.userData = { kind: 'ref', ref: epRef(e, o.id), label: `${o.name} · ePoint ${e.name}`, base: 0.95, ep: { occ: o.id, id: e.id, kind: e.kind, name: e.name, pW, dW } };
+          const ar = new THREE.ArrowHelper(new THREE.Vector3(...dW), new THREE.Vector3(0, 0, 0), r * 4.5, col, r * 1.6, r * 1.1);
+          ar.traverse((c) => { const mm = (c as THREE.Mesh).material as THREE.Material | undefined; if (mm) { mm.depthTest = false; mm.transparent = true; } c.renderOrder = 9; (c as THREE.Mesh).raycast = () => {}; });
+          m.add(ar); refGroup.add(m);
+        }
+      }
+      // origen (planos y ejes) de las piezas elegidas: referencias locales del componente
+      for (const id of s.asmOrigins) {
+        const o = s.asm.occurrences.find((x) => x.id === id); const X = o && occX(id); if (!o || !X) continue;
+        const qq = new THREE.Quaternion(...X.quat), P0 = new THREE.Vector3(...X.pos), sz = size * 0.5;
+        const defs: [string, FaceRef, string][] = [
+          ['XY', { occ: id, point: [0, 0, 0], normal: [0, 0, 1], kind: 'plane', xdir: [1, 0, 0], center: [0, 0, 0] }, '#1c7ed6'],
+          ['XZ', { occ: id, point: [0, 0, 0], normal: [0, 1, 0], kind: 'plane', xdir: [1, 0, 0], center: [0, 0, 0] }, '#2b8a3e'],
+          ['YZ', { occ: id, point: [0, 0, 0], normal: [1, 0, 0], kind: 'plane', xdir: [0, 1, 0], center: [0, 0, 0] }, '#d9480f'],
+          ['X', { occ: id, point: [0, 0, 0], normal: [1, 0, 0], kind: 'axis', radius: 0, center: [0, 0, 0] }, '#d9480f'],
+          ['Y', { occ: id, point: [0, 0, 0], normal: [0, 1, 0], kind: 'axis', radius: 0, center: [0, 0, 0] }, '#2b8a3e'],
+          ['Z', { occ: id, point: [0, 0, 0], normal: [0, 0, 1], kind: 'axis', radius: 0, center: [0, 0, 0] }, '#1c7ed6'],
+        ];
+        for (const [k, ref, color] of defs) {
+          const n = new THREE.Vector3(...ref.normal).applyQuaternion(qq);
+          if (ref.kind === 'plane') {
+            const x = new THREE.Vector3(...ref.xdir!).applyQuaternion(qq), y = n.clone().cross(x);
+            const m = new THREE.Mesh(new THREE.PlaneGeometry(sz, sz), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false }));
+            m.matrixAutoUpdate = false; m.matrix.makeBasis(x, y, n).setPosition(P0);
+            m.userData = { kind: 'ref', ref, label: `${o.name} · plano ${k}`, base: 0.1 }; m.renderOrder = 3;
+            m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55 })));
+            refGroup.add(m);
+          } else {
+            const m = new THREE.Mesh(new THREE.CylinderGeometry(sz * 0.008, sz * 0.008, sz * 1.15, 8), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, depthWrite: false }));
+            m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n); m.position.copy(P0);
+            m.userData = { kind: 'ref', ref, label: `${o.name} · eje ${k}`, base: 0.6 }; m.renderOrder = 4; refGroup.add(m);
+          }
+        }
+      }
       refGroup.updateMatrixWorld(true);
       V.request();
     };
@@ -148,6 +196,9 @@ export default function AsmViewport() {
     let ghost: { grp: THREE.Group; part: string; box: THREE.Box3 } | null = null;
     let lastCursor: { x: number; y: number } | null = null;
     let ghostXf: Xform | null = null;
+    let ghostSnap: { a: EPoint; occ: string; ep: string; label: string } | null = null;
+    const snapMark = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 32), new THREE.MeshBasicMaterial({ color: 0xe03131, depthTest: false, side: THREE.DoubleSide }));
+    snapMark.renderOrder = 30; snapMark.visible = false; snapMark.onBeforeRender = () => snapMark.quaternion.copy(camera.quaternion); scene.add(snapMark);
     /** Posición de la copia pendiente bajo el cursor: sobre la cara apuntada (apoyada en ella) o en el plano de la vista por el centro del modelo. */
     const moveGhost = (c: { x: number; y: number }) => {
       const s = useStore.getState(); const p = s.placing; if (!ghost || !p) return;
@@ -174,7 +225,29 @@ export default function AsmViewport() {
         const pd = s.docData(p.part) as PartDoc | null;
         if (pd?.format === 'inv3d.part') cL.set(...insertPoint(pd));
       }
-      const pos = target.clone().sub(cL.clone().applyQuaternion(q));
+      let pos = target.clone().sub(cL.clone().applyQuaternion(q));
+      // imán: un ePoint de la pieza nueva se pega al ePoint de un componente colocado cercano al cursor
+      ghostSnap = null; snapMark.visible = false;
+      const pd0 = s.docData(p.part) as PartDoc | null;
+      const mine = pd0?.format === 'inv3d.part' ? partEPoints(pd0).filter((e) => !e.inactive && e.kind !== 'composite') : [];
+      if (mine.length) {
+        const m = V.local(ev); let best: { u: any; d: number } | null = null;
+        for (const c of refGroup.children) { const u = c.userData.ep; if (!u) continue; const sp = V.project(u.pW); const d = Math.hypot(sp.x - m.x, sp.y - m.y); if (d < 30 && (!best || d < best.d)) best = { u, d }; }
+        if (best) {
+          const u = best.u;
+          const a = mine.find((e) => e.name === u.name && e.kind === u.kind) ?? mine.find((e) => e.kind === u.kind && !e.isDefault) ?? mine[0];
+          const aDir = new THREE.Vector3(...a.dir).applyQuaternion(q), want = new THREE.Vector3(...u.dW).negate();
+          const qa = new THREE.Quaternion().setFromUnitVectors(aDir.normalize(), want.normalize()).multiply(q);
+          pos = new THREE.Vector3(...u.pW).sub(new THREE.Vector3(...a.point).applyQuaternion(qa));
+          ghostSnap = { a, occ: u.occ, ep: u.id, label: `${a.name} → ${u.name}` };
+          snapMark.position.set(...(u.pW as V3)); snapMark.scale.setScalar(V.worldPerPx() * 9); snapMark.visible = true;
+          ghostXf = { pos: vArr(pos, 3), quat: [qa.x, qa.y, qa.z, qa.w] };
+          ghost.grp.matrix.compose(pos, qa, new THREE.Vector3(1, 1, 1)); ghost.grp.matrixWorldNeedsUpdate = true;
+          setHint(`Imán: ePoint ${ghostSnap.label} · clic para colocar y conectar`);
+          V.request();
+          return;
+        }
+      }
       ghostXf = { pos: vArr(pos, 3), quat: p.quat };
       ghost.grp.matrix.compose(pos, q, new THREE.Vector3(1, 1, 1)); ghost.grp.matrixWorldNeedsUpdate = true;
       V.request();
@@ -411,6 +484,8 @@ export default function AsmViewport() {
       const top = topOf(s, hit.object.userData.id);
       const o = s.asm.occurrences.find((x) => x.id === top);
       if (!o || o.grounded || o.mirrorOf || o.patternOf) return;
+      // solo se arrastra el componente ya seleccionado: así el arrastre sobre una pieza libre sigue girando la vista
+      if (s.selItem !== top) return;
       V.controls.enabled = false;
       const dir = camera.getWorldDirection(new THREE.Vector3());
       const grps = pickables.filter((m) => m.userData.kind === 'occ' && topOf(s, m.userData.id) === top).map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() }));
@@ -455,7 +530,7 @@ export default function AsmViewport() {
       const s = useStore.getState();
       if (s.tool === 'place') {
         lastCursor = { x: ev.clientX, y: ev.clientY }; moveGhost(lastCursor);
-        if (ghost && ghostXf) asmActions.dropPlace(ghostXf);
+        if (ghost && ghostXf) { asmActions.dropPlace(ghostXf, ghostSnap ? { a: ghostSnap.a.id, occ: ghostSnap.occ, ep: ghostSnap.ep } : undefined); ghostSnap = null; snapMark.visible = false; }
         else s.notify('Calculando la pieza… suéltala cuando aparezca bajo el cursor');
         return;
       }
@@ -522,6 +597,23 @@ export default function AsmViewport() {
         }
         return;
       }
+      // ePoints visibles: clic en uno y clic en otro de otro componente → se conectan (como Inventor)
+      if (!s.tool && !s.dialog) {
+        const r = refAt(ev);
+        const ep = r?.object.userData.ep as { occ: string; id: string; name: string } | undefined;
+        if (ep) {
+          const c = s.epConnect;
+          if (!c || c.occ === ep.occ) { useStore.setState({ epConnect: { occ: ep.occ, ep: ep.id, label: r!.object.userData.label }, selItem: ep.occ }); return; }
+          const oa = s.asm.occurrences.find((o) => o.id === c.occ), ob = s.asm.occurrences.find((o) => o.id === ep.occ);
+          const ea = oa && partEPoints(s.docData(oa.part) as PartDoc).find((x) => x.id === c.ep), eb = ob && partEPoints(s.docData(ob.part) as PartDoc).find((x) => x.id === ep.id);
+          useStore.setState({ epConnect: null });
+          if (!ea || !eb) return;
+          s.commitAsm((a) => { a.joints.push(epJoint(a, c.occ, ea, ep.occ, eb, (p0) => p0 + Math.random().toString(36).slice(2, 8))); });
+          s.notify(`ePoints conectados: ${oa!.name} · ${ea.name} ↔ ${ob!.name} · ${eb.name}`);
+          return;
+        }
+        if (s.epConnect) useStore.setState({ epConnect: null });
+      }
       // Selección normal
       const hit = hitAt(ev);
       const id = hit ? (hit.object.userData.id as string) : null;
@@ -587,7 +679,9 @@ export default function AsmViewport() {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }
-      if (s.dialog?.kind !== p.dialog?.kind || s.asm.workPlanes !== p.asm.workPlanes || s.asm.workAxes !== p.asm.workAxes || s.asm.workPoints !== p.asm.workPoints) buildRefs(s);
+      if (s.dialog?.kind !== p.dialog?.kind || s.asm.workPlanes !== p.asm.workPlanes || s.asm.workAxes !== p.asm.workAxes || s.asm.workPoints !== p.asm.workPoints
+        || s.asmResult !== p.asmResult || s.asmOrigins !== p.asmOrigins || s.hud.epoints !== p.hud.epoints || s.epConnect !== p.epConnect || s.docs !== p.docs || s.placing?.occ !== p.placing?.occ) buildRefs(s);
+      if (s.epConnect !== p.epConnect) setHint(s.epConnect ? `${s.epConnect.label}: elige el ePoint de otro componente para conectarlos (Esc cancela)` : '');
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); }

@@ -31,6 +31,17 @@ async function toBytes(data: BlobPart): Promise<Uint8Array> {
   return new Uint8Array(await new Blob([data]).arrayBuffer());
 }
 
+/** Fichero de cada documento (API de acceso a ficheros): tras el primer guardado o al abrirlo, se guarda en él sin preguntar */
+export const fileHandles = new Map<string, any>();
+async function writeHandle(h: any, data: BlobPart, mime: string): Promise<boolean> {
+  try {
+    if (h.queryPermission && (await h.queryPermission({ mode: 'readwrite' })) !== 'granted' && (await h.requestPermission({ mode: 'readwrite' })) !== 'granted') return false;
+    const ws = await h.createWritable(); await ws.write(new Blob([data], { type: mime })); await ws.close();
+    return true;
+  } catch { return false; }
+}
+let lastHandle: any = null;
+
 /** Guardar: capacidad del anfitrión, diálogo nativo del navegador o descarga. */
 async function saveAs(data: BlobPart, name: string, desc: string, ext: string, mime: string) {
   const host = await hostDownloads();
@@ -50,6 +61,7 @@ async function saveAs(data: BlobPart, name: string, desc: string, ext: string, m
     try {
       const h = await w.showSaveFilePicker({ suggestedName: name, types: [{ description: desc, accept: { [mime]: [ext] } }] });
       const ws = await h.createWritable(); await ws.write(new Blob([data], { type: mime })); await ws.close();
+      lastHandle = h;
       return h.name as string;
     } catch (e) {
       if ((e as Error).name === 'AbortError') return null;
@@ -64,12 +76,12 @@ const baseName = (n: string) => n.replace(/\.[^.]+$/, '');
 /** Documentos de pieza referenciados (para embeber en .i3a / .i3d). */
 function embedFor(ids: string[]) {
   const s = useStore.getState();
-  const out: Record<string, { fileName: string; kind: string; data: unknown }> = {};
+  const out: Record<string, { fileName: string; kind: string; data: unknown; path?: string }> = {};
   const add = (id: string) => {
     if (out[id]) return;
     const e = s.docs.find((d) => d.id === id); const data = s.docData(id);
     if (!e || !data) return;
-    out[id] = { fileName: e.fileName, kind: e.kind, data };
+    out[id] = { fileName: e.fileName, kind: e.kind, data, ...(e.path ? { path: e.path } : {}) };
     if (e.kind === 'assembly') (data as AsmDoc).occurrences.forEach((o) => add(o.part));
   };
   ids.forEach(add);
@@ -89,38 +101,89 @@ export function serializeDoc(id?: string): string {
 }
 const DOC_EXT = { part: ['.i3p', 'Pieza INV3D'], assembly: ['.i3a', 'Ensamblaje INV3D'], drawing: ['.i3d', 'Plano INV3D'] } as const;
 
-/** Guardar: en la carpeta de trabajo si está conectada (sin diálogo); si no, diálogo del navegador o descarga. */
+/** Guardar el documento activo. Tras el primer guardado se escribe en el mismo sitio sin preguntar
+ *  (carpeta de trabajo o fichero elegido); «Guardar como» pregunta siempre. Al guardar una pieza se
+ *  actualizan los ensamblajes y planos abiertos que la usan. */
 export async function saveDoc(as = false) {
   const s = useStore.getState();
-  const [ext, desc] = DOC_EXT[s.kind];
-  const content = serializeDoc();
-  const cur = s.docs.find((d) => d.id === s.active);
-  const fn = s.fileName.endsWith(ext) ? s.fileName : `${baseName(s.fileName)}${ext}`;
+  const ok = await saveDocById(s.active, { as });
+  if (ok && s.kind === 'part') await propagatePart(s.active);
+}
+
+/** Guarda un documento abierto. silent: solo si ya tiene sitio (ruta en la carpeta o fichero), sin diálogos. */
+export async function saveDocById(id: string, o: { as?: boolean; silent?: boolean } = {}): Promise<boolean> {
+  const s = useStore.getState();
+  const cur = s.docs.find((d) => d.id === id); if (!cur) return false;
+  const kind = cur.kind;
+  const [ext, desc] = DOC_EXT[kind];
+  const content = serializeDoc(id);
+  const name0 = id === s.active ? s.fileName : cur.fileName;
+  const fn = name0.endsWith(ext) ? name0 : `${baseName(name0)}${ext}`;
   const { markSaved, addRecent } = await import('../ui/session');
-  if (s.folder.state === 'granted') {
-    let path = cur?.path ?? fn;
-    if (as || !cur?.path) {
+  const done = (name: string, path?: string) => {
+    if (path) markSaved(id, path);
+    else useStore.setState({ ...(id === useStore.getState().active ? { fileName: name, dirty: false } : {}), docs: useStore.getState().docs.map((d) => (d.id === id ? { ...d, fileName: name, dirty: false } : d)) });
+    if (!o.silent) addRecent(path?.split('/').pop() ?? name, kind, path, content);
+  };
+  if (s.folder.state === 'granted' && (cur.path || !fileHandles.has(id) || o.as)) {
+    let path = cur.path ?? fn;
+    if (o.as || !cur.path) {
+      if (o.silent) return false;
       const p = prompt(`Guardar en la carpeta «${s.folder.name}» como (puedes poner subcarpetas, p. ej. Piezas/${fn}):`, path);
-      if (!p) return;
+      if (!p) return false;
       path = p.endsWith(ext) ? p : `${p}${ext}`;
       const { existsInFolder } = await import('./persist');
-      if (path !== cur?.path && await existsInFolder(path) && !(await s.ask(`${path} ya existe. ¿Sustituirlo?`, 'Sustituir'))) return;
+      if (path !== cur.path && await existsInFolder(path) && !(await s.ask(`${path} ya existe. ¿Sustituirlo?`, 'Sustituir'))) return false;
     }
     try {
       const { writeInFolder } = await import('./persist');
       await writeInFolder(path, content, 'application/json');
-      markSaved(s.active, path);
-      addRecent(path.split('/').pop()!, s.kind, path, content);
-      s.notify(`Guardado ${path} en ${s.folder.name}`);
-      return;
-    } catch (e) { s.notify(`No se pudo escribir en la carpeta (${(e as Error).message}); se usa el diálogo`, 'error'); }
+      done(path.split('/').pop()!, path);
+      if (!o.silent) s.notify(`Guardado ${path} en ${s.folder.name}`);
+      return true;
+    } catch (e) { if (o.silent) return false; s.notify(`No se pudo escribir en la carpeta (${(e as Error).message}); se usa el diálogo`, 'error'); }
   }
+  // mismo fichero que la última vez: sin diálogo
+  const h = fileHandles.get(id);
+  if (h && !o.as) {
+    if (await writeHandle(h, content, 'application/json')) { done(h.name ?? fn); if (!o.silent) s.notify(`Guardado ${h.name ?? fn}`); return true; }
+    if (o.silent) return false;
+  }
+  if (o.silent) return false;
+  lastHandle = null;
   const name = await saveAs(content, fn, desc, ext, 'application/json');
-  if (name) {
-    useStore.setState({ fileName: name, dirty: false, docs: useStore.getState().docs.map((d) => (d.id === s.active ? { ...d, fileName: name, dirty: false } : d)) });
-    addRecent(name, s.kind, undefined, content);
-    s.notify(`Guardado ${name}`);
+  if (!name) return false;
+  if (lastHandle) fileHandles.set(id, lastHandle);
+  done(name);
+  s.notify(`Guardado ${name}`);
+  return true;
+}
+
+/** La pieza guardada se actualiza en los ensamblajes y planos abiertos que la usan (se guardan si ya tienen sitio). */
+export async function propagatePart(partId: string) {
+  const s = useStore.getState();
+  const uses = (id: string, depth = 0): boolean => {
+    const e = s.docs.find((d) => d.id === id), data = s.docData(id) as any; if (!e || !data || depth > 6) return false;
+    if (e.kind === 'assembly') return (data.occurrences ?? []).some((o: any) => o.part === partId || uses(o.part, depth + 1));
+    if (e.kind === 'drawing') return (data.views ?? []).some((v: any) => v.source === partId || uses(v.source, depth + 1));
+    return false;
+  };
+  const users = s.docs.filter((d) => d.id !== partId && (d.kind === 'assembly' || d.kind === 'drawing') && uses(d.id));
+  const saved: string[] = [];
+  for (const d of users) { if (await saveDocById(d.id, { silent: true })) saved.push(d.fileName); else useStore.setState({ docs: useStore.getState().docs.map((x) => (x.id === d.id ? { ...x, dirty: true } : x)) }); }
+  if (saved.length) s.notify(`Pieza actualizada también en ${saved.join(', ')}`);
+  else if (users.length) s.notify(`La pieza se actualizará en ${users.map((d) => d.fileName).join(', ')} al guardarlos`);
+}
+
+/** Autoguardado: documentos con cambios que ya tienen sitio (carpeta o fichero) */
+export async function autosaveAll(): Promise<number> {
+  const s = useStore.getState(); let n = 0;
+  for (const d of s.docs) {
+    const dirty = d.id === s.active ? s.dirty : d.dirty;
+    if (!dirty || !(d.path || fileHandles.has(d.id))) continue;
+    if (await saveDocById(d.id, { silent: true })) n++;
   }
+  return n;
 }
 
 export async function saveText(data: BlobPart, name: string, desc: string, ext: string, mime: string) {
@@ -209,29 +272,46 @@ export function pickFile(accept: string): Promise<File | null> {
 
 export const OPEN_ACCEPT = '.i3p,.i3a,.i3d,.json,.zip,.step,.stp,.ipj,.ipt,.iam,.idw,.ipn,.dwg,.dxf';
 
-export async function openFile(file?: File | null) {
+export async function openFile(file?: File | null, handle?: any) {
   const s = useStore.getState();
-  file ??= await pickFile(OPEN_ACCEPT);
+  if (!file) {
+    // con la API de ficheros se recuerda el fichero abierto para guardar en él sin preguntar
+    const w = window as unknown as { showOpenFilePicker?: (o: object) => Promise<any[]> };
+    if (w.showOpenFilePicker) {
+      try {
+        const [h] = await w.showOpenFilePicker({ types: [{ description: 'INV3D y CAD', accept: { 'application/octet-stream': OPEN_ACCEPT.split(',') } }], excludeAcceptAllOption: false });
+        handle = h; file = await h.getFile();
+      } catch (e) { if ((e as Error).name === 'AbortError') return; file = await pickFile(OPEN_ACCEPT); }
+    } else file = await pickFile(OPEN_ACCEPT);
+  }
   if (!file) return;
+  const rememberHandle = () => { if (handle && /\.(i3p|i3a|i3d|json)$/i.test(file!.name)) fileHandles.set(useStore.getState().active, handle); };
   try {
     if (/\.zip$/i.test(file.name)) file = await unzipFirst(file);
     const ext = file.name.split('.').pop()!.toLowerCase();
     if (ext === 'i3p' || ext === 'json') {
       const doc = validateDoc(JSON.parse(await file.text()));
       s.load(doc, file.name);
+      rememberHandle();
       s.notify(`Abierto ${file.name}`);
       remember(file);
     } else if (ext === 'i3a' || ext === 'i3d') {
       const raw = JSON.parse(await file.text());
       const embedded = (raw.embedded ?? {}) as Record<string, { fileName: string; kind: string; data: unknown }>;
       delete raw.embedded;
+      // con la carpeta de trabajo conectada, las piezas se toman de su fichero (la versión guardada más reciente)
+      const { readFromFolder } = await import('./persist');
       for (const [id, e] of Object.entries(embedded)) {
         if (s.docs.some((d) => d.id === id)) continue;
+        if (e.kind === 'part' && useStore.getState().folder.state === 'granted') {
+          try { const f = await readFromFolder((e as any).path ?? e.fileName); const pd = validateDoc(JSON.parse(await f.text())); s.addDocument('part', { ...pd } as never, e.fileName, false, id); const ne = useStore.getState().docs.find((d) => d.id === id); if (ne && (e as any).path) ne.path = (e as any).path; continue; } catch { /* no está en la carpeta */ }
+        }
         if (e.kind === 'part') s.addDocument('part', validateDoc(e.data), e.fileName, false, id);
         else if (e.kind === 'assembly') s.addDocument('assembly', validateAsm(e.data), e.fileName, false, id);
       }
       if (ext === 'i3a') s.addDocument('assembly', validateAsm(raw), file.name);
       else s.addDocument('drawing', validateDrawing(raw) as DrawingDoc, file.name);
+      rememberHandle();
       s.notify(`Abierto ${file.name}`);
       remember(file);
     } else if (ext === 'step' || ext === 'stp') {

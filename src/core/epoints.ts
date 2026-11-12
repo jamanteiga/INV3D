@@ -22,6 +22,8 @@ export interface EPoint {
   isDefault?: boolean;
   /** Desactivado por el diseñador: no se conecta ni se ofrece al colocar */
   inactive?: boolean;
+  /** Oculto en el modelo (solo visualización) */
+  hidden?: boolean;
 }
 
 /** ePoints de la pieza, con el de inserción por defecto en primer lugar */
@@ -36,6 +38,8 @@ export const activeEPoints = (doc: PartDoc | null | undefined) => partEPoints(do
 /** Punto por el que se coge la pieza: su ePoint de inserción (si está desactivado, el origen) */
 export const insertPoint = (doc: PartDoc | null | undefined): V3 => { const d = partEPoints(doc)[0]; return d && !d.inactive ? d.point : [0, 0, 0]; };
 
+/** Referencia de unión de un ePoint de un componente */
+export const epRef = (e: EPoint, occ: string): FaceRef => ref(e, occ);
 const ref = (e: EPoint, occ: string): FaceRef => (e.kind === 'insert'
   ? { occ, point: e.point, normal: e.dir, kind: 'axis', radius: e.radius ?? 5, center: e.point }
   : { occ, point: e.point, normal: e.dir, kind: 'plane', center: e.point });
@@ -83,4 +87,13 @@ export function autoEPointJoints(asm: AsmDoc, getPart: (id: string) => PartDoc |
     }
   }
   return out;
+}
+
+/** Unión entre dos ePoints de componentes distintos (mueve el no fijo) */
+export function epJoint(asm: AsmDoc, occA: string, a: EPoint, occB: string, b: EPoint, uid: (p: string) => string): Joint {
+  let [A, ea, B, eb] = [occA, a, occB, b];
+  const fixed = (id: string) => !!asm.occurrences.find((o) => o.id === id)?.grounded;
+  if (fixed(A) && !fixed(B)) [A, ea, B, eb] = [B, b, A, a];
+  const insert = ea.kind === 'insert' && eb.kind === 'insert';
+  return { id: uid('j'), name: `ePoint ${ea.name}–${eb.name}`, type: insert ? 'insert' : 'mate', a: ref(ea, A), b: ref(eb, B), offset: ea.offset || eb.offset || '0', angle: '0', ep: { a: ea.id, b: eb.id, name: ea.name } };
 }

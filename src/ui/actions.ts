@@ -1,5 +1,5 @@
 import { normalizeAsm } from '../core/subasm';
-import { autoEPointJoints } from '../core/epoints';
+import { autoEPointJoints, partEPoints, epJoint } from '../core/epoints';
 const partOf = (s: ReturnType<typeof useStore.getState>, id: string): PartDoc | null => { const d = s.docData(id) as PartDoc | null; return d && d.format === 'inv3d.part' ? d : null; };
 import { docGetter } from '../core/store';
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
@@ -160,7 +160,7 @@ export const asmActions = {
     s.notify(first ? `${base}: primer componente ${firstAt?.label ?? 'fijo en el origen'}. Clic para colocar más copias · Esc para terminar` : `${base}: clic para colocar · X/Y/Z gira 90° · Esc o clic derecho para terminar`);
   },
   /** Suelta la copia pendiente en la posición indicada y prepara la siguiente. */
-  dropPlace: (xf: Xform) => {
+  dropPlace: (xf: Xform, snap?: { a: string; occ: string; ep: string }) => {
     const s = S(); const p = s.placing; if (!p) return;
     const e = s.docs.find((d) => d.id === p.part);
     const base = (e?.fileName ?? 'Pieza').replace(/\.[^.]+$/, '');
@@ -168,9 +168,15 @@ export const asmActions = {
     let nj = 0;
     s.commitAsm((a) => {
       const o = a.occurrences.find((x) => x.id === p.occ); if (o) o.xf = xf;
+      // imán: unión entre el ePoint de la pieza nueva y el del componente sobre el que se soltó
+      if (snap && o) {
+        const pa = partEPoints(partOf(S(), p.part)).find((e) => e.id === snap.a);
+        const ob = a.occurrences.find((x) => x.id === snap.occ), pb = ob && partEPoints(partOf(S(), ob.part)).find((e) => e.id === snap.ep);
+        if (pa && pb) { a.joints.push(epJoint(a, o.id, pa, snap.occ, pb, uid)); nj++; }
+      }
       for (const x of p.extras ?? []) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { pos: [...xf.pos], quat: [...xf.quat] } });
       // ePoints del mismo nombre: se conectan solos al soltar la pieza
-      const js = autoEPointJoints(a, (id) => partOf(S(), id), [p.occ], uid); a.joints.push(...js); nj = js.length;
+      const js = autoEPointJoints(a, (id) => partOf(S(), id), [p.occ], uid); a.joints.push(...js); nj += js.length;
       let k = 1; while (a.occurrences.some((x) => x.name === `${base}:${k}`)) k++;
       a.occurrences.push({ id: occ, name: `${base}:${k}`, part: p.part, xf: { pos: [...xf.pos], quat: [...p.quat] } });
     });

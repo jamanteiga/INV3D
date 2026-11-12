@@ -1,14 +1,14 @@
-import { partEPoints, EP_KIND_NAMES } from '../core/epoints';
+import { partEPoints, EP_KIND_NAMES, epRef, epJoint, type EPoint } from '../core/epoints';
 import { drwActions } from './actions';
 import { allPages } from '../core/drawing';
 import { useState, Fragment, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
-import { planeLabel, ENTITY_NAMES, uid, type Feature, type StdPlane, type PartDoc } from '../core/doc';
+import { planeLabel, ENTITY_NAMES, uid, type Feature, type StdPlane, type PartDoc, type V3 } from '../core/doc';
 import { profileLabel } from '../core/catalog';
 import { scaleLabel } from '../core/drawing';
 import { asmActions } from './actions';
-import { JOINT_NAMES, ORIGIN_REFS, ASM_REF } from '../core/asm';
+import { JOINT_NAMES, ORIGIN_REFS, ASM_REF, xfPoint, type FaceRef } from '../core/asm';
 
 const ICON: Record<Feature['type'], string> = {
   sketch: 'sketch', extrude: 'extrude', revolve: 'revolve', fillet: 'fillet', chamfer: 'chamfer', import: 'import',
@@ -134,6 +134,7 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
       onMenu={(x, y) => setMenu({ x, y, items: [{ label: 'Nuevo ePoint…', run: () => s.open({ kind: 'epoint' }) }] })}>
       {partEPoints(s.doc).map((e) => {
         const stored = (s.doc.epoints ?? []).some((x) => x.id === e.id);
+        const upd = (fn: (q: typeof e) => typeof e) => s.commit((doc) => { const cur = doc.epoints ?? []; doc.epoints = stored ? cur.map((x) => (x.id === e.id ? fn(x) : x)) : [fn({ ...e }), ...cur]; });
         // el de inserción por defecto implícito (origen) se guarda al desactivarlo
         const setInactive = (v: boolean) => s.commit((doc) => {
           const cur = doc.epoints ?? [];
@@ -145,6 +146,10 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
               { label: e.inactive ? 'Activar' : 'Desactivar', run: () => setInactive(!e.inactive) },
               { label: 'Editar…', run: () => s.open({ kind: 'epoint' }) },
               { label: 'Nuevo ePoint…', run: () => s.open({ kind: 'epoint' }) },
+              { label: e.hidden ? 'Mostrar en el modelo' : 'Ocultar en el modelo', run: () => upd((q) => ({ ...q, hidden: q.hidden ? undefined : true })) },
+              { label: 'Invertir dirección', run: () => upd((q) => ({ ...q, dir: q.dir.map((v) => -v) as V3 })) },
+              ...(!e.isDefault ? [{ label: 'Renombrar…', run: () => { const n = prompt('Nuevo nombre del ePoint', e.name)?.trim(); if (n) upd((q) => ({ ...q, name: n })); } }] : []),
+              { label: 'Copiar coordenadas', run: () => { navigator.clipboard?.writeText(e.point.join('; ')).catch(() => {}); s.notify(`Coordenadas: ${e.point.join('; ')} · dirección ${e.dir.join('; ')}`); } },
               ...(!e.isDefault ? [
                 { label: 'Duplicar', run: () => s.commit((doc) => { const cur = doc.epoints ?? []; let k = 2; while (cur.some((x) => x.name === `${e.name}_${k}`)) k++; doc.epoints = [...cur, { ...structuredClone(e), id: uid('ep'), name: `${e.name}_${k}` }]; }) },
                 { label: 'Usar como ePoint de inserción', run: () => s.commit((doc) => { doc.epoints = (doc.epoints ?? []).map((x) => ({ ...x, isDefault: x.id === e.id ? true : undefined, inactive: x.id === e.id ? undefined : x.inactive })); }) },
@@ -165,6 +170,17 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
 
 function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
   const s = useStore();
+  /** Con Restringir abierto, entrega la referencia elegida en el árbol como si se hubiera elegido en el modelo */
+  const pickToJoint = (ref: FaceRef, label: string, occ: string): boolean => {
+    const st = useStore.getState(), dlg = st.dialog;
+    if (!dlg || dlg.kind !== 'joint' || !('draft' in dlg)) return false;
+    const X = st.asmResult?.xf[occ] ?? st.asm.occurrences.find((q) => q.id === occ)?.xf;
+    const pW = X ? xfPoint(X, ref.center ?? ref.point) : ref.point;
+    const d = dlg.draft as any, step = (dlg as any).step ?? 0;
+    if (step === 0) useStore.setState({ dialog: { ...dlg, draft: { ...d, a: ref, aW: pW, aL: label }, step: 1 } as never });
+    else useStore.setState({ dialog: { ...dlg, draft: { ...d, b: ref, bW: pW, bL: label }, step: d.type === 'sym' ? 2 : 0 } as never });
+    return true;
+  };
   const errs = s.asmResult?.errors ?? {};
   const sel = (id: string) => s.set({ selItem: id });
   const rowCls = (id: string, extra = '') => `tree-row ${s.selItem === id ? 'sel' : ''} ${extra}`;
@@ -256,6 +272,8 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
             { label: o.grounded ? 'Liberar' : 'Fijar', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.grounded = !t.grounded; }) },
             { label: o.hidden ? 'Mostrar' : 'Ocultar', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.hidden = !t.hidden; }) },
             { label: o.suppressed ? 'Activar' : 'Suprimir', run: () => s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === o.id)!; t.suppressed = !t.suppressed; }) },
+            ...(e?.kind === 'part' ? [{ label: s.asmOrigins.includes(o.id) ? 'Ocultar origen de la pieza' : 'Mostrar origen de la pieza (planos y ejes)', run: () => useStore.setState({ asmOrigins: s.asmOrigins.includes(o.id) ? s.asmOrigins.filter((x) => x !== o.id) : [...s.asmOrigins, o.id] }) }] : []),
+            { label: s.hud.epoints === false ? 'Mostrar ePoints' : 'Ocultar ePoints', run: () => s.set({ hud: { ...s.hud, epoints: s.hud.epoints === false } }) },
             { label: 'Sustituir…', run: () => s.open({ kind: 'replace' }) },
             { label: 'Simetría respecto a YZ', run: () => asmActions.mirrorComponent(o.id, 'YZ') },
             { label: 'Simetría respecto a XZ', run: () => asmActions.mirrorComponent(o.id, 'XZ') },
@@ -281,13 +299,49 @@ function AsmTree({ setMenu }: { setMenu: (m: Menu) => void }) {
                 {st && st.ok === false && <span className="tree-err"><Icon name="error" size={13} /></span>}
               </div>
             ))}
-            {partEPoints(pd).filter((x) => !x.isDefault).map((x) => (
-              <div key={x.id} className={`tree-row sub ${x.inactive ? 'supp' : ''}`} style={{ paddingLeft: 34 }} title={`ePoint de ${EP_KIND_NAMES[x.kind].toLowerCase()}${x.inactive ? ' · desactivado' : ''} · clic derecho: activar/desactivar`}
-                onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); setMenu({ x: ev.clientX, y: ev.clientY, items: [
-                  { label: x.inactive ? 'Activar' : 'Desactivar', run: () => { const next = structuredClone(pd); next.epoints = (next.epoints ?? []).map((q) => (q.id === x.id ? { ...q, inactive: x.inactive ? undefined : true } : q)); s.editPartDoc(o.part, next); } },
-                ] }); }}>
-                <span className={`ep-dot ep-${x.inactive ? 'off' : x.kind}`} /><span className="tree-name">{x.name}</span></div>
+            <div className="tree-row sub" style={{ paddingLeft: 34 }} title="Planos y ejes de origen de la pieza: clic para mostrarlos o, con Restringir abierto, para elegirlos"
+              onClick={() => useStore.setState({ asmOrigins: s.asmOrigins.includes(o.id) ? s.asmOrigins.filter((x) => x !== o.id) : [...s.asmOrigins, o.id] })}>
+              <Icon name="origin" size={15} /><span className="tree-name">Origen</span><span className="tree-count">{s.asmOrigins.includes(o.id) ? 'visible' : ''}</span></div>
+            {([['XY', 'plane', [0, 0, 1], [1, 0, 0]], ['XZ', 'plane', [0, 1, 0], [1, 0, 0]], ['YZ', 'plane', [1, 0, 0], [0, 1, 0]], ['X', 'axis', [1, 0, 0]], ['Y', 'axis', [0, 1, 0]], ['Z', 'axis', [0, 0, 1]]] as [string, 'plane' | 'axis', V3, V3?][]).map(([k, kind, n, xd]) => (
+              <div key={k} className="tree-row sub" style={{ paddingLeft: 48 }} title={`${kind === 'plane' ? 'Plano' : 'Eje'} ${k} de la pieza · clic: elegir para restringir (con Restringir abierto) o mostrar`}
+                onClick={() => {
+                  const ref: FaceRef = { occ: o.id, point: [0, 0, 0], normal: n, kind, ...(kind === 'plane' ? { xdir: xd } : { radius: 0 }), center: [0, 0, 0] };
+                  if (!pickToJoint(ref, `${o.name} · ${kind === 'plane' ? 'plano' : 'eje'} ${k}`, o.id) && !s.asmOrigins.includes(o.id)) useStore.setState({ asmOrigins: [...s.asmOrigins, o.id] });
+                }}>
+                <Icon name={kind === 'plane' ? 'workplane' : 'axis'} size={14} /><span className="tree-name">{kind === 'plane' ? `Plano ${k}` : `Eje ${k}`}</span></div>
             ))}
+            {partEPoints(pd).filter((x) => x.kind !== 'composite').map((x) => {
+              const setEp = (fn: (q: EPoint) => EPoint | null) => { const next = structuredClone(pd); const cur = next.epoints ?? []; const has = cur.some((q) => q.id === x.id); const base = has ? cur : [x, ...cur]; next.epoints = base.map((q) => (q.id === x.id ? fn(q) : q)).filter(Boolean) as EPoint[]; s.editPartDoc(o.part, next); };
+              const label = `${o.name} · ePoint ${x.name}`;
+              const clickEp = () => {
+                if (pickToJoint(epRef(x, o.id), label, o.id)) return;
+                const c = useStore.getState().epConnect;
+                if (!c || c.occ === o.id) { useStore.setState({ epConnect: { occ: o.id, ep: x.id, label } }); return; }
+                const oa = s.asm.occurrences.find((q) => q.id === c.occ); const ea = oa && partEPoints(s.docData(oa.part) as PartDoc).find((q) => q.id === c.ep);
+                useStore.setState({ epConnect: null }); if (!ea) return;
+                s.commitAsm((a) => { a.joints.push(epJoint(a, c.occ, ea, o.id, x, uid)); });
+                s.notify(`ePoints conectados: ${oa!.name} · ${ea.name} ↔ ${o.name} · ${x.name}`);
+              };
+              return (
+                <div key={x.id} className={`tree-row sub ${x.inactive ? 'supp' : ''} ${s.epConnect?.occ === o.id && s.epConnect.ep === x.id ? 'sel' : ''}`} style={{ paddingLeft: 34 }} onClick={clickEp}
+                  title={`${x.isDefault ? 'ePoint de inserción' : `ePoint de ${EP_KIND_NAMES[x.kind].toLowerCase()}`}${x.inactive ? ' · desactivado' : ''} · clic: conectar con otro ePoint (o elegir en Restringir) · clic derecho: más opciones`}
+                  onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); setMenu({ x: ev.clientX, y: ev.clientY, items: [
+                    { label: 'Conectar con el ePoint de otro componente…', run: () => useStore.setState({ epConnect: { occ: o.id, ep: x.id, label } }) },
+                    { label: 'Restringir (unión) desde este ePoint…', run: () => { asmActions.openJoint(); pickToJoint(epRef(x, o.id), label, o.id); } },
+                    { label: 'Conectar automáticamente (mismo nombre)', run: () => asmActions.connectEPoints() },
+                    { label: '-', run: () => {} },
+                    { label: x.inactive ? 'Activar' : 'Desactivar', run: () => setEp((q) => ({ ...q, inactive: q.inactive ? undefined : true })) },
+                    { label: x.hidden ? 'Mostrar en el modelo' : 'Ocultar en el modelo', run: () => setEp((q) => ({ ...q, hidden: q.hidden ? undefined : true })) },
+                    { label: 'Invertir dirección', run: () => setEp((q) => ({ ...q, dir: q.dir.map((v) => -v) as V3 })) },
+                    { label: 'Renombrar…', run: () => { const n = prompt('Nuevo nombre del ePoint', x.name)?.trim(); if (n) setEp((q) => ({ ...q, name: n })); } },
+                    ...(!x.isDefault ? [{ label: 'Usar como ePoint de inserción', run: () => { const next = structuredClone(pd); next.epoints = (next.epoints ?? []).map((q) => ({ ...q, isDefault: q.id === x.id ? true : undefined })); s.editPartDoc(o.part, next); } }] : []),
+                    { label: 'Copiar coordenadas', run: () => { navigator.clipboard?.writeText(x.point.join('; ')).catch(() => {}); s.notify(`Coordenadas (pieza): ${x.point.join('; ')}`); } },
+                    { label: 'Editar ePoints de la pieza…', run: () => { asmActions.editInPlace(o.id); setTimeout(() => useStore.getState().open({ kind: 'epoint' }), 80); } },
+                    ...(!x.isDefault ? [{ label: '-', run: () => {} }, { label: 'Eliminar', danger: true, run: () => setEp(() => null) }] : []),
+                  ] }); }}>
+                  <span className={`ep-dot ep-${x.inactive ? 'off' : x.isDefault ? 'def' : x.kind}`} /><span className="tree-name">{x.name}</span><span className="tree-count">{x.inactive ? 'desactivado' : x.isDefault ? 'inserción' : ''}</span></div>
+              );
+            })}
           </>;
         })()}
         {openOcc.has(o.id) && e?.kind === 'assembly' && !o.suppressed && (s.asmResult?.view?.occurrences ?? []).filter((c) => (c as { sub?: string }).sub === o.id).map((c) => (

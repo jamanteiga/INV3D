@@ -682,3 +682,11 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .hole-types button { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--panel); color: var(--fg-2); font-size: 11.5px; text-align: left; cursor: pointer; }
 .hole-types button.on { border-color: var(--accent); color: var(--fg); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .ctx-shade { position: fixed; inset: 0; z-index: 49; }
+.ep-modes { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Atajos de teclado */
+.keys-list { max-height: 52vh; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; }
+.keys-list tr.custom td:first-child { font-weight: 600; }
+.kchip { display: inline-flex; align-items: center; gap: 2px; margin: 1px 4px 1px 0; }
+.kchip button { border: 0; background: none; color: var(--fg-3); cursor: pointer; padding: 0 2px; font-size: 11px; }
+.kchip button:hover { color: var(--accent); }
+.kcap { color: var(--accent); font-size: 11.5px; font-weight: 600; }

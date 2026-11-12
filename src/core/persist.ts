@@ -13,8 +13,12 @@ export interface AppSettings {
   defaultMaterial: string;
   restoreSession: boolean;
   autosave: boolean;
-  /** Autoguardado en la carpeta de trabajo de los documentos ya guardados allí (además de la sesión) */
+  /** Autoguardado periódico de los documentos ya guardados (en la carpeta o en su fichero) */
   autosaveFolder: boolean;
+  /** Intervalo del autoguardado en minutos */
+  autosaveMin?: number;
+  /** Atajos de teclado personalizados: comando → combinaciones */
+  keymap?: Record<string, string[]>;
   drawingStd: DrawStd;
   sheetDefault: SheetSize;
   showEdges: boolean;
@@ -24,7 +28,7 @@ export interface AppSettings {
   osnap?: { on: boolean; modes: string[] };
 }
 export const DEFAULT_SETTINGS: AppSettings = {
-  userName: '', company: '', defaultMaterial: 'Acero S275JR', restoreSession: true, autosave: true, autosaveFolder: false,
+  userName: '', company: '', defaultMaterial: 'Acero S275JR', restoreSession: true, autosave: true, autosaveFolder: true, autosaveMin: 2,
   drawingStd: 'ISO', sheetDefault: 'A3', showEdges: true,
 };
 export interface UserMaterial { name: string; density: number; color: string }

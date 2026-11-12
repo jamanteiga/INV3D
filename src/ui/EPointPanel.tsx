@@ -19,7 +19,7 @@ export default function EPointPanel({ onClose }: { onClose: () => void }) {
     if (!pick) return;
     setD((x) => ({ ...x, point: pick.point, dir: pick.dir, radius: pick.radius, kind: x.isDefault ? x.kind : pick.axis ? 'insert' : x.kind === 'composite' ? 'mate' : x.kind }));
   }, [pick?.n]);
-  useEffect(() => () => { const t = useStore.getState(); if (t.tool === 'epPick') t.set({ tool: null }); }, []);
+  useEffect(() => () => { const t = useStore.getState(); if (t.tool === 'epPick' || t.tool === 'epEdge') t.set({ tool: null, epEdges: [] }); }, []);
   if (s.kind !== 'part') return null;
   const up = (p: Partial<EPoint>) => setD({ ...d, ...p });
   const save = () => {
@@ -73,8 +73,15 @@ export default function EPointPanel({ onClose }: { onClose: () => void }) {
             : 'Agrupa varios ePoints: se conectan todos a la vez con el compuesto del mismo nombre de otro componente.'}
         </p>
         {d.kind !== 'composite' && <>
-          <div className="fem-row"><button className={`btn sm ${s.tool === 'epPick' ? 'primary' : ''}`} onClick={() => s.set({ tool: s.tool === 'epPick' ? null : 'epPick' })}>{s.tool === 'epPick' ? 'Elige una cara…' : 'Elegir cara en el modelo'}</button>
-            <button className="btn sm" onClick={() => up({ dir: d.dir.map((x) => -x) as V3 })}>Invertir dirección</button></div>
+          <div className="ep-modes">
+            {([['facec', 'Centro de cara', 'Centro de una cara plana (o eje de una cara cilíndrica)'], ['face', 'Punto de cara', 'Punto donde se hace clic en la cara'], ['circle', 'Círculo', 'Arista circular: centro y eje (conducto o accesorio circular)'], ['edges3', '3 aristas', 'Boca rectangular hueca: tres aristas de sus lados'], ['oval2', 'Oval', 'Dos aristas rectas (lados planos) de una boca oval']] as const).map(([k, l, t]) => {
+              const tool = k === 'face' || k === 'facec' ? 'epPick' : 'epEdge';
+              const on = s.epMode === k && s.tool === tool;
+              return <button key={k} className={`btn sm ${on ? 'primary' : ''}`} title={t} onClick={() => s.set({ epMode: k, epEdges: [], tool: on ? null : tool })}>{l}</button>;
+            })}
+          </div>
+          {(s.tool === 'epPick' || s.tool === 'epEdge') && <p className="muted" style={{ fontSize: 11.5, margin: 0 }}>{s.tool === 'epPick' ? (s.epMode === 'face' ? 'Clic en el punto de la cara…' : 'Clic en una cara: se toma su centro…') : `Elige ${s.epMode === 'circle' ? 'la arista circular' : s.epMode === 'oval2' ? 'las 2 aristas rectas' : 'las 3 aristas de los lados'} (${s.epEdges.length}/${s.epMode === 'circle' ? 1 : s.epMode === 'oval2' ? 2 : 3})…`}</p>}
+          <div className="fem-row"><button className="btn sm" onClick={() => up({ dir: d.dir.map((x) => -x) as V3 })}>Invertir dirección</button></div>
           <div className="fem-row">Punto X {num(d.point[0], (x) => up({ point: [x, d.point[1], d.point[2]] }))} Y {num(d.point[1], (x) => up({ point: [d.point[0], x, d.point[2]] }))} Z {num(d.point[2], (x) => up({ point: [d.point[0], d.point[1], x] }))}</div>
           <div className="fem-row">Dirección {num(d.dir[0], (x) => up({ dir: [x, d.dir[1], d.dir[2]] }))} {num(d.dir[1], (x) => up({ dir: [d.dir[0], x, d.dir[2]] }))} {num(d.dir[2], (x) => up({ dir: [d.dir[0], d.dir[1], x] }))}</div>
           {d.kind === 'insert' && !d.isDefault && <div className="fem-row">Radio {num(d.radius ?? 5, (x) => up({ radius: x }))} mm</div>}

@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.23
+## Versión 0.24
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,14 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.24**
+- **Guardado**: tras el primer guardado (o al abrir un fichero con Archivo › Abrir) se guarda en el mismo fichero sin preguntar; *Guardar como* sigue preguntando. **Autoguardado** cada 2 min de los documentos ya guardados (Herramientas › Opciones: intervalo en minutos).
+- **Pieza → ensamblaje**: al guardar una pieza se actualizan y guardan los ensamblajes y planos abiertos que la usan; con la carpeta de trabajo, al abrir un ensamblaje sus piezas se toman de su fichero.
+- **Ensamblaje**: arrastrar sobre una pieza libre gira la vista; para moverla, selecciónala primero (o Mover). **ePoints visibles** (barra de vista o clic derecho › Ocultar ePoints): clic en un ePoint y en otro de otro componente → se conectan. Al colocar, el ePoint de la pieza nueva **se imanta** al ePoint cercano de otra y al soltar queda conectada. Con *Restringir* abierto los ePoints, y los planos y ejes de origen de cada pieza, se eligen en el 3D o en el árbol.
+- **Origen de la pieza en el ensamblaje**: al desplegar «+» un componente aparecen *Origen* (planos XY/XZ/YZ y ejes X/Y/Z) y sus ePoints; clic derecho en el componente › *Mostrar origen de la pieza*.
+- **ePoints**: creación por *Centro de cara*, *Punto de cara*, *Círculo* (arista circular: centro y eje), *3 aristas* (boca rectangular hueca) y *Oval* (2 aristas rectas). Menú contextual completo: conectar, restringir, activar/desactivar, ocultar, invertir dirección, renombrar, usar como inserción, copiar coordenadas, editar, eliminar.
+- **Atajos de teclado personalizables** (Herramientas › Atajos de teclado, o «?» de la barra rápida): añadir (＋), cambiar (✎), quitar (✕), restablecer, buscar y filtrar por entorno; avisa de conflictos.
 
 **Centro de gravedad (CDG)**: en pieza y ensamblaje, **Vista › Aspecto › Ver/ocultar CDG** (o la barra de vista › Ocultar/mostrar › Centro de gravedad): símbolo con coordenadas y masa según el material de cada pieza. En el dibujo, **clic derecho sobre una vista › Ver/ocultar CDG** (por vista).
 

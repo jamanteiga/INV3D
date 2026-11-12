@@ -65,6 +65,8 @@ export interface HudState {
   origin: boolean; sketches: boolean; triad: boolean; cube: boolean;
   /** mostrar el centro de gravedad (CDG) */
   cog?: boolean;
+  /** mostrar los ePoints de los componentes en el ensamblaje (por defecto, sí) */
+  epoints?: boolean;
   scene: 'grad' | 'white' | 'studio' | 'dark' | 'blue';
 }
 const HUD0: HudState = { style: 'shaded', clipOff: 0, clipFlip: false, origin: true, sketches: true, triad: true, cube: true, scene: 'grad' };
@@ -73,7 +75,7 @@ export type Tool = null
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
-  | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge' | 'femFace' | 'epPick'
+  | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge' | 'femFace' | 'epPick' | 'epEdge'
   | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember' | 'place'
   | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum' | 'drwSectionPath' | 'drwBreakout';
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
@@ -147,10 +149,17 @@ export interface State {
   fem: FemState | null;
   /** Última cara elegida para un ePoint (punto, dirección y, si es cilíndrica, radio) */
   epPick: { point: V3; dir: V3; radius?: number; axis: boolean; n: number } | null;
+  /** Creación de ePoints: punto de la cara, centro de cara, círculo, 3 aristas (conducto rectangular) u oval (2 aristas) */
+  epMode: 'face' | 'facec' | 'circle' | 'edges3' | 'oval2';
+  epEdges: number[];
   /** Detección de colisiones al mover componentes */
   collide: boolean;
   ctxEdit: { asm: string; occ: string; part: string; asmName: string; mesh: MeshData | null } | null;
   placing: { part: string; occ: string; quat: [number, number, number, number]; extras?: string[] } | null;
+  /** Ensamblaje: componentes con su origen (planos y ejes de la pieza) visible */
+  asmOrigins: string[];
+  /** Ensamblaje: ePoint elegido esperando el ePoint de otro componente para conectarlos */
+  epConnect: { occ: string; ep: string; label: string } | null;
   selItem: string | null;        // ensamblaje: componente/barra/cordón/tornillo/unión; plano: vista
   dialog: Dialog;
   result: RegenResult | null;
@@ -294,7 +303,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null,
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, epMode: 'facec', epEdges: [],
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',

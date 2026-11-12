@@ -77,8 +77,16 @@ function watch() {
     if (s.showEdges !== prev.showEdges && s.showEdges !== s.settings.showEdges) useStore.setState({ settings: { ...s.settings, showEdges: s.showEdges } });
   });
   window.addEventListener('beforeunload', () => { if (S().settings.autosave) saveSession(); });
-  // Autoguardado en la carpeta de los documentos que ya tienen ruta allí
-  setInterval(() => { const s = S(); if (s.settings.autosaveFolder && s.folder.state === 'granted') autosaveToFolder(); }, 60000);
+  // Autoguardado periódico (cada «autosaveMin» minutos) de los documentos que ya se guardaron (carpeta o fichero)
+  let last = Date.now();
+  setInterval(async () => {
+    const s = S(), min = Math.max(0.5, s.settings.autosaveMin ?? 2);
+    if (!s.settings.autosaveFolder || Date.now() - last < min * 60000 - 500) return;
+    last = Date.now();
+    const { autosaveAll } = await import('../core/files');
+    const n = await autosaveAll();
+    if (n) S().notify(`Autoguardado: ${n} documento${n > 1 ? 's' : ''}`);
+  }, 15000);
 }
 
 export async function saveSession() {
@@ -97,15 +105,6 @@ async function saveConfig() {
   applyLibs(c.libs);
   await kvSet('settings', c.settings); await kvSet('libs', c.libs); await kvSet('configAt', c.savedAt);
   if (S().folder.state === 'granted') await writeFolderConfig(c);
-}
-async function autosaveToFolder() {
-  const { serializeDoc } = await import('../core/files');
-  const s = S();
-  for (const d of s.docs) {
-    const dirty = d.id === s.active ? s.dirty : d.dirty;
-    if (!dirty || !d.path) continue;
-    try { await writeInFolder(d.path, serializeDoc(d.id), 'application/json'); markSaved(d.id, d.path); } catch { /* sin permiso */ }
-  }
 }
 export function markSaved(id: string, path: string) {
   const s = S(), name = path.split('/').pop()!;

@@ -36,6 +36,7 @@ import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
 import { activeView } from './view3d';
+import { COMMANDS, CTX_NAMES, comboOf, keysOf, conflicts, type Ctx } from './commands';
 import { HOLE_TYPES, THREAD_STDS, threadsOf, threadByName, clearance, cboreFor, csinkFor, FASTENERS, SCREW_SIZES, FIT_NAMES, type ThreadStd, type Fastener, type Fit } from '../core/holes';
 import { osCfg, setOsCfg, OS_MODES, OS_NAMES, OS_GLYPH, type OsMode } from './osnap';
 import { viewModelDims, viewGeom } from './DrawingView';
@@ -1570,6 +1571,68 @@ function AsmAuxPanel({ aux, onClose }: { aux: 'axis' | 'point'; onClose: () => v
   );
 }
 
+/** Atajos de teclado: crear, cambiar, quitar y restablecer (se guardan en los ajustes) */
+function KeysDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const map = s.settings.keymap ?? {};
+  const [q, setQ] = useState('');
+  const [ctxF, setCtxF] = useState<Ctx | ''>('');
+  const [cap, setCap] = useState<{ id: string; replace?: string } | null>(null);
+  const [tab, setTab] = useState<'keys' | 'mouse'>('keys');
+  const save = (m: Record<string, string[]>) => s.set({ settings: { ...s.settings, keymap: m } });
+  const setKeys = (id: string, keys: string[]) => { const c = COMMANDS.find((x) => x.id === id)!; const m = { ...map }; if (JSON.stringify(keys) === JSON.stringify(c.keys)) delete m[id]; else m[id] = keys; save(m); };
+  // captura de la combinación
+  useEffect(() => {
+    if (!cap) return;
+    const on = async (e: KeyboardEvent) => {
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === 'Escape') { setCap(null); return; }
+      const combo = comboOf(e); if (!combo) return;
+      const c = COMMANDS.find((x) => x.id === cap.id)!;
+      const cur = keysOf(c, map).filter((k) => k !== cap.replace);
+      const others = conflicts(combo, c.ctx, c.id);
+      setCap(null);
+      if (others.length && !(await s.ask(`${combo} ya lo usa «${others.map((o) => o.label).join('», «')}». ¿Asignarlo a «${c.label}» y quitarlo de ahí?`, 'Reasignar'))) return;
+      const m = { ...(useStore.getState().settings.keymap ?? {}) };
+      for (const o of others) m[o.id] = keysOf(o, m).filter((k) => k !== combo);
+      const nk = [...cur.filter((k) => k !== combo), combo];
+      if (JSON.stringify(nk) === JSON.stringify(c.keys)) delete m[c.id]; else m[c.id] = nk;
+      save(m);
+    };
+    window.addEventListener('keydown', on, true);
+    return () => window.removeEventListener('keydown', on, true);
+  }, [cap]);
+  const list = COMMANDS.filter((c) => (!ctxF || c.ctx === ctxF) && (!q || (c.label + ' ' + keysOf(c, map).join(' ')).toLowerCase().includes(q.toLowerCase())));
+  return (
+    <Modal title="Atajos de teclado" onClose={onClose} wide>
+      <div className="seg-mini" style={{ marginBottom: 8 }}><button className={tab === 'keys' ? 'on' : ''} onClick={() => setTab('keys')}>Teclado (editable)</button><button className={tab === 'mouse' ? 'on' : ''} onClick={() => setTab('mouse')}>Ratón y otras teclas</button></div>
+      {tab === 'mouse' ? <table className="ptable kv"><tbody>{SHORTCUTS.map(([k, v]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{v}</td></tr>)}</tbody></table> : <>
+        <div className="fem-row"><input placeholder="Buscar comando o tecla…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} style={{ flex: 1 }} />
+          <select value={ctxF} onChange={(e) => setCtxF(e.target.value as Ctx | '')}><option value="">Todos los entornos</option>{Object.entries(CTX_NAMES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+        <div className="keys-list">
+          <table className="ptable">
+            <thead><tr><th>Comando</th><th>Entorno</th><th>Atajos</th><th></th></tr></thead>
+            <tbody>{list.map((c) => {
+              const ks = keysOf(c, map), custom = !!map[c.id];
+              return (
+                <tr key={c.id} className={custom ? 'custom' : ''}>
+                  <td>{c.label}</td>
+                  <td className="muted">{CTX_NAMES[c.ctx]}</td>
+                  <td>{ks.map((k) => <span key={k} className="kchip"><kbd>{k}</kbd><button title="Cambiar" onClick={() => setCap({ id: c.id, replace: k })}>✎</button><button title="Quitar" onClick={() => setKeys(c.id, ks.filter((x) => x !== k))}>✕</button></span>)}
+                    {cap?.id === c.id && <span className="kcap">Pulsa la combinación… (Esc cancela)</span>}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}><button className="btn sm" title="Añadir un atajo nuevo" onClick={() => setCap({ id: c.id })}>＋</button>{custom && <button className="btn sm" title="Restablecer el atajo por defecto" onClick={() => setKeys(c.id, c.keys)}>↺</button>}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        </div>
+        <p className="phelp">＋ añade un atajo (pulsa la combinación), ✎ lo cambia y ✕ lo quita. Si la combinación ya se usa en el mismo entorno, se pregunta antes de reasignarla. Los cambios se guardan en los ajustes.</p>
+      </>}
+      <div className="modal-btns"><button className="btn" onClick={async () => { if (await s.ask('¿Restablecer todos los atajos de teclado a los de por defecto?', 'Restablecer')) save({}); }}>Restablecer todo</button><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
 /** Referencias a objetos (tipo osnap de AutoCAD) */
 function OsnapDialog({ onClose }: { onClose: () => void }) {
   useStore((s) => s.settings.osnap);
@@ -1742,7 +1805,9 @@ function OptionsDialog({ onClose }: { onClose: () => void }) {
       {tab === 'folder' && (<>
         <label className="check"><input type="checkbox" checked={st.restoreSession} onChange={(e) => setS({ restoreSession: e.target.checked })} />Reabrir los documentos de la última sesión al entrar</label>
         <label className="check"><input type="checkbox" checked={st.autosave} onChange={(e) => setS({ autosave: e.target.checked })} />Autoguardar la sesión en el navegador (cada cambio)</label>
-        <label className="check"><input type="checkbox" checked={st.autosaveFolder} disabled={s.folder.state !== 'granted'} onChange={(e) => setS({ autosaveFolder: e.target.checked })} />Autoguardar cada minuto en la carpeta los documentos ya guardados allí</label>
+        <label className="check"><input type="checkbox" checked={st.autosaveFolder} onChange={(e) => setS({ autosaveFolder: e.target.checked })} />Autoguardar cada
+          <input type="number" min={0.5} step={0.5} value={st.autosaveMin ?? 2} disabled={!st.autosaveFolder} onChange={(e) => setS({ autosaveMin: Math.max(0.5, parseFloat(e.target.value) || 2) })} onKeyDown={(e) => e.stopPropagation()} style={{ width: 56, margin: '0 6px' }} />
+          min los documentos ya guardados (en la carpeta o en su fichero), sin preguntar</label>
         <div className="psec-title" style={{ marginTop: 12 }}>Carpeta de trabajo</div>
         {!folderApi.supported() ? <p className="phelp">Este navegador o esta página no permiten acceder a carpetas locales. Abre INV3D directamente en Chrome o Edge (https://jamanteiga.github.io/INV3D/). La configuración se guarda igualmente en el navegador.</p> : (<>
           <Row label="Carpeta"><span className="ro strong">{s.folder.name || '— sin carpeta —'}</span>{s.folder.state === 'prompt' && <span className="ro" style={{ marginLeft: 6 }}>(pendiente de permiso)</span>}</Row>
@@ -2818,7 +2883,7 @@ export function Modals() {
     case 'newdoc': return <NewDocDialog onClose={close} />;
     case 'drwview': return <DrwViewDialog onClose={close} />;
     case 'ilogic': return <ILogicDialog onClose={close} />;
-    case 'shortcuts': return <Modal title="Atajos de teclado y ratón" onClose={close}><table className="ptable kv"><tbody>{SHORTCUTS.map(([k, v]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{v}</td></tr>)}</tbody></table></Modal>;
+    case 'shortcuts': return <KeysDialog onClose={close} />;
     default: return (
       <Modal title="Acerca de INV3D" onClose={close}>
         <p><b>INV3D 0.8</b> · CAD paramétrico libre en el navegador.</p>
