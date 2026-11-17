@@ -14,7 +14,7 @@ import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
 import type { MeshData } from '../core/cadClient';
 import { View3D, css, tv, vArr, planarFaceAt, faceVertices } from './view3d';
-import { sizeForHole } from '../core/fasteners';
+import { sizeForHole, flangeOfPart } from '../core/fasteners';
 
 export interface PickedFace { owner: string; ownerKind: 'occ' | 'member'; pointW: V3; normalW: V3; pointL: V3; normalL: V3; vertsW: V3[]; kind: 'plane' | 'axis'; radius?: number; convex?: boolean; centerL?: V3; xdirL?: V3 }
 
@@ -632,7 +632,8 @@ export default function AsmViewport() {
         const hit = hitAt(ev); if (!hit) return;
         const f = faceFromHit(hit);
         if (!f || f.kind !== 'axis' || f.convex || hit.object.userData.kind !== 'occ') { s.notify('Haz clic en la pared de un taladro, cerca del lado donde va la cabeza o la primera tuerca', 'error'); return; }
-        const m = meshOf('occ', hit.object.userData.id)!, mw = hit.object.matrixWorld;
+        const occId = hit.object.userData.id as string;
+        const m = meshOf('occ', occId)!, mw = hit.object.matrixWorld;
         const d0 = tv(f.normalW).normalize(), p0 = tv(f.pointW), r = f.radius ?? 5;
         const found: { p: THREE.Vector3; d: THREE.Vector3 }[] = [{ p: p0, d: d0 }];
         if ((fdl.fx as { all?: boolean }).all !== false) {
@@ -652,19 +653,32 @@ export default function AsmViewport() {
           const xr = new THREE.Vector3(1, 0, 0); if (Math.abs(xr.dot(d)) > 0.9) xr.set(0, 1, 0); xr.sub(d.clone().multiplyScalar(xr.dot(d))).normalize();
           const o = p.clone().addScaledVector(xr, r + 0.8).addScaledVector(d, 2);
           const hs = new THREE.Raycaster(o, d.clone().negate(), 0, 5000).intersectObjects(occl, false).map((h) => h.distance).sort((a, b) => a - b);
-          let grip = 0, start = p.clone();
+          let grip = 0, gap = 0, start = p.clone();
           if (hs.length >= 2) {
             let end = hs[1];
-            for (let i = 2; i + 1 < hs.length; i += 2) { if (hs[i] - end > 10) break; end = hs[i + 1]; }
+            for (let i = 2; i + 1 < hs.length; i += 2) { if (hs[i] - end > 10) break; gap += hs[i] - end; end = hs[i + 1]; }
             grip = Math.round((end - hs[0]) * 10) / 10;
             start = p.clone().addScaledVector(d, 2 - hs[0]);
           }
-          return { p: vArr(start, 4), d: vArr(d, 6), grip };
+          // referencia del taladro en coordenadas de la pieza (para restringir la fijación al agujero)
+          const inv = mw.clone().invert();
+          return { p: vArr(start, 4), d: vArr(d, 6), grip, gap: Math.round(gap * 10) / 10, occ: occId, pL: vArr(start.clone().applyMatrix4(inv), 4), dL: vArr(d.clone().transformDirection(inv), 6), r: Math.round(r * 1000) / 1000 };
         });
+        // ¿es una brida? → norma, métrica de pernos, montaje y junta
+        const occ = s.asm.occurrences.find((o) => o.id === occId);
+        const pdoc = occ ? s.docData(occ.part) as PartDoc | null : null;
+        const fl = pdoc?.format === 'inv3d.part' ? flangeOfPart(pdoc) : null;
         const fx = fdl.fx as { std?: 'EN' | 'ASME' };
-        const size = sizeForHole(fx.std ?? 'EN', 2 * r);
-        useStore.setState({ tool: null, dialog: { ...fdl, fx: { ...fdl.fx, holes, grip: String(holes[0].grip), ...(size ? { size } : {}) } } });
-        s.notify(`${holes.length} taladro(s) Ø${Math.round(2 * r * 10) / 10} · espesor a abarcar ${holes[0].grip} mm${size ? ` · ${size}` : ''}`);
+        const std = fl?.std ?? fx.std ?? 'EN';
+        const size = fl?.size ?? sizeForHole(std, 2 * r);
+        // sin junta modelada: el hueco entre platos es solo el de las caras realzadas (2·rfH)
+        const noGap = holes[0].gap - (fl ? 2 * fl.rfH : 0) < 1;
+        const patch = fl
+          ? { std, size, kind: fl.kind, flange: fl.label, gasket: noGap, gasketT: String(fl.gasketT), gasketName: fl.gasketName }
+          : { std, ...(size ? { size } : {}), flange: '' };
+        useStore.setState({ tool: null, dialog: { ...fdl, fx: { ...fdl.fx, ...patch, holes, grip: String(holes[0].grip) } } });
+        s.notify(fl ? `Brida ${fl.label} · ${holes.length} taladro(s) · espesor ${holes[0].grip} mm${noGap ? ` + junta ${fl.gasketT} mm` : ` (incluye ${holes[0].gap} mm de junta/hueco)`}`
+          : `${holes.length} taladro(s) Ø${Math.round(2 * r * 10) / 10} · espesor a abarcar ${holes[0].grip} mm${size ? ` · ${size}` : ''}`);
         return;
       }
       if (s.tool === 'asmFace' || s.tool === 'weldFace' || s.tool === 'boltFace') {

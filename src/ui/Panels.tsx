@@ -35,7 +35,7 @@ import { downloadXlsx, type Sheet } from '../core/xlsx';
 import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
 import { FASTENER_SIZES, planFix, fsize, type FStd, type FixKind } from '../core/fasteners';
-export interface FastDraft { std?: FStd; kind?: FixKind; size?: string; grip?: string; gasket?: boolean; gasketT?: string; headWasher?: boolean; all?: boolean; holes?: { p: [number, number, number]; d: [number, number, number]; grip: number }[] }
+export interface FastDraft { std?: FStd; kind?: FixKind; size?: string; grip?: string; gasket?: boolean; gasketT?: string; headWasher?: boolean; all?: boolean; flange?: string; gasketName?: string; holes?: { p: [number, number, number]; d: [number, number, number]; grip: number; gap?: number; occ?: string }[] }
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
 import { activeView } from './view3d';
 import { COMMANDS, CTX_NAMES, comboOf, keysOf, conflicts, type Ctx } from './commands';
@@ -1783,9 +1783,11 @@ function FastenerDialog({ onClose }: { onClose: () => void }) {
       {kind === 'bolt' && <label className="check"><input type="checkbox" checked={!!d.headWasher} onChange={(e) => up({ headWasher: e.target.checked })} />Arandela también bajo la cabeza</label>}
       <Row label="Taladro"><button className={`btn ${s.tool === 'fastHole' ? 'on' : ''}`} onClick={() => s.setTool(s.tool === 'fastHole' ? null : 'fastHole')}>{n ? `${n} taladro(s) elegido(s)` : 'Elegir taladro…'}</button></Row>
       <label className="check"><input type="checkbox" checked={d.all !== false} onChange={(e) => up({ all: e.target.checked })} />Todos los taladros iguales de esa pieza (p. ej. los de la brida)</label>
+      {d.flange ? <div className="pick-info">Brida reconocida: <b>{d.flange}</b> · montaje {kind === 'stud' ? 'espárrago + 2 tuercas (ASME B16.5)' : 'tornillo + tuerca (EN 1515-1)'}</div>
+        : n > 0 && <div className="pick-info">Pieza sin datos de brida: métrica según el Ø del taladro</div>}
       <Row label="Métrica"><select value={size} onChange={(e) => up({ size: e.target.value })}>{sizes.map((z) => <option key={z}>{z}</option>)}</select>{f && <span className="ro" style={{ marginLeft: 6 }}>{f.thread}</span>}</Row>
       <Row label="Espesor a abarcar"><input className="num" type="number" value={grip} onChange={(e) => up({ grip: e.target.value })} style={{ width: 80 }} /> <span className="ro">mm {n ? '(medido en el modelo; huecos de hasta 10 mm se suman)' : ''}</span></Row>
-      <label className="check"><input type="checkbox" checked={!!d.gasket} onChange={(e) => up({ gasket: e.target.checked })} />Sumar la junta (si no está modelada)</label>
+      <label className="check"><input type="checkbox" checked={!!d.gasket} onChange={(e) => up({ gasket: e.target.checked })} />Sumar la junta{d.gasketName ? ` ${d.gasketName}` : ''} (no modelada{n && d.holes?.[0]?.gap ? `; ya hay ${d.holes[0].gap} mm de hueco medido` : ''})</label>
       {d.gasket && <Row label="Espesor de junta"><input className="num" type="number" value={d.gasketT ?? (std === 'EN' ? 2 : 3.2)} onChange={(e) => up({ gasketT: e.target.value })} style={{ width: 80 }} /> <span className="ro">mm</span></Row>}
       {plan && f && (
         <div className="psec">
@@ -1793,7 +1795,7 @@ function FastenerDialog({ onClose }: { onClose: () => void }) {
           <p className="phelp" style={{ margin: 0 }}>
             {kind === 'bolt' ? `Tornillo ${f.name} × ${plan.lengthLbl}${std === 'ASME' ? ` (${plan.L} mm)` : ''}` : `Espárrago ${f.name} × ${plan.lengthLbl}${std === 'ASME' ? ` (${plan.L} mm)` : ''}`}
             {` · ${kind === 'bolt' ? (d.headWasher ? 2 : 1) : 2} arandela(s) · ${kind === 'bolt' ? 1 : 2} tuerca(s)`}<br />
-            Sobresale {plan.projection} mm por la tuerca (mínimo {std === 'ASME' ? `2 hilos = ${r2n(plan.minProj)} mm` : '10 mm'}){n ? ` · ${n} conjunto(s)` : ''}
+            Sobresale {plan.projection} mm por la tuerca (mínimo {std === 'ASME' ? `2 hilos = ${r2n(plan.minProj)} mm` : '10 mm'}){n ? ` · ${n} conjunto(s), restringidos al agujero (Insertar)` : ''}
           </p>
         </div>
       )}

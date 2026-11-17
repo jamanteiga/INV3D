@@ -293,6 +293,12 @@ function makeCoupling(spec: PipeSpec): PartDoc {
 }
 
 export function makePipePart(spec: PipeSpec): PartDoc {
+  const d = makePipePart0(spec);
+  // se guarda la especificación: la Fijación reconoce la brida (norma, clase, tamaño, pernos)
+  (d as PartDoc & { pipeSpec?: PipeSpec }).pipeSpec = { ...spec };
+  return d;
+}
+function makePipePart0(spec: PipeSpec): PartDoc {
   switch (spec.kind) {
     case 'pipe': return makePipe(spec);
     case 'flange': return makeFlange(spec);

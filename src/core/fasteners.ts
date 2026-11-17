@@ -219,16 +219,17 @@ export function planFix(std: FStd, size: string, kind: FixKind, grip: number, ga
     const L = roundLength(std, 'bolt', need);
     if (headWasher) items.push({ part: 'washer', z0: 0, outward: true });
     items.push({ part: 'bolt', z0: hw, outward: true });                       // cara de apoyo de la cabeza
-    items.push({ part: 'washer', z0: -G, outward: false }, { part: 'nut', z0: -G - f.h, outward: false });
+    // la junta no modelada alarga el tornillo, pero las piezas se apoyan en el modelo tal como está
+    items.push({ part: 'washer', z0: -grip, outward: false }, { part: 'nut', z0: -grip - f.h, outward: false });
     return { std, size: f.name, kind, L, lengthLbl: lengthLabel(std, L), projection: r2(L - (need - minProj)), minProj, items };
   }
   const need = G + 2 * (f.h + f.m + minProj);
   const L = roundLength(std, 'stud', need);
-  const extra = (L - need) / 2, out = f.h + f.m + minProj + extra;
+  const extra = (L - need) / 2, out = f.h + f.m + minProj + extra + (G - grip) / 2;   // saliente igual por los dos lados
   items.push({ part: 'washer', z0: 0, outward: true }, { part: 'nut', z0: f.h, outward: true });
   items.push({ part: 'stud', z0: out, outward: false });                        // el espárrago empieza fuera y entra
-  items.push({ part: 'washer', z0: -G, outward: false }, { part: 'nut', z0: -G - f.h, outward: false });
-  return { std, size: f.name, kind, L, lengthLbl: lengthLabel(std, L), projection: r2(minProj + extra), minProj, items };
+  items.push({ part: 'washer', z0: -grip, outward: false }, { part: 'nut', z0: -grip - f.h, outward: false });
+  return { std, size: f.name, kind, L, lengthLbl: lengthLabel(std, L), projection: r2(minProj + extra + (G - grip) / 2), minProj, items };
 }
 
 /** Cuaternión [x,y,z,w] que lleva +Z a v (unitario) */
@@ -237,4 +238,31 @@ export function quatZTo(v: V3): [number, number, number, number] {
   if (z < -0.999999) return [1, 0, 0, 0];
   const q: [number, number, number, number] = [-y, x, 0, 1 + z];
   const n = Math.hypot(...q); return q.map((c) => c / n) as [number, number, number, number];
+}
+
+// ---------- Reconocer la brida de un taladro ----------
+export interface FlangeInfo { label: string; std: FStd; size: string; kind: FixKind; n: number; gasketT: number; gasketName: string; /** altura de la cara realzada (0 si FF): el hueco entre platos sin junta es 2·rfH */ rfH: number }
+/** Brida a partir de la pieza (especificación guardada o número de pieza): métrica de pernos, montaje y junta habituales.
+ *  ASME B16.5/B16.47 → espárrago con 2 tuercas (B16.5), junta espirometálica B16.20 (3,2 mm de cálculo en RF).
+ *  EN 1092-1 → tornillo + tuerca (EN 1515-1), junta plana EN 1514-1 de 2 mm. */
+export function flangeOfPart(doc: PartDoc): FlangeInfo | null {
+  let fd: FlangeDims | null = null; let typ = '', ff = false;
+  const spec = (doc as PartDoc & { pipeSpec?: { kind: string; flType?: string } }).pipeSpec;
+  if (spec?.kind === 'flange') { fd = flangeDims(spec as never); typ = spec.flType ?? ''; ff = (spec as { facing?: string }).facing === 'FF' || typ === 'LJ'; }
+  else {
+    const m = /^(ASME B16\.5|ASME B16\.47 Serie ([AB])|EN 1092-1) (?:Clase (\d+)|PN(\d+)) (?:DN)?(\S+) (\S+?)-(RF|FF|B1)/.exec(doc.iProperties?.partNumber ?? '');
+    if (m) {
+      typ = m[6]; ff = m[7] === 'FF' || typ === 'LJ';
+      fd = m[1].startsWith('EN') ? flangeDims({ kind: 'flange', norm: 'EN', size: m[5], rating: +m[4], flType: typ } as never)
+        : flangeDims({ kind: 'flange', norm: 'ASME', size: m[5], rating: +m[3], flType: typ, flStd: m[2] ? (`B16.47${m[2]}` as never) : 'B16.5' } as never);
+    }
+  }
+  if (!fd) return null;
+  const std: FStd = fd.std.startsWith('EN') ? 'EN' : 'ASME';
+  const size = std === 'EN' ? fd.bolt : fd.bolt.endsWith('"') ? fd.bolt : `${fd.bolt}"`;
+  if (!fsize(std, size)) return null;
+  return {
+    label: `${fd.std} ${fd.rating} ${fd.size}${typ ? ` ${typ}` : ''} · ${fd.n} × ${size}`, std, size, kind: std === 'ASME' ? 'stud' : 'bolt', n: fd.n,
+    rfH: ff ? 0 : fd.rfH, gasketT: std === 'ASME' ? 3.2 : 2, gasketName: std === 'ASME' ? 'espirometálica ASME B16.20' : 'plana EN 1514-1',
+  };
 }
