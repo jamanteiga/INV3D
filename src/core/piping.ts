@@ -81,7 +81,29 @@ function makeFlange(spec: PipeSpec): PartDoc {
   if (rfH > 0) { pts.push([fd.rf / 2, 0], [fd.rf / 2, rfH]); }
   pts.push([R, rfH], [R, zb]);
   if (zEnd > zb + 0.01) {
-    if (kind === 'WN') { const xs = Math.max(X, A / 2 + 2); pts.push([xs, zb], [A / 2, zEnd]); }
+    if (kind === 'WN') {
+      // Cuello para soldar: plato → acuerdo r → cubo cónico (de X a A) → tramo recto de Ø A → chaflán de soldadura B16.25 (37,5°, talón 1,6)
+      const xs = Math.max(X, A / 2 + 2), ri = A / 2 - t;
+      const bev = t > 2.4 ? (t - 1.6) * Math.tan((37.5 * Math.PI) / 180) : 0;
+      const hubL = zEnd - zb;
+      const Ls = Math.min(Math.max(1.5 * t, 6) + bev, hubL * 0.4);           // tramo recto (incluye el chaflán)
+      const zt = zEnd - Ls;                                                  // fin del cono
+      // acuerdo entre la cara posterior del plato y el cono
+      const r = fd.D <= 120 ? 3 : fd.D <= 260 ? 5 : fd.D <= 560 ? 8 : 10;
+      const u = [A / 2 - xs, zt - zb], L = Math.hypot(u[0], u[1]); u[0] /= L; u[1] /= L;
+      const ang = Math.acos(Math.max(-1, Math.min(1, u[0])));                // ángulo del rincón entre la cara posterior (+x) y el cono
+      const tt = Math.min(r / Math.tan(ang / 2), (R - xs) * 0.5, L * 0.3);
+      if (tt > 0.3 && ang > 0.05) {
+        const p1: [number, number] = [xs + tt, zb], p2: [number, number] = [xs + u[0] * tt, zb + u[1] * tt];
+        // centro del arco: sobre la normal a la cara posterior por p1
+        const rr = tt * Math.tan(ang / 2), c: [number, number] = [p1[0], zb + rr];
+        const a1 = Math.atan2(p1[1] - c[1], p1[0] - c[0]), a2 = Math.atan2(p2[1] - c[1], p2[0] - c[0]);
+        let da = a2 - a1; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+        for (let k = 0; k <= 4; k++) { const a = a1 + (da * k) / 4; pts.push([c[0] + rr * Math.cos(a), c[1] + rr * Math.sin(a)]); }
+      } else pts.push([xs, zb]);
+      pts.push([A / 2, zt]);
+      if (bev > 0) pts.push([A / 2, zEnd - bev], [ri + 1.6, zEnd]); else pts.push([A / 2, zEnd]);
+    }
     else pts.push([Math.max(X, bore + 3), zb], [Math.max(X, bore + 3) - (kind === 'LJ' ? 0 : 1), zEnd]);
   }
   if (bore > 0) {

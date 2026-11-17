@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.25.1
+## Versión 0.25.2
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.25.2**
+- **Bridas de cuello para soldar (WN)** ASME B16.5 / B16.47 / EN 1092 tipo 11: geometría corregida con acuerdo entre plato y cubo, cubo cónico de X a A, **tramo recto** de Ø A y **chaflán de soldadura** ASME B16.25 (37,5°, talón 1,6 mm). La longitud total Y no cambia.
 
 **Novedades 0.25.1**
 - **Ensamblar › Posición › Rotar** (tecla R): arrastrando una pieza se gira sola alrededor de su centro, para ver y elegir la geometría a restringir (funciona con el diálogo de restricción abierto). Pieza libre: el giro se guarda. Pieza restringida o fija: giro temporal, se restablece con Esc o al desactivar Rotar.
