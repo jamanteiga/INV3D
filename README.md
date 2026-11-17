@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.25.2
+## Versión 0.26
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,13 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.26**
+- **Mecánica › Tornillería y juntas (ASME · EN)**:
+  - EN/ISO: tornillo ISO 4014/4017, espárrago DIN 976-1 / EN 1515-1, tuerca ISO 4032, arandela ISO 7089 (M6–M64).
+  - ASME: tornillo hexagonal pesado B18.2.1, espárrago B18.31.2 para bridas B16.5, tuerca hexagonal pesada B18.2.2 2H y arandela ASTM F436 (1/2"–4"; UNC hasta 1", 8UN por encima).
+  - Juntas planas EN 1514-1 IBC / ASME B16.21 y espirometálicas EN 1514-2 / ASME B16.20 por DN-PN o NPS-clase.
+- **Mecánica › Fijación** (ensamblaje): tornillo + arandela + tuerca, o tuerca + arandela + espárrago + arandela + tuerca. Clic en la pared de un taladro: mide el espesor a abarcar (los huecos de junta de hasta 10 mm se suman), propone la métrica según el taladro y coloca el conjunto en todos los taladros iguales de la pieza. Opción de sumar la junta si no está modelada. Longitud comercial con saliente mínimo de **2 hilos (ASME)** o **10 mm (métrica)**.
 
 **Novedades 0.25.2**
 - **Bridas de cuello para soldar (WN)** ASME B16.5 / B16.47 / EN 1092 tipo 11: geometría corregida con acuerdo entre plato y cubo, cubo cónico de X a A, **tramo recto** de Ø A y **chaflán de soldadura** ASME B16.25 (37,5°, talón 1,6 mm). La longitud total Y no cambia.

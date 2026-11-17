@@ -34,6 +34,8 @@ import { bomRows, bomCsv, bomPartsOnly, bomTotal, type BomRow } from './bom';
 import { downloadXlsx, type Sheet } from '../core/xlsx';
 import { ILOGIC_RULE } from './ilogic';
 import { CONTENT } from '../core/content';
+import { FASTENER_SIZES, planFix, fsize, type FStd, type FixKind } from '../core/fasteners';
+export interface FastDraft { std?: FStd; kind?: FixKind; size?: string; grip?: string; gasket?: boolean; gasketT?: string; headWasher?: boolean; all?: boolean; holes?: { p: [number, number, number]; d: [number, number, number]; grip: number }[] }
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
 import { activeView } from './view3d';
 import { COMMANDS, CTX_NAMES, comboOf, keysOf, conflicts, type Ctx } from './commands';
@@ -1261,13 +1263,13 @@ export function PropertyPanel() {
 }
 
 // =================== MODALES ===================
-export function Modal({ title, onClose, children, wide, xwide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; xwide?: boolean }) {
+export function Modal({ title, onClose, children, wide, xwide, float }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; xwide?: boolean; float?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, [onClose]);
   return (
-    <div className="modal-shade" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className={`modal-shade ${float ? 'float' : ''}`} onMouseDown={(e) => { if (!float && e.target === e.currentTarget) onClose(); }}>
       <div className={`modal ${wide ? 'wide' : ''} ${xwide ? 'xwide' : ''}`} role="dialog" aria-label={title}>
         <div className="modal-head"><span>{title}</span><button className="x" onClick={onClose} aria-label="Cerrar"><Icon name="close" size={18} /></button></div>
         <div className="modal-body">{children}</div>
@@ -1731,8 +1733,9 @@ function AuxSketchDialog({ onClose, init }: { onClose: () => void; init?: { pt?:
   );
 }
 
-function ContentDialog({ onClose }: { onClose: () => void }) {
-  const [fam, setFam] = useState(CONTENT[0].id);
+function ContentDialog({ onClose, init }: { onClose: () => void; init?: string }) {
+  const [fam, setFam] = useState(init && CONTENT.some((c) => c.id === init) ? init : CONTENT[0].id);
+  const kind = useStore((s) => s.kind);
   const F = CONTENT.find((f) => f.id === fam)!;
   const [size, setSize] = useState(F.sizes[2] ?? F.sizes[0]);
   const lens = F.lengths?.(size) ?? [];
@@ -1750,15 +1753,56 @@ function ContentDialog({ onClose }: { onClose: () => void }) {
         <div className="cc-form">
           <div className="psec-title">{F.name} · {F.std}</div>
           <Row label="Tamaño"><select value={size} onChange={(e) => setSize(e.target.value)}>{F.sizes.map((z) => <option key={z}>{z}</option>)}</select></Row>
-          {lens.length > 0 && <Row label="Longitud"><select value={len} onChange={(e) => setLen(Number(e.target.value))}>{lens.map((l) => <option key={l} value={l}>{l} mm</option>)}</select></Row>}
-          <p className="phelp">Se crea una pieza paramétrica normalizada (con sus iProperties y rosca cosmética) y se coloca en el ensamblaje. Después se restringe con Insertar o Coincidir.</p>
+          {lens.length > 0 && <Row label={F.lenLabel ?? 'Longitud'}><select value={len} onChange={(e) => setLen(Number(e.target.value))}>{lens.map((l) => <option key={l} value={l}>{F.fmtLen ? `${F.fmtLen(l)} (${l} mm)` : `${l} mm`}</option>)}</select></Row>}
+          {F.category === 'Juntas' && <p className="phelp">Ø interior = Ø exterior del tubo y Ø exterior tangente a los pernos de la brida. Espirometálica: aros y espiral con medidas aproximadas a partir de la brida.</p>}
+          <p className="phelp">{kind === 'assembly' ? 'Se crea una pieza paramétrica normalizada (con sus iProperties y rosca cosmética) y se coloca en el ensamblaje. Después se restringe con Insertar o Coincidir.' : 'Se crea una pieza paramétrica normalizada (con sus iProperties y rosca cosmética) y se abre como documento nuevo.'}</p>
           <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button>
-            <button className="btn primary" onClick={() => { asmActions.placeContent(F.id, size, len); onClose(); }}>Colocar</button></div>
+            <button className="btn primary" onClick={() => { asmActions.placeContent(F.id, size, len); onClose(); }}>{kind === 'assembly' ? 'Colocar' : 'Crear pieza'}</button></div>
         </div>
       </div>
     </Modal>
   );
 }
+
+/** Mecánica › Fijación: tornillo + arandela(s) + tuerca, o tuerca + arandela + espárrago + arandela + tuerca, según el espesor a abarcar y la junta */
+function FastenerDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const d = (s.dialog?.kind === 'fastener' ? s.dialog.fx : {}) as FastDraft;
+  const up = (p: Partial<FastDraft>) => { const dl = useStore.getState().dialog; if (dl?.kind === 'fastener') useStore.setState({ dialog: { ...dl, fx: { ...dl.fx, ...p } } }); };
+  const std = d.std ?? 'EN', kind = d.kind ?? 'bolt';
+  const sizes = FASTENER_SIZES[std];
+  const size = d.size && sizes.includes(d.size) ? d.size : sizes[std === 'EN' ? 5 : 1];
+  const grip = Number(d.grip ?? 40), gk = d.gasket ? Number(d.gasketT ?? (std === 'EN' ? 2 : 3.2)) : 0;
+  const plan = planFix(std, size, kind, grip, gk, !!d.headWasher);
+  const f = fsize(std, size);
+  const n = d.holes?.length ?? 0;
+  return (
+    <Modal title="Fijación" onClose={onClose} float>
+      <Row label="Norma"><Seg value={std} onChange={(v) => up({ std: v, size: undefined })} options={[['EN', 'EN / ISO (métrica)'], ['ASME', 'ASME (pulgadas)']]} /></Row>
+      <Row label="Conjunto"><Seg value={kind} onChange={(v) => up({ kind: v })} options={[['bolt', 'Tornillo + arandela + tuerca'], ['stud', 'Espárrago + 2 tuercas']]} /></Row>
+      {kind === 'bolt' && <label className="check"><input type="checkbox" checked={!!d.headWasher} onChange={(e) => up({ headWasher: e.target.checked })} />Arandela también bajo la cabeza</label>}
+      <Row label="Taladro"><button className={`btn ${s.tool === 'fastHole' ? 'on' : ''}`} onClick={() => s.setTool(s.tool === 'fastHole' ? null : 'fastHole')}>{n ? `${n} taladro(s) elegido(s)` : 'Elegir taladro…'}</button></Row>
+      <label className="check"><input type="checkbox" checked={d.all !== false} onChange={(e) => up({ all: e.target.checked })} />Todos los taladros iguales de esa pieza (p. ej. los de la brida)</label>
+      <Row label="Métrica"><select value={size} onChange={(e) => up({ size: e.target.value })}>{sizes.map((z) => <option key={z}>{z}</option>)}</select>{f && <span className="ro" style={{ marginLeft: 6 }}>{f.thread}</span>}</Row>
+      <Row label="Espesor a abarcar"><input className="num" type="number" value={grip} onChange={(e) => up({ grip: e.target.value })} style={{ width: 80 }} /> <span className="ro">mm {n ? '(medido en el modelo; huecos de hasta 10 mm se suman)' : ''}</span></Row>
+      <label className="check"><input type="checkbox" checked={!!d.gasket} onChange={(e) => up({ gasket: e.target.checked })} />Sumar la junta (si no está modelada)</label>
+      {d.gasket && <Row label="Espesor de junta"><input className="num" type="number" value={d.gasketT ?? (std === 'EN' ? 2 : 3.2)} onChange={(e) => up({ gasketT: e.target.value })} style={{ width: 80 }} /> <span className="ro">mm</span></Row>}
+      {plan && f && (
+        <div className="psec">
+          <div className="psec-title">Resultado</div>
+          <p className="phelp" style={{ margin: 0 }}>
+            {kind === 'bolt' ? `Tornillo ${f.name} × ${plan.lengthLbl}${std === 'ASME' ? ` (${plan.L} mm)` : ''}` : `Espárrago ${f.name} × ${plan.lengthLbl}${std === 'ASME' ? ` (${plan.L} mm)` : ''}`}
+            {` · ${kind === 'bolt' ? (d.headWasher ? 2 : 1) : 2} arandela(s) · ${kind === 'bolt' ? 1 : 2} tuerca(s)`}<br />
+            Sobresale {plan.projection} mm por la tuerca (mínimo {std === 'ASME' ? `2 hilos = ${r2n(plan.minProj)} mm` : '10 mm'}){n ? ` · ${n} conjunto(s)` : ''}
+          </p>
+        </div>
+      )}
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button>
+        <button className="btn primary" disabled={!plan || !n} onClick={() => { asmActions.placeFasteners(); }}>Colocar</button></div>
+    </Modal>
+  );
+}
+const r2n = (x: number) => Math.round(x * 100) / 100;
 
 function CompPatternDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
@@ -2920,6 +2964,8 @@ export function Modals() {
     case 'fileinfo': return <FileInfoDialog title={d.title} info={d.info} onClose={close} />;
     case 'place': return <PlaceDialog onClose={close} />;
     case 'content': return <ContentDialog onClose={close} />;
+    case 'contentf': return <ContentDialog onClose={close} init={d.fam} />;
+    case 'fastener': return <FastenerDialog onClose={close} />;
     case 'cpattern': return <CompPatternDialog onClose={close} />;
     case 'drive': return <DriveDialog onClose={close} />;
     case 'motion': return <MotionDialog onClose={close} />;

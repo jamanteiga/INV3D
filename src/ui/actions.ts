@@ -7,6 +7,7 @@ import { useStore, type SkOp } from '../core/store';
 import { uid, v3, newDoc, MATERIALS, planeFrame, resolveWorkPlanes, docParams, entityOutline, type V3, type SketchF, type PartDoc, type SkEntity, type Frame } from '../core/doc';
 import { IDENTITY, auxName, solveAssembly, patternPoses, mirrorPose, xfPoint, q as qq, q, type Occurrence, type FrameMember, type BoltGroup, type EndType, type Xform } from '../core/asm';
 import { CONTENT } from '../core/content';
+import { FASTENER_SIZES, planFix, makeBolt, makeStud, makeNut, makeWasher, quatZTo, type FStd, type FixKind } from '../core/fasteners';
 import { makeEval, fmt } from '../core/expr';
 import { cad, type MeshData } from '../core/cadClient';
 import { projectedDir, drawStyle, SHEETS, SCALES, VIEW_NAMES, scaleLabel, allPages, loadPage, extractPage, type DView, type TableKind } from '../core/drawing';
@@ -275,11 +276,49 @@ export const asmActions = {
   placeContent: (fam: string, size: string, len: number) => {
     const s = S();
     const F = CONTENT.find((f) => f.id === fam); if (!F) return;
-    const doc = F.make(size, len);
+    let doc: PartDoc; try { doc = F.make(size, len); } catch (e) { return s.notify((e as Error).message, 'error'); }
     const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_').replace(/ - /g, ' ') + '.i3p';
     const existing = s.docs.find((d) => d.fileName === fn);
+    if (s.kind !== 'assembly') { if (existing) s.activate(existing.id); else s.addDocument('part', doc, fn, true); return; }
     const pid = existing?.id ?? s.addDocument('part', doc, fn, false);
     asmActions.startPlace(pid);
+  },
+  /** Mecánica › Fijación: crea tornillo/espárrago, tuercas y arandelas y los coloca en cada taladro elegido */
+  placeFasteners: () => {
+    const s = S();
+    const dl = s.dialog; if (dl?.kind !== 'fastener') return;
+    const fx = dl.fx as { std?: FStd; kind?: FixKind; size?: string; grip?: string; gasket?: boolean; gasketT?: string; headWasher?: boolean; holes?: { p: V3; d: V3; grip: number }[] };
+    const std = fx.std ?? 'EN', kind = fx.kind ?? 'bolt';
+    const sizes = FASTENER_SIZES[std], size = fx.size && sizes.includes(fx.size) ? fx.size : sizes[std === 'EN' ? 5 : 1];
+    const gk = fx.gasket ? Number(fx.gasketT ?? (std === 'EN' ? 2 : 3.2)) : 0;
+    const holes = fx.holes ?? []; if (!holes.length) return s.notify('Elige antes un taladro', 'error');
+    const userGrip = Number(fx.grip ?? holes[0].grip);
+    const docId = (doc: PartDoc) => {
+      const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_').replace(/ - /g, ' ') + '.i3p';
+      return S().docs.find((d) => d.fileName === fn)?.id ?? S().addDocument('part', doc, fn, false);
+    };
+    const occs: Occurrence[] = [];
+    const names = new Map<string, number>();
+    const nameOf = (pid: string) => { const b = (S().docs.find((d) => d.id === pid)?.fileName ?? 'Pieza').replace(/\.[^.]+$/, ''); let k = names.get(pid) ?? 1; while (S().asm.occurrences.some((o) => o.name === `${b}:${k}`) || occs.some((o) => o.name === `${b}:${k}`)) k++; names.set(pid, k + 1); return `${b}:${k}`; };
+    let summary = '';
+    for (const h of holes) {
+      // si el usuario corrigió el espesor del primero, se aplica la misma diferencia a todos
+      const grip = Math.max(0.5, h.grip + (userGrip - holes[0].grip));
+      const plan = planFix(std, size, kind, grip, gk, !!fx.headWasher); if (!plan) return s.notify('Métrica no disponible', 'error');
+      const parts = {
+        bolt: () => docId(makeBolt(std, size, plan.L)), stud: () => docId(makeStud(std, size, plan.L)),
+        nut: () => docId(makeNut(std, size)), washer: () => docId(makeWasher(std, size)),
+      };
+      for (const it of plan.items) {
+        const pid = parts[it.part]();
+        const pos = v3.add(h.p, v3.mul(h.d, it.z0));
+        occs.push({ id: uid('o'), name: nameOf(pid), part: pid, xf: { pos: pos.map((x) => Math.round(x * 1e4) / 1e4) as V3, quat: quatZTo(it.outward ? h.d : v3.mul(h.d, -1)) } });
+      }
+      summary = `${kind === 'bolt' ? 'Tornillo' : 'Espárrago'} ${plan.size} × ${plan.lengthLbl} · sobresale ${plan.projection} mm`;
+    }
+    s.commitAsm((a) => { a.occurrences.push(...occs); });
+    s.set({ dialog: null, tool: null });
+    s.notify(`${holes.length} fijación(es): ${summary}`);
   },
   patternComponent: (occId: string, p: Record<string, string>) => {
     const s = S();

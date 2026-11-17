@@ -14,6 +14,7 @@ import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
 import type { MeshData } from '../core/cadClient';
 import { View3D, css, tv, vArr, planarFaceAt, faceVertices } from './view3d';
+import { sizeForHole } from '../core/fasteners';
 
 export interface PickedFace { owner: string; ownerKind: 'occ' | 'member'; pointW: V3; normalW: V3; pointL: V3; normalL: V3; vertsW: V3[]; kind: 'plane' | 'axis'; radius?: number; convex?: boolean; centerL?: V3; xdirL?: V3 }
 
@@ -626,6 +627,46 @@ export default function AsmViewport() {
         }
         return;
       }
+      if (s.tool === 'fastHole' && s.dialog?.kind === 'fastener') {
+        const fdl = s.dialog;
+        const hit = hitAt(ev); if (!hit) return;
+        const f = faceFromHit(hit);
+        if (!f || f.kind !== 'axis' || f.convex || hit.object.userData.kind !== 'occ') { s.notify('Haz clic en la pared de un taladro, cerca del lado donde va la cabeza o la primera tuerca', 'error'); return; }
+        const m = meshOf('occ', hit.object.userData.id)!, mw = hit.object.matrixWorld;
+        const d0 = tv(f.normalW).normalize(), p0 = tv(f.pointW), r = f.radius ?? 5;
+        const found: { p: THREE.Vector3; d: THREE.Vector3 }[] = [{ p: p0, d: d0 }];
+        if ((fdl.fx as { all?: boolean }).all !== false) {
+          for (let g = 0; g < m.faceGroups.length; g++) {
+            const c = cylinderOf(m, g); if (!c || c.convex || Math.abs(c.radius - r) > 0.05) continue;
+            const ax = c.axis.clone().transformDirection(mw); if (Math.abs(ax.dot(d0)) < 0.999) continue;
+            const base = c.point.clone().sub(c.axis.clone().multiplyScalar(c.point.dot(c.axis)));
+            const ends = [c.tmin, c.tmax].map((t) => base.clone().add(c.axis.clone().multiplyScalar(t)).applyMatrix4(mw));
+            const e = ends.find((q) => Math.abs(q.clone().sub(p0).dot(d0)) < 0.5); if (!e) continue;
+            if (found.some((x) => x.p.distanceTo(e) < 0.5)) continue;
+            found.push({ p: e, d: d0.clone() });
+          }
+        }
+        // espesor a abarcar por fuera del taladro (paralelo al eje), sumando huecos de hasta 10 mm (junta)
+        const occl = pickables.filter((q) => q.userData.kind === 'occ' || q.userData.kind === 'member');
+        const holes = found.map(({ p, d }) => {
+          const xr = new THREE.Vector3(1, 0, 0); if (Math.abs(xr.dot(d)) > 0.9) xr.set(0, 1, 0); xr.sub(d.clone().multiplyScalar(xr.dot(d))).normalize();
+          const o = p.clone().addScaledVector(xr, r + 0.8).addScaledVector(d, 2);
+          const hs = new THREE.Raycaster(o, d.clone().negate(), 0, 5000).intersectObjects(occl, false).map((h) => h.distance).sort((a, b) => a - b);
+          let grip = 0, start = p.clone();
+          if (hs.length >= 2) {
+            let end = hs[1];
+            for (let i = 2; i + 1 < hs.length; i += 2) { if (hs[i] - end > 10) break; end = hs[i + 1]; }
+            grip = Math.round((end - hs[0]) * 10) / 10;
+            start = p.clone().addScaledVector(d, 2 - hs[0]);
+          }
+          return { p: vArr(start, 4), d: vArr(d, 6), grip };
+        });
+        const fx = fdl.fx as { std?: 'EN' | 'ASME' };
+        const size = sizeForHole(fx.std ?? 'EN', 2 * r);
+        useStore.setState({ tool: null, dialog: { ...fdl, fx: { ...fdl.fx, holes, grip: String(holes[0].grip), ...(size ? { size } : {}) } } });
+        s.notify(`${holes.length} taladro(s) Ø${Math.round(2 * r * 10) / 10} · espesor a abarcar ${holes[0].grip} mm${size ? ` · ${size}` : ''}`);
+        return;
+      }
       if (s.tool === 'asmFace' || s.tool === 'weldFace' || s.tool === 'boltFace') {
         const hit = hitAt(ev); if (!hit) return;
         const f = faceFromHit(hit);
@@ -752,6 +793,7 @@ export default function AsmViewport() {
     asmFace: dialog?.kind === 'asmwp' ? 'Cara plana o plano de base para el plano de trabajo' : step === 0 ? 'Primera geometría: cara, eje o plano de origen' : step === 1 ? 'Segunda geometría (se moverá el componente libre)' : 'Plano de simetría',
     weldFace: step === 0 ? 'Primera cara a soldar' : 'Segunda cara a soldar',
     boltFace: 'Cara de inicio: donde apoya la cabeza del tornillo',
+    fastHole: 'Clic en la pared de un taladro, cerca del lado de la cabeza o de la primera tuerca',
     move: 'Arrastra el gizmo para mover o girar el componente seleccionado',
     place: 'Clic: soltar copia · X / Y / Z: girar 90° · Esc o clic derecho: terminar',
     pickMember: 'Selecciona la barra y después la barra de referencia',

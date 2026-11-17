@@ -1,13 +1,18 @@
 // Centro de contenido: piezas normalizadas generadas como piezas paramétricas INV3D (.i3p).
 import { newDoc, type PartDoc, type SkEntity } from './doc';
 import { BOLTS } from './catalog';
+import { FASTENER_SIZES, makeBolt, makeStud, makeNut, makeWasher, makeGasket, gasketSizes, lengthLabel } from './fasteners';
 
 export interface ContentFamily {
   id: string; name: string; std: string; category: string;
   sizes: string[];
   lengths?: (size: string) => number[];
   make: (size: string, length: number) => PartDoc;
+  /** Rótulo del campo de longitud y formato (por defecto «Longitud» en mm) */
+  lenLabel?: string; fmtLen?: (l: number) => string;
 }
+const ASME_LEN = Array.from({ length: 4 * 24 - 3 }, (_, i) => Math.round((1 + i * 0.25) * 25.4 * 100) / 100); // 1" … 24" cada 1/4"
+const fmtIn = (l: number) => lengthLabel('ASME', l);
 
 const LEN = [6, 8, 10, 12, 16, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200];
 const XY = (offset = '0') => ({ kind: 'std' as const, name: 'XY' as const, offset });
@@ -34,24 +39,20 @@ const BEARINGS: Record<string, [number, number, number]> = {
 };
 
 export const CONTENT: ContentFamily[] = [
+  { id: 'iso4014', name: 'Tornillo de cabeza hexagonal', std: 'ISO 4014 / 4017', category: 'Tornillería EN / ISO', sizes: FASTENER_SIZES.EN, lengths: () => LEN.filter((l) => l >= 10).concat([220, 240, 260, 280, 300]), make: (m, L) => makeBolt('EN', m, L) },
+  { id: 'enstud', name: 'Espárrago (varilla roscada)', std: 'DIN 976-1 / EN 1515-1', category: 'Tornillería EN / ISO', sizes: FASTENER_SIZES.EN, lengths: () => Array.from({ length: 80 }, (_, i) => 30 + i * 5), make: (m, L) => makeStud('EN', m, L) },
+  { id: 'iso4032', name: 'Tuerca hexagonal', std: 'ISO 4032', category: 'Tornillería EN / ISO', sizes: FASTENER_SIZES.EN, make: (m) => makeNut('EN', m) },
+  { id: 'iso7089', name: 'Arandela plana', std: 'ISO 7089', category: 'Tornillería EN / ISO', sizes: FASTENER_SIZES.EN, make: (m) => makeWasher('EN', m) },
+  { id: 'asmebolt', name: 'Tornillo hexagonal pesado', std: 'ASME B18.2.1', category: 'Tornillería ASME', sizes: FASTENER_SIZES.ASME, lengths: () => ASME_LEN, fmtLen: fmtIn, make: (m, L) => makeBolt('ASME', m, L) },
+  { id: 'asmestud', name: 'Espárrago para bridas', std: 'ASME B18.31.2 / B16.5', category: 'Tornillería ASME', sizes: FASTENER_SIZES.ASME, lengths: () => ASME_LEN, fmtLen: fmtIn, make: (m, L) => makeStud('ASME', m, L) },
+  { id: 'asmenut', name: 'Tuerca hexagonal pesada 2H', std: 'ASME B18.2.2', category: 'Tornillería ASME', sizes: FASTENER_SIZES.ASME, make: (m) => makeNut('ASME', m) },
+  { id: 'f436', name: 'Arandela endurecida', std: 'ASTM F436', category: 'Tornillería ASME', sizes: FASTENER_SIZES.ASME, make: (m) => makeWasher('ASME', m) },
+  { id: 'gkenflat', name: 'Junta plana IBC', std: 'EN 1514-1', category: 'Juntas', sizes: gasketSizes('EN'), lengths: () => [1, 1.5, 2, 3, 4], lenLabel: 'Espesor', make: (k, t) => makeGasket('EN', k, 'flat', t) },
+  { id: 'gkenspiral', name: 'Junta espirometálica', std: 'EN 1514-2', category: 'Juntas', sizes: gasketSizes('EN'), lengths: () => [4.5, 3.2, 6.4], lenLabel: 'Espesor espiral', make: (k, t) => makeGasket('EN', k, 'spiral', t) },
+  { id: 'gkasflat', name: 'Junta plana', std: 'ASME B16.21', category: 'Juntas', sizes: gasketSizes('ASME'), lengths: () => [1.6, 3.2], lenLabel: 'Espesor', make: (k, t) => makeGasket('ASME', k, 'flat', t) },
+  { id: 'gkasspiral', name: 'Junta espirometálica', std: 'ASME B16.20', category: 'Juntas', sizes: gasketSizes('ASME'), lengths: () => [4.5, 3.2, 6.4], lenLabel: 'Espesor espiral', make: (k, t) => makeGasket('ASME', k, 'spiral', t) },
   {
-    id: 'iso4017', name: 'Tornillo de cabeza hexagonal', std: 'ISO 4017', category: 'Tornillería', sizes: Object.keys(BOLTS), lengths: () => LEN.filter((l) => l >= 10),
-    make: (m, L) => {
-      const b = BOLTS[m]; const d = base(`ISO 4017 - ${m}x${L} - 8.8`, `Tornillo hexagonal ${m}×${L}`);
-      d.parameters = [{ name: 'd', expr: `${b.d} mm`, comment: 'Diámetro nominal' }, { name: 'L', expr: `${L} mm`, comment: 'Longitud' }, { name: 's', expr: `${b.s} mm`, comment: 'Entrecaras' }, { name: 'k', expr: `${b.k} mm`, comment: 'Altura de cabeza' }];
-      d.features = [
-        { id: 's1', name: 'Cabeza', type: 'sketch', plane: XY(), entities: [hex('h', 's')] },
-        { id: 'f1', name: 'Extrusión1', type: 'extrude', profile: 's1', distance: 'k', dir: 'normal', op: 'join' },
-        { id: 's2', name: 'Caña', type: 'sketch', plane: XY(), entities: [circle('c', 'd')] },
-        { id: 'f2', name: 'Extrusión2', type: 'extrude', profile: 's2', distance: 'L', dir: 'reverse', op: 'join' },
-        { id: 'f3', name: 'Chaflán1', type: 'chamfer', distance: `${Math.max(0.5, b.p * 0.7)} mm`, edges: { mode: 'picked', points: [[b.d / 2, 0, -L]] } },
-        { id: 'f4', name: 'Rosca1', type: 'thread', faces: [[b.d / 2, 0, -L / 2]], designation: `${m}x${b.p}`, length: `${Math.min(L, 2 * b.d + 6)} mm`, full: L <= 2 * b.d + 6 },
-      ];
-      return d;
-    },
-  },
-  {
-    id: 'iso4762', name: 'Tornillo de cabeza cilíndrica allen', std: 'ISO 4762', category: 'Tornillería', sizes: Object.keys(ISO4762), lengths: () => LEN.filter((l) => l >= 8),
+    id: 'iso4762', name: 'Tornillo de cabeza cilíndrica allen', std: 'ISO 4762', category: 'Tornillería EN / ISO', sizes: Object.keys(ISO4762), lengths: () => LEN.filter((l) => l >= 8),
     make: (m, L) => {
       const b = BOLTS[m], h = ISO4762[m]; const d = base(`ISO 4762 - ${m}x${L} - 8.8`, `Tornillo allen ${m}×${L}`);
       d.parameters = [{ name: 'd', expr: `${b.d} mm`, comment: '' }, { name: 'L', expr: `${L} mm`, comment: '' }, { name: 'dk', expr: `${h.dk} mm`, comment: 'Ø cabeza' }, { name: 'k', expr: `${h.k} mm`, comment: 'Altura de cabeza' }, { name: 'sw', expr: `${h.s} mm`, comment: 'Llave allen' }];
@@ -63,30 +64,6 @@ export const CONTENT: ContentFamily[] = [
         { id: 's3', name: 'Caña', type: 'sketch', plane: XY(), entities: [circle('c2', 'd')] },
         { id: 'f3', name: 'Extrusión3', type: 'extrude', profile: 's3', distance: 'L', dir: 'reverse', op: 'join' },
         { id: 'f4', name: 'Rosca1', type: 'thread', faces: [[b.d / 2, 0, -L / 2]], designation: `${m}x${b.p}`, length: `${L} mm`, full: true },
-      ];
-      return d;
-    },
-  },
-  {
-    id: 'iso4032', name: 'Tuerca hexagonal', std: 'ISO 4032', category: 'Tornillería', sizes: Object.keys(BOLTS),
-    make: (m) => {
-      const b = BOLTS[m]; const d = base(`ISO 4032 - ${m} - 8`, `Tuerca hexagonal ${m}`);
-      d.parameters = [{ name: 'd', expr: `${b.d} mm`, comment: '' }, { name: 's', expr: `${b.s} mm`, comment: 'Entrecaras' }, { name: 'm', expr: `${b.m} mm`, comment: 'Altura' }];
-      d.features = [
-        { id: 's1', name: 'Boceto1', type: 'sketch', plane: XY(), entities: [hex('h', 's'), circle('c', 'd')] },
-        { id: 'f1', name: 'Extrusión1', type: 'extrude', profile: 's1', distance: 'm', dir: 'normal', op: 'join' },
-        { id: 'f2', name: 'Rosca1', type: 'thread', faces: [[b.d / 2, 0, b.m / 2]], designation: `${m}x${b.p}`, length: `${b.m} mm`, full: true },
-      ];
-      return d;
-    },
-  },
-  {
-    id: 'iso7089', name: 'Arandela plana', std: 'ISO 7089', category: 'Tornillería', sizes: Object.keys(BOLTS),
-    make: (m) => {
-      const b = BOLTS[m]; const d = base(`ISO 7089 - ${b.d} - 200 HV`, `Arandela ${m}`);
-      d.features = [
-        { id: 's1', name: 'Boceto1', type: 'sketch', plane: XY(), entities: [circle('c1', b.d2), circle('c2', b.d0 - 0.5)] },
-        { id: 'f1', name: 'Extrusión1', type: 'extrude', profile: 's1', distance: `${b.h} mm`, dir: 'normal', op: 'join' },
       ];
       return d;
     },

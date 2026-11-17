@@ -274,6 +274,23 @@ export default function Ribbon() {
               {norm === 'ASME' && <Col><Small icon="pstub" label="Portabridas" onClick={() => s.open({ kind: 'piping', pk: 'stub', norm })} /></Col>}
             </Group>
           ))}
+          <Group label="Tornillería y juntas (ASME · EN)">
+            <Big icon="bolt" label="Fijación" disabled={k !== 'assembly'} onClick={() => s.open({ kind: 'fastener', fx: { std: 'EN', kind: 'bolt', all: true } })} title={k === 'assembly' ? 'Tornillo + arandela + tuerca o espárrago + 2 tuercas en los taladros elegidos, con la longitud según el espesor a abarcar y la junta (sobresale 10 mm en métrica, 2 hilos en ASME)' : 'Disponible en un ensamblaje'} />
+            <Col>
+              <Small icon="bolt" label="Tornillo EN" onClick={() => s.open({ kind: 'contentf', fam: 'iso4014' })} title="ISO 4014 / 4017" />
+              <Small icon="bolt" label="Espárrago EN" onClick={() => s.open({ kind: 'contentf', fam: 'enstud' })} title="DIN 976-1 / EN 1515-1" />
+              <Small icon="content" label="Tuerca / arandela EN" onClick={() => s.open({ kind: 'contentf', fam: 'iso4032' })} title="ISO 4032 · ISO 7089" />
+            </Col>
+            <Col>
+              <Small icon="bolt" label="Tornillo ASME" onClick={() => s.open({ kind: 'contentf', fam: 'asmebolt' })} title="ASME B18.2.1 hexagonal pesado" />
+              <Small icon="bolt" label="Espárrago ASME" onClick={() => s.open({ kind: 'contentf', fam: 'asmestud' })} title="ASME B18.31.2 para bridas B16.5" />
+              <Small icon="content" label="Tuerca / arandela ASME" onClick={() => s.open({ kind: 'contentf', fam: 'asmenut' })} title="ASME B18.2.2 2H · ASTM F436" />
+            </Col>
+            <Col>
+              <Small icon="pflange" label="Junta EN" onClick={() => s.open({ kind: 'contentf', fam: 'gkenflat' })} title="EN 1514-1 plana · EN 1514-2 espirometálica" />
+              <Small icon="pflange" label="Junta ASME" onClick={() => s.open({ kind: 'contentf', fam: 'gkasflat' })} title="ASME B16.21 plana · B16.20 espirometálica" />
+            </Col>
+          </Group>
           <Group label="Redes y cálculo a presión">
             <Big icon="pipe" label="Red de tuberías" disabled={k !== 'assembly'} onClick={() => s.open({ kind: 'pipenet' })} title={k === 'assembly' ? 'Trazado, dimensionado, pérdidas, espesores, PED, vanos, generación e isométrico' : 'Disponible en un ensamblaje'} />
             <Big icon="hcalc" label="Comprobar a presión" onClick={() => s.open({ kind: 'pressure' })} title="Espesor de tubo (B31.3 / EN 13480), bridas P-T (B16.5 / EN 1092-1), refuerzo de derivaciones y vanos entre soportes" />
