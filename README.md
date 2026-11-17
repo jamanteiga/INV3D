@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.25
+## Versión 0.25.1
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.25.1**
+- **Ensamblar › Posición › Rotar** (tecla R): arrastrando una pieza se gira sola alrededor de su centro, para ver y elegir la geometría a restringir (funciona con el diálogo de restricción abierto). Pieza libre: el giro se guarda. Pieza restringida o fija: giro temporal, se restablece con Esc o al desactivar Rotar.
 
 **Novedades 0.25**
 - **Plano**: doble clic sobre el cajetín abre su plantilla. **Separadores de zona** en todos los formatos (1, 2, 3… y A, B, C…, a partes iguales: A4 6×4, A3 8×6, A2 12×8, A1 16×12, A0 24×16). **Colocar vistas › Plantillas de hoja**: importar desde DXF/DWG el **plano completo**, los **bordes**, el **cajetín de revisiones** y el **copyright** (en la esquina elegida); el cajetín principal sigue en *Cajetín*.

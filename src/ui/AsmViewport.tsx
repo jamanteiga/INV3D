@@ -287,6 +287,8 @@ export default function AsmViewport() {
     };
     const explodeOf = (s: State, id: string): V3 => v3.mul(s.asm.explode[(findOcc(s, id)?.sub ?? id)] ?? [0, 0, 0], s.mode === 'present' ? s.explodeT : 0);
 
+    /** Giros temporales de «Rotar» (matriz en mundo que se antepone a la posición resuelta) */
+    const tempRot = new Map<string, THREE.Matrix4>();
     const build = (s: State) => {
       V.clearGroup(modelGroup);
       pickables = [];
@@ -322,7 +324,8 @@ export default function AsmViewport() {
             grp.traverse((x: any) => { if (x.isMesh) { x.geometry.computeBoundingBox(); ghost!.box.union(x.geometry.boundingBox.clone().applyMatrix4(grp.matrix)); } });
             continue;
           }
-          add('occ', o.id, meshOf('occ', o.id), color, xfMatrix(xf, explodeOf(s, o.id)));
+          const tr = tempRot.get(topOf(s, o.id));
+          add('occ', o.id, meshOf('occ', o.id), color, tr ? tr.clone().multiply(xfMatrix(xf, explodeOf(s, o.id))) : xfMatrix(xf, explodeOf(s, o.id)));
         }
         for (const m of r.members) {
           const fm = s.asm.frames.find((f) => f.id === m.id);
@@ -473,12 +476,58 @@ export default function AsmViewport() {
 
     let downAt: { x: number; y: number; button: number } | null = null;
     const cvs = V.renderer.domElement;
+    // Rotar: giro libre de una sola pieza alrededor de su centro (trackball con el ratón)
+    let rot: { top: string; c: THREE.Vector3; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; R0: THREE.Matrix4; x: number; y: number; R: THREE.Matrix4; moved: boolean } | null = null;
+    host.current!.addEventListener('pointerdown', (ev) => {
+      const s = useStore.getState();
+      if (!s.asmRotate || ev.button !== 0 || (s.tool && s.tool !== 'move') || s.mode === 'present') return;
+      const hit = hitAt(ev);
+      if (!hit || hit.object.userData.kind !== 'occ') return;
+      const top = topOf(s, hit.object.userData.id);
+      const meshes = pickables.filter((m) => m.userData.kind === 'occ' && topOf(s, m.userData.id) === top);
+      const bb = new THREE.Box3(); for (const m of meshes) { m.geometry.computeBoundingBox(); bb.union(m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld)); }
+      V.controls.enabled = false;
+      rot = { top, c: bb.getCenter(new THREE.Vector3()), grps: meshes.map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() })), R0: tempRot.get(top)?.clone() ?? new THREE.Matrix4(), x: ev.clientX, y: ev.clientY, R: new THREE.Matrix4(), moved: false };
+      cvs.style.cursor = 'grabbing';
+    }, { capture: true });
+    window.addEventListener('pointermove', (ev) => {
+      if (!rot) return;
+      const dx = ev.clientX - rot.x, dy = ev.clientY - rot.y;
+      if (!rot.moved && Math.hypot(dx, dy) <= 4) return;
+      rot.moved = true;
+      const up = camera.up.clone().applyQuaternion(camera.quaternion).normalize(), right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+      const q = new THREE.Quaternion().setFromAxisAngle(up, dx * 0.01).multiply(new THREE.Quaternion().setFromAxisAngle(right, dy * 0.01));
+      rot.R = new THREE.Matrix4().makeTranslation(rot.c.x, rot.c.y, rot.c.z).multiply(new THREE.Matrix4().makeRotationFromQuaternion(q)).multiply(new THREE.Matrix4().makeTranslation(-rot.c.x, -rot.c.y, -rot.c.z));
+      for (const { g, m } of rot.grps) { g.matrix.copy(m).premultiply(rot.R); g.matrixWorldNeedsUpdate = true; }
+      V.request();
+    });
+    /** Fin del giro: persistente si la pieza está libre (sin restricciones ni fija), temporal si no */
+    const endRot = (): boolean => {
+      const r = rot; rot = null; if (!r) return false;
+      V.controls.enabled = true; cvs.style.cursor = 'grab';
+      if (!r.moved) return false;
+      const s = useStore.getState();
+      const o = s.asm.occurrences.find((x) => x.id === r.top);
+      const used = s.asm.joints.some((j) => [j.a, j.b, j.c].some((f) => f && (f.occ === r.top || topOf(s, f.occ) === r.top)));
+      if (o && !o.grounded && !used && !o.mirrorOf && !o.patternOf) {
+        const xf = s.asmResult?.xf[o.id] ?? o.xf;
+        const M = r.R.clone().multiply(xfMatrix(xf));
+        const pos = new THREE.Vector3(), quat = new THREE.Quaternion(); M.decompose(pos, quat, new THREE.Vector3());
+        tempRot.delete(r.top);
+        s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === r.top); if (t) t.xf = { pos: vArr(pos, 4), quat: quat.toArray() as [number, number, number, number] }; });
+      } else {
+        tempRot.set(r.top, r.R.clone().multiply(r.R0));
+        if (!rotWarned) { rotWarned = true; s.notify('Giro temporal (pieza restringida o fija): se restablece al salir de Rotar'); }
+      }
+      return true;
+    };
+    let rotWarned = false;
     // Arrastre libre: clic izquierdo mantenido sobre un componente no fijo lo mueve en el plano de la vista;
     // al soltar se vuelven a resolver las restricciones (se mueve solo en sus grados de libertad libres).
     let drag: { id: string; grp: THREE.Object3D; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; plane: THREE.Plane; start: THREE.Vector3; xf: Xform; moved: boolean } | null = null;
     host.current!.addEventListener('pointerdown', (ev) => {
       const s = useStore.getState();
-      if (ev.button !== 0 || s.tool || s.mode === 'present' || V.picking) return;
+      if (ev.button !== 0 || s.tool || s.mode === 'present' || V.picking || s.asmRotate) return;
       const hit = hitAt(ev);
       if (!hit || hit.object.userData.kind !== 'occ') return;
       const top = topOf(s, hit.object.userData.id);
@@ -514,6 +563,7 @@ export default function AsmViewport() {
     };
     cvs.addEventListener('pointerdown', (ev) => { downAt = { x: ev.clientX, y: ev.clientY, button: ev.button }; });
     cvs.addEventListener('pointerup', (ev) => {
+      if (endRot()) { downAt = null; ev.stopImmediatePropagation(); return; }
       if (endDrag(ev)) { downAt = null; return; }
       if (V.picking) { downAt = null; return; }
       const small = !!downAt && Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y) <= 4;
@@ -686,6 +736,7 @@ export default function AsmViewport() {
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); }
       if (s.view !== p.view) V.setView(s.view.name);
+      if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
     });
     V.setView('home');
     return () => { unsub(); tc.dispose(); V.dispose(); };

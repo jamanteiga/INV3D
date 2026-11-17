@@ -400,6 +400,7 @@ export default function Ribbon() {
           </Group>
           <Group label="Posición">
             <Big icon="move" label="Mover" active={tool === 'move'} onClick={T('move')} title="Mover o girar el componente seleccionado con el gizmo (respeta las restricciones)" />
+            <Big icon="rotate2d" label="Rotar" active={s.asmRotate} onClick={() => s.set({ asmRotate: !s.asmRotate })} title="Rotar una pieza sola arrastrándola, para ver y elegir su geometría (también con un diálogo de restricción abierto). Si está restringida o fija el giro es temporal: se restablece al salir con Esc o con este botón" />
             <Col>
               <Small icon="ground" label="Fijar / liberar" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={A.toggleGround} />
             </Col>

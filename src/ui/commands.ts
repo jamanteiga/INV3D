@@ -90,6 +90,7 @@ export const COMMANDS: Command[] = [
   { id: 'asm.place', label: 'Colocar componente', ctx: 'assembly', keys: ['P'], run: (s) => s.open({ kind: 'place' }) },
   { id: 'asm.joint', label: 'Restringir (unión)', ctx: 'assembly', keys: ['J'], run: () => asmActions.openJoint() },
   { id: 'asm.epoints', label: 'Conectar ePoints', ctx: 'assembly', keys: [], run: () => asmActions.connectEPoints() },
+  { id: 'asm.rotate', label: 'Rotar pieza (giro libre)', ctx: 'assembly', keys: ['R'], run: (s) => s.set({ asmRotate: !s.asmRotate }) },
   { id: 'asm.workplane', label: 'Plano auxiliar del ensamblaje', ctx: 'assembly', keys: [], run: () => asmActions.openWorkPlane() },
   { id: 'asm.workaxis', label: 'Eje auxiliar del ensamblaje', ctx: 'assembly', keys: [], run: (s) => s.open({ kind: 'asmaux', aux: 'axis' }) },
   { id: 'asm.workpoint', label: 'Punto auxiliar del ensamblaje', ctx: 'assembly', keys: [], run: (s) => s.open({ kind: 'asmaux', aux: 'point' }) },

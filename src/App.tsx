@@ -177,6 +177,7 @@ export default function App() {
         if (s.menuOpen) return s.set({ menuOpen: false });
         if (s.epConnect) return s.set({ epConnect: null });
         if (s.dialog) return s.closeDialog();
+        if (s.asmRotate) return s.set({ asmRotate: false });
         if (s.tool === 'place') return asmActions.finishPlace();
         if (s.tool) return s.setTool(null);
         if (s.mode === 'sketch' && (s.selEntity || s.selCon || s.selEntities.length)) return s.set({ selEntity: null, selCon: null, selEntities: [] });
