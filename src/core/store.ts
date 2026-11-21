@@ -174,6 +174,8 @@ export interface State {
   aiOpen: boolean;
   /** Cara plana seleccionada en el modelo: plano listo para «Iniciar boceto 2D» */
   selFacePlane: PlaneRef | null;
+  /** Operación que espera un boceto (corte, punzonado…): al terminar el boceto se reabre con él */
+  pendingFeature: { type: string; draft: Record<string, unknown> } | null;
   selItem: string | null;        // ensamblaje: componente/barra/cordón/tornillo/unión; plano: vista
   dialog: Dialog;
   result: RegenResult | null;
@@ -263,17 +265,18 @@ export const activeSketch = (s: State): SketchF | null => {
   return f && f.type === 'sketch' ? f : null;
 };
 
+// En chapa solo se proponen bocetos libres: reutilizar el de la cara base haría que un corte se llevara toda la chapa
 function defaultProfile(doc: PartDoc): string {
   const used = consumedSketches(doc);
   const sks = doc.features.filter((f): f is SketchF => f.type === 'sketch' && f.entities.some((e) => e.type !== 'point' && !e.construction));
   const free = sks.filter((s) => !used.has(s.id));
-  return (free[free.length - 1] ?? sks[sks.length - 1])?.id ?? '';
+  return (free[free.length - 1] ?? (doc.sheet ? undefined : sks[sks.length - 1]))?.id ?? '';
 }
 function lastSketch(doc: PartDoc, pred: (s: SketchF) => boolean): string {
   const used = consumedSketches(doc);
   const sks = doc.features.filter((f): f is SketchF => f.type === 'sketch' && pred(f));
   const free = sks.filter((s) => !used.has(s.id));
-  return (free[free.length - 1] ?? sks[sks.length - 1])?.id ?? '';
+  return (free[free.length - 1] ?? (doc.sheet ? undefined : sks[sks.length - 1]))?.id ?? '';
 }
 const lastBody = (doc: PartDoc) => [...doc.features].reverse().find((f) => ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil'].includes(f.type))?.id;
 
@@ -329,7 +332,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, asmRotate: false, aiOpen: false, selFacePlane: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, asmRotate: false, aiOpen: false, selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
@@ -555,7 +558,10 @@ export const useStore = create<State>((set, get) => ({
       const probe = structuredClone(s0.doc);
       if (syncCenterAxes(probe, id, ev)) s0.commit((d) => { syncCenterAxes(d, id, ev); });
     }
-    set({ mode: 'model', sketchId: null, tool: null, selEntity: null, selEntities: [], selCon: null, skInfo: null, view: { name: 'restore', n: get().view.n + 1 }, skStyle: 'normal' });
+    const skId = s0.sketchId, pf = s0.pendingFeature;
+    set({ mode: 'model', sketchId: null, tool: null, selEntity: null, selEntities: [], selCon: null, skInfo: null, view: { name: 'restore', n: get().view.n + 1 }, skStyle: 'normal', pendingFeature: null });
+    // se vuelve a la operación que pidió el boceto, ya con él seleccionado
+    if (pf && skId) setTimeout(() => { const st = get(); st.openFeatureDialog(pf.type as FeatDialogKind); st.updateDraft({ ...pf.draft, ...(pf.type === 'sm_punch' || pf.type === 'hole' ? { sketch: skId } : { profile: skId }) }); }, 0);
   },
   setTool: (tool) => {
     const s = get();

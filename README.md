@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.28
+## Versión 0.28.1
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.28.1**
+- Chapa: **Corte** y **Punzonado** ya no reutilizan el boceto de la cara base. Con el cuadro abierto y sin boceto libre, haz clic en una cara plana: se abre un boceto en ella y al pulsar «Terminar boceto» vuelve la operación con ese boceto. También: clic en la cara + **S**.
 
 **Novedades 0.28**
 - **Chapa**: clic en una cara (base o pestaña) + **S** (o *Chapa › Iniciar boceto 2D*) para bocetar en ella, y con ese boceto **Corte**, **Punzonado** o **Agujero**.

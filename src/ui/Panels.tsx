@@ -164,6 +164,7 @@ function FeatureDialog() {
   return (
     <div className="fdlg">
       <Head icon={ICONS[f.type] ?? 'part'} name={f.name} onName={(v) => up({ name: v })} />
+      {f.type === 'extrude' && f.op === 'cut' && s.doc.sheet && !(s.dialog && 'editId' in s.dialog && s.dialog.editId) && <p className="phelp" style={{ margin: '2px 0 6px' }}>¿Sin boceto? Haz clic en una cara plana de la chapa: se abre un boceto en ella; dibuja el perfil y al terminar vuelves aquí.</p>}
       {f.type === 'extrude' && (<>
         <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
         <Row label="Extensión"><Seg value={f.extent ?? 'distance'} onChange={(v) => up({ extent: v })} options={[['distance', 'Distancia'], ['through', 'A través de todo']]} /></Row>
@@ -272,6 +273,7 @@ function FeatureDialog() {
       </>)}
       {f.type === 'sm_punch' && (<>
         <Row label="Centros">{skSel(f.sketch, 'sketch', sketches.filter((x) => x.entities.some((e) => e.type === 'point')))}</Row>
+        <p className="phelp" style={{ margin: '2px 0 6px' }}>¿Sin boceto? Haz clic en una cara plana de la chapa: se abre un boceto en ella; marca los puntos y al terminar vuelves aquí.</p>
         <Row label="Forma"><Seg value={f.shape} onChange={(v) => up({ shape: v })} options={[['round', 'Redondo'], ['square', 'Cuadrado'], ['rect', 'Rectángulo'], ['slot', 'Coliso']]} /></Row>
         {f.shape === 'round' && <Row label="Diámetro"><Expr value={f.d} live onCommit={(v) => up({ d: v })} /></Row>}
         {f.shape !== 'round' && <Row label={f.shape === 'slot' ? 'Longitud' : 'Ancho'}><Expr value={f.w} live onCommit={(v) => up({ w: v })} /></Row>}

@@ -1280,6 +1280,24 @@ export default function PartViewport() {
       // clic derecho sobre una cara: menú de operaciones (nuevo boceto, taladro, empalme, vaciado, rosca, auxiliares…)
       if (btn === 2 && s.mode !== 'sketch' && !s.tool) { const fh = faceHit(ev); if (fh) { openFaceMenu(ev, fh); return; } }
       if (btn !== 0) return;
+      // con Corte / Punzonado abiertos y sin boceto: clic en una cara plana → boceto en ella; al terminarlo se vuelve a la operación
+      {
+        const dd = s.dialog && 'draft' in s.dialog ? s.dialog.draft as Record<string, unknown> : null;
+        // boceto «libre» = no lo usa ya otra operación (p. ej. el boceto de la cara base)
+        const usedSk = consumedSketches({ ...s.doc, features: s.doc.features.filter((f) => f.id !== dd?.id) });
+        const freeSk = (id: unknown) => typeof id === 'string' && !!id && !usedSk.has(id);
+        const wants = dd && !s.tool && !(s.dialog && 'editId' in s.dialog && s.dialog.editId) && ((dd.type === 'extrude' && dd.op === 'cut' && !freeSk(dd.profile)) || (dd.type === 'sm_punch' && !freeSk(dd.sketch)));
+        if (wants) {
+          const fh = faceHit(ev);
+          if (fh && fh.planar && fh.mesh === state.mesh) {
+            const draft = { ...dd! }; delete draft.profile; delete draft.sketch;
+            useStore.setState({ pendingFeature: { type: String(dd!.type), draft }, dialog: null });
+            s.startSketch(planeOfFace(fh));
+            s.notify(`Boceto en la cara: dibuja el ${dd!.type === 'sm_punch' ? 'punto o puntos del punzonado' : 'perfil del corte'} y pulsa «Terminar boceto»; se vuelve a la operación con él`);
+            return;
+          }
+        }
+      }
       // clic en una cara plana del modelo (sin herramienta): queda seleccionada; «Iniciar boceto 2D» (S) bocetará en ella
       if (!s.tool && s.mode !== 'sketch' && !s.dialog && !s.placing) {
         const fh = faceHit(ev);
