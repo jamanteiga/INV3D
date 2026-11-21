@@ -46,7 +46,7 @@ export const COMMANDS: Command[] = [
   { id: 'view.edges', label: 'Aristas (sí/no)', ctx: 'all', keys: [], run: (s) => s.set({ showEdges: !s.showEdges }) },
   { id: 'view.wire', label: 'Alámbrico (sí/no)', ctx: 'all', keys: [], run: (s) => s.set({ wire: !s.wire, showEdges: true }) },
   // Pieza
-  { id: 'part.sketch', label: 'Nuevo boceto', ctx: 'model', keys: ['S'], run: tool('pickPlane') },
+  { id: 'part.sketch', label: 'Nuevo boceto', ctx: 'model', keys: ['S'], run: () => partActions.startSketch() },
   { id: 'part.auxsketch', label: 'Boceto en auxiliar', ctx: 'model', keys: [], run: (s) => s.open({ kind: 'auxsketch' }) },
   { id: 'part.extrude', label: 'Extrusión', ctx: 'model', keys: ['E'], run: feat('extrude') },
   { id: 'part.revolve', label: 'Revolución', ctx: 'model', keys: ['R'], run: feat('revolve') },

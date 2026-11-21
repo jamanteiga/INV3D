@@ -39,7 +39,12 @@ function P_style(st: 'construction' | 'center') {
 }
 
 export const partActions = {
-  startSketch: () => { const s = S(); if (s.mode === 'sketch') s.finishSketch(); s.setTool(s.tool === 'pickPlane' ? null : 'pickPlane'); },
+  startSketch: () => {
+    const s = S();
+    // cara plana seleccionada antes: boceto directamente en ella
+    if (s.mode !== 'sketch' && !s.tool && s.selFacePlane) { const pl = s.selFacePlane; s.set({ selFacePlane: null }); s.startSketch(pl); return; }
+    if (s.mode === 'sketch') s.finishSketch(); s.setTool(s.tool === 'pickPlane' ? null : 'pickPlane');
+  },
   /** Con selección: cambia el estilo de lo seleccionado. Sin selección: estilo para la geometría que se dibuje a continuación */
   toggleConstruction: () => P_style('construction'),
   toggleCenterline: () => P_style('center'),

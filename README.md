@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.27.1
+## Versión 0.27.2
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -29,6 +29,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
 
+**Novedades 0.27.2**
+- **Boceto en una cara**: clic en una cara plana de la pieza (queda resaltada) y **S** o **Modelo 3D › Iniciar boceto 2D** abre el boceto en ella. Con *Iniciar boceto 2D* activo, la cara de la pieza bajo el cursor tiene prioridad sobre los planos de origen que la atraviesan. También: clic derecho sobre la cara › *Nuevo boceto*.
+
 **Novedades 0.27.1**
 - **ePoints automáticos en las piezas generadas**: cada extremo de tubos, codos, tes, cruces, reducciones, casquetes, portabridas, manguitos y bridas (ASME/EN), y de conductos, codos, transiciones, manguitos, tapas, compuertas, silenciadores y flexibles de HVAC lleva un ePoint de inserción en su centro, con la dirección hacia fuera. Las bridas llevan además el de la cara de junta (WN en el extremo del cuello, SO retranqueado espesor + 3 mm, SW en el fondo del encaje con 1,6 mm). Extremos con el mismo nombre (p. ej. «Tubo 4"», «Conducto Ø315», «Cara brida 4 Clase 150») se conectan solos al colocarlos.
 
@@ -37,7 +40,7 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 - Configuración en ⚙ del panel: clave de API de Gemini (Google AI Studio) guardada solo en el navegador y elección de modelo.
 
 **Novedades 0.26.2**
-- Zoom con la rueda el doble de rápido por defecto y regulable en **Herramientas › Opciones › General › Velocidad del zoom** (0,5× a 6×), en 3D y en planos.
+- Zoom con la rueda el doble de rápido por defecto y regulable en **Archivo › Opciones de la aplicación… › General › Velocidad del zoom (rueda)** (0,5× a 6×), en 3D y en planos.
 
 **Novedades 0.26.1**
 - **Fijación** reconoce la brida del taladro (ASME B16.5/B16.47 o EN 1092-1: clase/PN, tamaño, tipo y nº × métrica de pernos) y elige montaje: ASME → espárrago + 2 tuercas + 2 arandelas (B16.5, rosca UNC/8UN); EN → tornillo + arandela + tuerca (EN 1515-1). Si entre las bridas solo hay el hueco de las caras realzadas, suma la junta (espirometálica B16.20 3,2 mm / plana EN 1514-1 2 mm); si la junta está modelada, la mide.
@@ -69,7 +72,7 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 - **Ensamblaje**: clic derecho sobre un componente › *Restringir por ePoint · …* y después el ePoint del otro componente.
 
 **Novedades 0.24**
-- **Guardado**: tras el primer guardado (o al abrir un fichero con Archivo › Abrir) se guarda en el mismo fichero sin preguntar; *Guardar como* sigue preguntando. **Autoguardado** cada 2 min de los documentos ya guardados (Herramientas › Opciones: intervalo en minutos).
+- **Guardado**: tras el primer guardado (o al abrir un fichero con Archivo › Abrir) se guarda en el mismo fichero sin preguntar; *Guardar como* sigue preguntando. **Autoguardado** cada 2 min de los documentos ya guardados (Archivo › Opciones de la aplicación… › Carpeta y sesión: intervalo en minutos).
 - **Pieza → ensamblaje**: al guardar una pieza se actualizan y guardan los ensamblajes y planos abiertos que la usan; con la carpeta de trabajo, al abrir un ensamblaje sus piezas se toman de su fichero.
 - **Ensamblaje**: arrastrar sobre una pieza libre gira la vista; para moverla, selecciónala primero (o Mover). **ePoints visibles** (barra de vista o clic derecho › Ocultar ePoints): clic en un ePoint y en otro de otro componente → se conectan. Al colocar, el ePoint de la pieza nueva **se imanta** al ePoint cercano de otra y al soltar queda conectada. Con *Restringir* abierto los ePoints, y los planos y ejes de origen de cada pieza, se eligen en el 3D o en el árbol.
 - **Origen de la pieza en el ensamblaje**: al desplegar «+» un componente aparecen *Origen* (planos XY/XZ/YZ y ejes X/Y/Z) y sus ePoints; clic derecho en el componente › *Mostrar origen de la pieza*.

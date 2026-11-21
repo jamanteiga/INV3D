@@ -186,6 +186,7 @@ export default function PartViewport() {
     const state = {
       /** segmentos (mundo) de cada boceto visible, para el doble clic */
       skSegs: new Map<string, number[]>(),
+      selFace: -1,
       mesh: null as MeshData | null,
       partMesh: null as THREE.Mesh | null,
       frame: null as Frame | null,
@@ -371,12 +372,14 @@ export default function PartViewport() {
       return mesh;
     };
     let hoverFace = -1;
+    // (cara seleccionada en el modelo: state.selFace)
     let measureSel: number[] = [];
     const buildOverlay = (s: State) => {
       V.clearGroup(overlayGroup);
       if (s.tool === 'measure' && state.mesh) for (const g of measureSel) if (g < state.mesh.edgeGroups.length) overlayGroup.add(V.segs(groupPts(g, state.mesh), V.lineMat(css('--accent'), 4, false, false)));
       const d = s.dialog && 'draft' in s.dialog ? s.dialog.draft : null;
       const m = pickMesh();
+      if (state.mesh && state.selFace >= 0 && state.selFace < state.mesh.faceGroups.length && s.selFacePlane && s.mode !== 'sketch' && !s.tool) overlayGroup.add(faceOverlay(state.mesh, state.selFace, css('--accent'), 0.35));
       if (m && d && (d.type === 'fillet' || d.type === 'chamfer')) {
         const sel = (d.edges as EdgeSel).points, selPts: number[] = [];
         if (d.edges.mode === 'picked') m.edgeGroups.forEach((_, gi) => { if (sel.some((p: V3) => groupMatches(gi, p))) selPts.push(...groupPts(gi)); });
@@ -1072,6 +1075,14 @@ export default function PartViewport() {
       s.notify(`Proyección sobre superficie: ${ents.length} curva(s) en un boceto 3D`);
     };
 
+    /** Plano de boceto sobre una cara plana de la pieza (eje X del boceto lo más alineado posible con X o Y global) */
+    const planeOfFace = (fh: { normal: THREE.Vector3; point: THREE.Vector3 }): PlaneRef => {
+      const n = fh.normal.clone().normalize(), o = n.clone().multiplyScalar(fh.point.dot(n));
+      let x = new THREE.Vector3(1, 0, 0).projectOnPlane(n);
+      if (x.length() < 0.3) x = new THREE.Vector3(0, 1, 0).projectOnPlane(n);
+      x.normalize();
+      return { kind: 'custom', label: 'Cara de la pieza', origin: vArr(o), xDir: vArr(x), normal: vArr(n) };
+    };
     const faceHit = (ev: MouseEvent) => {
       const m = pickMesh(); if (!m || !state.partMesh) return null;
       let target = state.partMesh;
@@ -1269,6 +1280,15 @@ export default function PartViewport() {
       // clic derecho sobre una cara: menú de operaciones (nuevo boceto, taladro, empalme, vaciado, rosca, auxiliares…)
       if (btn === 2 && s.mode !== 'sketch' && !s.tool) { const fh = faceHit(ev); if (fh) { openFaceMenu(ev, fh); return; } }
       if (btn !== 0) return;
+      // clic en una cara plana del modelo (sin herramienta): queda seleccionada; «Iniciar boceto 2D» (S) bocetará en ella
+      if (!s.tool && s.mode !== 'sketch' && !s.dialog && !s.placing) {
+        const fh = faceHit(ev);
+        const ok = !!fh && fh.planar && fh.mesh === state.mesh;
+        state.selFace = ok ? fh!.group : -1;
+        useStore.setState({ selFacePlane: ok ? planeOfFace(fh!) : null, ...(ok && s.result?.faceFeat?.[fh!.group] ? { selFeature: s.result.faceFeat[fh!.group] } : {}) });
+        buildOverlay(useStore.getState());
+        if (ok) setHint('Cara seleccionada · S o «Iniciar boceto 2D» para bocetar en ella · clic derecho: más opciones');
+      }
       const d = s.dialog && 'draft' in s.dialog ? s.dialog.draft : null;
       if (s.tool === 'projSurf') {
         const m = pickMesh(); if (!m || !state.partMesh) return;
@@ -1281,7 +1301,8 @@ export default function PartViewport() {
       if (s.tool === 'pickPlane' || s.tool === 'pickWorkBase' || s.tool === 'projFace') {
         const ph = hitPlane(ev), fh = faceHit(ev), ch = ctxFace(ev);
         let plane: Parameters<typeof s.startSketch>[0] | null = null;
-        if (ch && (!fh || ch.distance < fh.distance) && (!ph || ch.distance <= ph.dist)) {
+        // la cara de la pieza bajo el cursor manda sobre los planos de origen (que atraviesan la pieza)
+        if (ch && (!fh || ch.distance < fh.distance) && (!(fh?.planar) || ch.distance <= fh.distance)) {
           if (!ch.planar) { s.notify('Selecciona una cara plana o un plano', 'error'); return; }
           // cara de otro componente del ensamblaje: plano fijo (sin actualización automática)
           const n = ch.normal.clone().normalize(), o = n.clone().multiplyScalar(ch.point.dot(n));
@@ -1289,13 +1310,9 @@ export default function PartViewport() {
           if (x.length() < 0.3) x = new THREE.Vector3(0, 1, 0).projectOnPlane(n);
           x.normalize();
           plane = { kind: 'custom', label: 'Cara del ensamblaje', origin: vArr(o), xDir: vArr(x), normal: vArr(n) };
-        } else if (fh && (!ph || fh.distance <= ph.dist)) {
+        } else if (fh && (fh.planar || !ph)) {
           if (!fh.planar) { s.notify('Selecciona una cara plana o un plano', 'error'); return; }
-          const n = fh.normal, o = n.clone().multiplyScalar(fh.point.dot(n));
-          let x = new THREE.Vector3(1, 0, 0).projectOnPlane(n);
-          if (x.length() < 0.3) x = new THREE.Vector3(0, 1, 0).projectOnPlane(n);
-          x.normalize();
-          plane = { kind: 'custom', label: 'Cara de la pieza', origin: vArr(o), xDir: vArr(x), normal: vArr(n) };
+          plane = planeOfFace(fh);
         } else if (ph) plane = ph.key.startsWith('work:') ? { kind: 'work', id: ph.key.slice(5) } : { kind: 'std', name: ph.key as StdPlane, offset: '0' };
         if (!plane) return;
         if (s.tool === 'pickWorkBase') { s.updateDraft(d?.type === 'workplane' ? { base: plane } : { plane }); useStore.setState({ tool: s.dialog && 'draft' in s.dialog && ['draft', 'thicken', 'thread'].includes(s.dialog.draft.type) ? 'pickFaces' : null }); }
@@ -1841,6 +1858,7 @@ export default function PartViewport() {
         if (firstMesh && s.result?.mesh) { firstMesh = false; setView('home'); }
       }
       if (s.doc !== p.doc || s.sketchId !== p.sketchId || s.selEntity !== p.selEntity || s.selEntities !== p.selEntities || s.selCon !== p.selCon || s.tool !== p.tool || s.mode !== p.mode || s.skInfo !== p.skInfo || s.showCons !== p.showCons || s.dialog !== p.dialog) buildSketches(s);
+      if ((s.mode !== p.mode || s.doc !== p.doc) && (state.selFace >= 0 || s.selFacePlane)) { state.selFace = -1; if (s.selFacePlane) useStore.setState({ selFacePlane: null }); }
       if (s.tool !== p.tool || s.mode !== p.mode || s.conType !== p.conType) { applyMouse(s); cancelTool(); setHint(''); state.hoverEdge = -1; hoverFace = -1; measureSel = []; buildOverlay(s); }
       if (s.view !== p.view) setView(s.view.name);
       if (s.ctxEdit !== p.ctxEdit || s.active !== p.active) buildCtx(s);
