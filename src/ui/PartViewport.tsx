@@ -1832,6 +1832,7 @@ export default function PartViewport() {
       if (e.key === 'Escape' && s.mode === 'sketch' && (state.chain.length || state.clicks.length || state.picks.length)) { e.stopPropagation(); state.chain = []; state.chainIds = []; state.clicks = []; state.picks = []; state.locks = {}; buildPreview(s); publishTip(s); }
     };
     const cvs = V.renderer.domElement;
+    // en boceto: Mayús + botón central (o derecho) arrastrando gira la pieza (OrbitControls: pan + Mayús = giro); Re Pág vuelve a mirar al boceto
     cvs.addEventListener('pointerdown', onDown);
     cvs.addEventListener('pointerup', onUp);
     cvs.addEventListener('pointermove', onMove);

@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.27.2
+## Versión 0.27.3
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.27.3**
+- En un boceto se puede seguir girando la pieza: **Mayús + botón central (o derecho) arrastrando**, o el ViewCube. **Re Pág** (Mirar al boceto) vuelve a ponerlo de frente.
 
 **Novedades 0.27.2**
 - **Boceto en una cara**: clic en una cara plana de la pieza (queda resaltada) y **S** o **Modelo 3D › Iniciar boceto 2D** abre el boceto en ella. Con *Iniciar boceto 2D* activo, la cara de la pieza bajo el cursor tiene prioridad sobre los planos de origen que la atraviesan. También: clic derecho sobre la cara › *Nuevo boceto*.
