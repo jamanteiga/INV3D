@@ -1004,6 +1004,8 @@ export function flatPattern(doc: PartDoc) {
   const bends: { a: V2; b: V2; label: string }[] = [];
   let flat: Drawing | null = null;
   const sk3 = new Map<string, Sketch3dF>();
+  /** tramos planos de las pestañas ya desarrolladas: 3D → plano */
+  const panels: { p0: V3; ax: V3; iE: V3; d: V3; nF: V3; L: number; BA: number; pf: V2; eF: V2; uF: V2 }[] = [];
   for (const f of doc.features) {
     if (f.suppressed) continue;
     if (f.type === 'sketch') sketches.set(f.id, f);
@@ -1037,16 +1039,44 @@ export function flatPattern(doc: PartDoc) {
     if (f.type === 'sm_flange' && base && f.edge) {
       const th = (ev(f.angle) * Math.PI) / 180, L = ev(f.length);
       const BA = th * (r + k * t);
-      const fr = base.fr;
-      const loc = (p: V3): V2 => { const d = v3.sub(p, fr.origin); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
-      const p0 = loc(f.edge.p0), p1 = loc(f.edge.p1);
-      const w: V2 = [v3.dot(f.edge.w, fr.xDir), v3.dot(f.edge.w, fr.yDir)];
-      const wl = Math.hypot(w[0], w[1]);
-      if (wl < 0.5) throw new Error(`${f.name}: solo se desarrollan pestañas sobre aristas de la cara base`);
-      const u: V2 = [w[0] / wl, w[1] / wl], ext = BA + L;
-      const q = (p: V2, s: number): V2 => [p[0] + u[0] * s, p[1] + u[1] * s];
-      flat = flat!.fuse(polyDrawing([p0, p1, q(p1, ext), q(p0, ext)]));
-      bends.push({ a: q(p0, BA / 2), b: q(p1, BA / 2), label: `${f.dir === 'up' ? 'ARRIBA' : 'ABAJO'} ${Math.round((th * 180) / Math.PI)}° R${r}` });
+      // misma orientación de la arista que en flangeSolid
+      let p0 = f.edge.p0, p1 = f.edge.p1;
+      const n3 = v3.norm(f.edge.n), w3 = v3.norm(f.edge.w);
+      if (v3.dot(v3.cross(w3, n3), v3.sub(p1, p0)) < 0) [p0, p1] = [p1, p0];
+      // ¿sobre qué tramo plano está la arista? la cara base o una pestaña anterior (pestaña sobre pestaña)
+      const fr = base.fr, tol = t + 0.05;
+      let toFlat: ((P: V3) => V2) | null = null, dirFlat: ((v: V3) => V2) | null = null;
+      if (Math.abs(v3.dot(v3.sub(p0, fr.origin), fr.normal)) <= tol && Math.abs(v3.dot(v3.sub(p1, fr.origin), fr.normal)) <= tol && Math.abs(v3.dot(w3, fr.normal)) < 0.2) {
+        toFlat = (P) => { const d = v3.sub(P, fr.origin); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
+        dirFlat = (v) => [v3.dot(v, fr.xDir), v3.dot(v, fr.yDir)];
+      } else {
+        for (const pn of [...panels].reverse()) {
+          const on = (P: V3) => { const sAlong = v3.dot(v3.sub(P, pn.iE), pn.d), off = v3.dot(v3.sub(P, pn.iE), pn.nF); return sAlong > -0.05 && sAlong < pn.L + tol && Math.abs(off) <= tol; };
+          if (on(p0) && on(p1) && Math.abs(v3.dot(w3, pn.nF)) < 0.2) {
+            toFlat = (P) => { const a = v3.dot(v3.sub(P, pn.p0), pn.ax), sA = Math.min(pn.L, Math.max(0, v3.dot(v3.sub(P, pn.iE), pn.d))); return [pn.pf[0] + pn.eF[0] * a + pn.uF[0] * (pn.BA + sA), pn.pf[1] + pn.eF[1] * a + pn.uF[1] * (pn.BA + sA)]; };
+            dirFlat = (v) => { const a = v3.dot(v, pn.ax), b2 = v3.dot(v, pn.d); return [pn.eF[0] * a + pn.uF[0] * b2, pn.eF[1] * a + pn.uF[1] * b2]; };
+            break;
+          }
+        }
+      }
+      if (!toFlat || !dirFlat) throw new Error(`${f.name}: la arista no está sobre la cara base ni sobre una pestaña anterior`);
+      const q0 = toFlat(p0), q1 = toFlat(p1);
+      const e2: V2 = [q1[0] - q0[0], q1[1] - q0[1]], el = Math.hypot(e2[0], e2[1]) || 1;
+      const eF: V2 = [e2[0] / el, e2[1] / el];
+      let wv = dirFlat(w3); const along = wv[0] * eF[0] + wv[1] * eF[1]; wv = [wv[0] - eF[0] * along, wv[1] - eF[1] * along];
+      const wl = Math.hypot(wv[0], wv[1]);
+      if (wl < 0.3) throw new Error(`${f.name}: dirección de la pestaña no válida para el desarrollo`);
+      const u: V2 = [wv[0] / wl, wv[1] / wl], ext = BA + L;
+      const q = (p: V2, s2: number): V2 => [p[0] + u[0] * s2, p[1] + u[1] * s2];
+      flat = flat!.fuse(polyDrawing([q0, q1, q(q1, ext), q(q0, ext)]));
+      bends.push({ a: q(q0, BA / 2), b: q(q1, BA / 2), label: `${f.dir === 'up' ? 'ARRIBA' : 'ABAJO'} ${Math.round((th * 180) / Math.PI)}° R${r}` });
+      // tramo plano de esta pestaña en 3D (como en flangeSolid) para las pestañas que cuelguen de ella
+      const sg = f.dir === 'down' ? -1 : 1;
+      const iEx = r * Math.sin(th), iEy = f.dir === 'down' ? -t - (r - r * Math.cos(th)) : r - r * Math.cos(th);
+      const iE = v3.add(p0, v3.add(v3.mul(w3, iEx), v3.mul(n3, iEy)));
+      const d3 = v3.norm(v3.add(v3.mul(w3, Math.cos(th)), v3.mul(n3, sg * Math.sin(th))));
+      const ax = v3.norm(v3.sub(p1, p0));
+      panels.push({ p0, ax, iE, d: d3, nF: v3.norm(v3.cross(ax, d3)), L, BA, pf: q0, eF, uF: u });
     }
   }
   if (!flat) throw new Error('No hay cara base de chapa');
