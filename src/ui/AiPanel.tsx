@@ -84,7 +84,7 @@ export default function AiPanel() {
         <div className="ai-cfg">
           {key ? <div className="ai-row">Clave guardada en este navegador <button className="btn" onClick={() => { aiKey.set(''); setKey(''); setModels([]); }}>Quitar</button></div>
             : <p className="phelp" style={{ margin: '0 0 6px' }}>Pega tu clave de API de Gemini (gratuita en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Google AI Studio › Get API key</a>). Se guarda solo en este navegador; no va a los ficheros ni a la configuración exportada.</p>}
-          {!key && <div className="ai-row"><input type="password" placeholder="AIza…" value={keyIn} onChange={(e) => setKeyIn(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveKey(); }} style={{ flex: 1 }} /><button className="btn primary" onClick={saveKey}>Conectar</button></div>}
+          {!key && <div className="ai-row"><input type="password" placeholder="Clave de API de Gemini" value={keyIn} onChange={(e) => setKeyIn(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveKey(); }} style={{ flex: 1 }} /><button className="btn primary" onClick={saveKey}>Conectar</button></div>}
           {key && <div className="ai-row">Modelo <select value={model} onChange={(e) => { setModel(e.target.value); aiModel.set(e.target.value); }} style={{ flex: 1 }}>{models.map((m) => <option key={m.name} value={m.name}>{m.displayName} ({m.name})</option>)}</select></div>}
           <label className="check"><input type="checkbox" checked={auto} onChange={(e) => { setAuto(e.target.checked); try { localStorage.setItem(AUTO_LS, e.target.checked ? '1' : '0'); } catch { /* */ } }} />Aplicar los cambios sin preguntar (se deshacen con Ctrl+Z)</label>
         </div>

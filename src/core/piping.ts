@@ -1,5 +1,11 @@
 // Generador de tubería: tubos, bridas y accesorios como piezas paramétricas INV3D.
-import { newDoc, type PartDoc, type SkEntity, type Feature } from './doc';
+import { newDoc, type PartDoc, type SkEntity, type Feature, type V3 } from './doc';
+import type { EPoint } from './epoints';
+
+/** ePoint de inserción en el centro de un extremo (dirección hacia fuera de la pieza). Los extremos con el mismo nombre se conectan solos. */
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+const endEP = (n: number, name: string, point: V3, dir: V3, radius: number): EPoint => ({ id: `ep${n}`, name, kind: 'insert', point: point.map(r3) as V3, dir: dir.map(r3) as V3, radius: r3(radius) });
+const tubeName = (spec: PipeSpec, size: string) => `Tubo ${spec.norm === 'ASME' ? `${size}"` : `DN${size}`}`;
 import {
   ASME_PIPE, pipeOD, pipeWall, EN_OD, EN_S, b165, b1647, en1092, B169, REDUCER_H, RTEE_M, B1611, DN_NPS, EN3D_R, NPS_DN,
   type FlangeDims, type ENType,
@@ -128,6 +134,14 @@ function makeFlange(spec: PipeSpec): PartDoc {
     { name: 'K', expr: `${fd.bc} mm`, comment: 'Círculo de pernos' }, { name: 'Lt', expr: `${fd.hole} mm`, comment: `Taladros (${fd.n} × ${fd.bolt})` },
     { name: 'n', expr: `${fd.n}`, comment: 'Nº de pernos' },
   ];
+  // ePoints: cara de junta (se conecta con otra brida igual) y extremo de tubo (donde apoya o entra el tubo)
+  d.epoints = [endEP(1, `Cara brida ${fd.size} ${fd.rating}`, [0, 0, 0], [0, 0, -1], (fd.rf || fd.D) / 2)];
+  if (kind !== 'BL') {
+    const zp = kind === 'WN' || kind === 'TH' || kind === 'LJ' ? zEnd
+      : kind === 'SW' ? zEnd - Math.min(B1611[spec.size]?.[3] ?? 13, zEnd - 2) + 1.6   // fondo del encaje con 1,6 mm de holgura
+      : Math.min(rfH + t + 3, zEnd);                                                    // SO: tubo retranqueado espesor + 3 mm
+    d.epoints.push(endEP(2, tubeName(spec, spec.size), [0, 0, zp], [0, 0, 1], A / 2));
+  }
   d.features = [
     { id: 's1', name: 'Perfil', type: 'sketch', plane: XZ, entities: [poly('p', pts)] },
     { id: 'f1', name: 'Revolución1', type: 'revolve', profile: 's1', axis: 'sy', angle: '360 deg', op: 'join' },
@@ -294,6 +308,7 @@ function makeCoupling(spec: PipeSpec): PartDoc {
 
 export function makePipePart(spec: PipeSpec): PartDoc {
   const d = makePipePart0(spec);
+  if (!d.epoints?.length) d.epoints = pipeEnds(spec, d);
   // se guarda la especificación: la Fijación reconoce la brida (norma, clase, tamaño, pernos)
   (d as PartDoc & { pipeSpec?: PipeSpec }).pipeSpec = { ...spec };
   return d;
@@ -316,3 +331,38 @@ export const PIPE_KINDS: Record<PipeKind, string> = {
 };
 export const ASME_SIZES = Object.keys(ASME_PIPE);
 export { NPS_DN };
+
+/** ePoints en los centros de los extremos de tubos y accesorios (con la geometría de cada generador) */
+function pipeEnds(spec: PipeSpec, d: PartDoc): EPoint[] {
+  const P = (n: string) => { const p = d.parameters.find((x) => x.name === n); return p ? parseFloat(p.expr) : NaN; };
+  const D = od(spec, spec.size), nm = tubeName(spec, spec.size);
+  switch (spec.kind) {
+    case 'pipe': return [endEP(1, nm, [0, 0, 0], [0, 0, -1], D / 2), endEP(2, nm, [0, 0, P('L')], [0, 0, 1], D / 2)];
+    case 'elbow': {
+      // sección en el origen girando alrededor del eje (R, y, 0): sale hacia +Z y acaba girada «ang»
+      const R = P('R'), a = (P('ang') * Math.PI) / 180;
+      return [endEP(1, nm, [0, 0, 0], [0, 0, -1], D / 2), endEP(2, nm, [R - R * Math.cos(a), 0, R * Math.sin(a)], [Math.sin(a), 0, Math.cos(a)], D / 2)];
+    }
+    case 'tee': case 'rtee': case 'cross': {
+      const C = P('C'), M = P('M'), D2 = P('OD2'), s2 = spec.kind === 'rtee' && spec.size2 ? spec.size2 : spec.size, n2 = tubeName(spec, s2);
+      const out = [endEP(1, nm, [-C, 0, 0], [-1, 0, 0], D / 2), endEP(2, nm, [C, 0, 0], [1, 0, 0], D / 2), endEP(3, n2, [0, 0, M], [0, 0, 1], D2 / 2)];
+      if (spec.kind === 'cross') out.push(endEP(4, n2, [0, 0, -M], [0, 0, -1], D2 / 2));
+      return out;
+    }
+    case 'reducer': {
+      const H = P('H'), D1 = P('OD1'), D2 = P('OD2'), e = spec.ecc ? -(D1 - D2) / 2 : 0;
+      return [endEP(1, nm, [0, 0, 0], [0, 0, -1], D1 / 2), endEP(2, tubeName(spec, spec.size2 ?? spec.size), [0, e, H], [0, 0, 1], D2 / 2)];
+    }
+    case 'cap': return [endEP(1, nm, [0, 0, 0], [0, 0, -1], D / 2)];
+    case 'stub': {
+      const L = Math.max(...(d.features[0] as { entities: { pts: [string, string][] }[] }).entities[0].pts.map((q) => parseFloat(q[1])));
+      return [endEP(1, `Cara portabridas ${spec.norm === 'ASME' ? `${spec.size}"` : `DN${spec.size}`}`, [0, 0, 0], [0, 0, -1], D / 2), endEP(2, nm, [0, 0, L], [0, 0, 1], D / 2)];
+    }
+    case 'coupling': {
+      const pts = (d.features[0] as { entities: { pts: [string, string][] }[] }).entities[0].pts.map((q) => parseFloat(q[1]));
+      const L = Math.max(...pts);
+      return [endEP(1, nm, [0, 0, 0], [0, 0, -1], D / 2), endEP(2, nm, [0, 0, L], [0, 0, 1], D / 2)];
+    }
+  }
+  return [];
+}

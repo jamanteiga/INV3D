@@ -2,6 +2,7 @@
 // Medidas de conducto interiores; el eje del conducto es Z y la boca de entrada está en z = 0.
 import { newDoc, type PartDoc, type SkEntity, type Feature, type PlaneRef, type V3 } from './doc';
 import { sheetThickness, INCH } from './hvacdata';
+import type { EPoint } from './epoints';
 
 export type HvacKind =
   | 'duct' | 'elbow' | 'transition' | 'branch' | 'coupling' | 'cap' | 'plenum'
@@ -457,6 +458,47 @@ function makeInsulation(s: HvacSpec): PartDoc {
 /** Elementos que admiten sección oval plana */
 export const OVAL_KINDS: HvacKind[] = ['duct', 'elbow', 'transition', 'coupling', 'cap', 'flange', 'support', 'insulation'];
 export function makeHvacPart(s: HvacSpec): PartDoc {
+  const d = makeHvacPart0(s);
+  if (!d.epoints?.length) d.epoints = hvacEnds(s);
+  return d;
+}
+/** ePoints de inserción en los centros de las bocas (dirección hacia fuera); bocas iguales se conectan solas */
+function hvacEnds(s: HvacSpec): EPoint[] {
+  const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  const ep = (n: number, second: boolean, point: V3, dir: V3): EPoint => {
+    const sh = second ? s.shape2 ?? s.shape : s.shape, W = second ? s.W2 ?? s.W : s.W, H = second ? s.H2 ?? s.H : s.H, D = second ? s.D2 ?? s.D : s.D;
+    return { id: `ep${n}`, name: `Conducto ${sizeLabel(s, second)}`, kind: 'insert', point: point.map(r3) as V3, dir: dir.map(r3) as V3, radius: r3((sh === 'round' ? D : Math.max(W, H)) / 2) };
+  };
+  const two = (L: number) => [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [0, 0, L], [0, 0, 1])];
+  const t = autoT(s);
+  switch (s.kind) {
+    case 'duct': case 'silencer': return two(s.L);
+    case 'damper': return two(s.L || 150);
+    case 'firedamper': return two(s.L || 350);
+    case 'flex': return two(Math.max(2, Math.round(s.L / 25)) * 25);
+    case 'coupling': return two(s.L > 0 && s.L < 600 ? s.L : (s.shape === 'round' ? s.D : s.W) <= 315 ? 100 : 150);
+    case 'cap': return [ep(1, false, [0, 0, t], [0, 0, 1])];
+    case 'transition': return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, true, [s.ex ?? 0, s.ey ?? 0, s.L], [0, 0, 1])];
+    case 'elbow': {
+      const ang = s.angle ?? 90, a = (ang * Math.PI) / 180;
+      let kind = s.elbowType ?? (s.shape === 'round' ? 'smooth' : 'radius');
+      if (s.shape === 'round' && kind !== 'segmented') kind = 'smooth';
+      if (s.shape === 'rect' && kind !== 'square') kind = 'radius';
+      if (s.shape === 'oval') kind = 'radius';
+      const rw = s.rw ?? (s.shape === 'round' ? 1.5 : 1);
+      if (kind === 'square') { const o = s.W / 2 + t, Lz = o + 60, Lx = o + 60; return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [Lx, 0, Lz], [1, 0, 0])]; }
+      if (kind === 'segmented') {
+        const n = Math.max(3, s.gores ?? (ang >= 90 ? 5 : 3)), Rc = rw * s.D, dl = ((ang / (n - 1)) * Math.PI) / 180, full = 2 * Rc * Math.tan(dl / 2);
+        let x = 0, z = 0; for (let i = 0; i < n; i++) { const phi = i * dl, len = i === 0 || i === n - 1 ? full / 2 : full; x += Math.sin(phi) * len; z += Math.cos(phi) * len; }
+        return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [x, 0, z], [Math.sin(a), 0, Math.cos(a)])];
+      }
+      const Rc = rw * (s.shape === 'round' ? s.D : s.W);
+      return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [Rc - Rc * Math.cos(a), 0, Rc * Math.sin(a)], [Math.sin(a), 0, Math.cos(a)])];
+    }
+  }
+  return [];
+}
+function makeHvacPart0(s: HvacSpec): PartDoc {
   nid = 0;
   if ((s.shape === 'oval' || (s.kind === 'transition' && s.shape2 === 'oval')) && !OVAL_KINDS.includes(s.kind)) throw new Error(`${HVAC_KINDS[s.kind]}: no disponible en sección oval`);
   switch (s.kind) {

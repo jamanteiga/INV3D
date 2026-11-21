@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.27
+## Versión 0.27.1
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.27.1**
+- **ePoints automáticos en las piezas generadas**: cada extremo de tubos, codos, tes, cruces, reducciones, casquetes, portabridas, manguitos y bridas (ASME/EN), y de conductos, codos, transiciones, manguitos, tapas, compuertas, silenciadores y flexibles de HVAC lleva un ePoint de inserción en su centro, con la dirección hacia fuera. Las bridas llevan además el de la cara de junta (WN en el extremo del cuello, SO retranqueado espesor + 3 mm, SW en el fondo del encaje con 1,6 mm). Extremos con el mismo nombre (p. ej. «Tubo 4"», «Conducto Ø315», «Cara brida 4 Clase 150») se conectan solos al colocarlos.
 
 **Novedades 0.27**
 - **Asistente IA (Gemini)**: botón **IA** de la barra superior o **F1**. Panel a la derecha que conoce el documento abierto (operaciones y errores, parámetros, propiedades físicas, componentes, GDL y restricciones, vistas del plano) y puede actuar: crear piezas y operaciones, modificarlas o borrarlas, cambiar parámetros e iPropiedades, abrir órdenes. Cada cambio se confirma antes (o automático, opcional) y se deshace con Ctrl+Z. Admite adjuntar una imagen o PDF.
