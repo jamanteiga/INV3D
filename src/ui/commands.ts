@@ -27,6 +27,7 @@ export const COMMANDS: Command[] = [
   { id: 'tools.params', label: 'Parámetros', ctx: 'part', keys: [], run: (s) => s.open({ kind: 'params' }) },
   { id: 'tools.iprops', label: 'iPropiedades', ctx: 'all', keys: [], run: (s) => s.open({ kind: 'iprops' }) },
   { id: 'tools.options', label: 'Opciones de la aplicación', ctx: 'all', keys: [], run: (s) => s.open({ kind: 'options' } as never) },
+  { id: 'tools.ai', label: 'Asistente IA (Gemini)', ctx: 'all', keys: ['F1'], run: (s) => s.set({ aiOpen: !s.aiOpen }) },
   { id: 'tools.keys', label: 'Atajos de teclado', ctx: 'all', keys: [], run: (s) => s.open({ kind: 'shortcuts' }) },
   { id: 'tools.osnap', label: 'Referencias a objetos (activar/desactivar)', ctx: 'all', keys: ['F3'], run: () => toggleOsnap() },
   { id: 'tools.osnapcfg', label: 'Referencias a objetos (modos)', ctx: 'all', keys: [], run: (s) => s.open({ kind: 'osnap' }) },

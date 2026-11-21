@@ -1,3 +1,4 @@
+import AiPanel from './ui/AiPanel';
 import { useEffect, useState } from 'react';
 import { toggleOsnap } from './ui/osnap';
 import { runShortcut } from './ui/commands';
@@ -236,6 +237,7 @@ export default function App() {
           <DocTabs />
         </section>
         <PropertyPanel />
+        <AiPanel />
       </main>
       <StatusBar />
       <Modals />

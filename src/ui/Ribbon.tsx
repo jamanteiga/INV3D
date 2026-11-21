@@ -103,6 +103,7 @@ export default function Ribbon() {
           </select>
         )}
         <div className="title">INV3D <span className="title-sep">·</span> {s.fileName}{s.dirty ? ' *' : ''}</div>
+        <button className={`qat-b qat-ai ${s.aiOpen ? 'on' : ''}`} title="Asistente IA · Gemini (F1)" onClick={() => s.set({ aiOpen: !s.aiOpen })}>IA</button>
         <button className="qat-b" title="Atajos de teclado" onClick={() => s.open({ kind: 'shortcuts' })}><Icon name="help" size={16} /></button>
       </div>
       <nav className="tabs">

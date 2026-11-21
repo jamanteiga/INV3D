@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.26.2
+## Versión 0.27
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.27**
+- **Asistente IA (Gemini)**: botón **IA** de la barra superior o **F1**. Panel a la derecha que conoce el documento abierto (operaciones y errores, parámetros, propiedades físicas, componentes, GDL y restricciones, vistas del plano) y puede actuar: crear piezas y operaciones, modificarlas o borrarlas, cambiar parámetros e iPropiedades, abrir órdenes. Cada cambio se confirma antes (o automático, opcional) y se deshace con Ctrl+Z. Admite adjuntar una imagen o PDF.
+- Configuración en ⚙ del panel: clave de API de Gemini (Google AI Studio) guardada solo en el navegador y elección de modelo.
 
 **Novedades 0.26.2**
 - Zoom con la rueda el doble de rápido por defecto y regulable en **Herramientas › Opciones › General › Velocidad del zoom** (0,5× a 6×), en 3D y en planos.
