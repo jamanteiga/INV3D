@@ -89,7 +89,7 @@ const MAT = 'Acero S275JR';
 /** Tornillo hexagonal: cabeza en z ∈ [0, k], caña hacia −Z */
 export function makeBolt(std: FStd, size: string, L: number, grade?: string): PartDoc {
   const f = fsize(std, size)!;
-  const g = grade ?? (std === 'EN' ? '8.8' : 'A193 B7');
+  const g = grade ?? (std === 'EN' ? '8.8' : 'SA-193 B7');
   const pn = std === 'EN' ? `ISO 4014 - ${size}x${L} - ${g}` : `ASME B18.2.1 HH - ${f.thread} x ${lengthLabel(std, L)} - ${g}`;
   const d = base(pn, std === 'EN' ? `Tornillo hexagonal ${size}×${L}` : `Tornillo hexagonal pesado ${f.name} × ${lengthLabel(std, L)}`, MAT);
   // longitud roscada: ISO 4014 b = 2d+6 (L ≤ 125), 2d+12 (L ≤ 200), 2d+25; ASME 2D + 1/4" (L ≤ 6"), 2D + 1/2"
@@ -109,7 +109,7 @@ export function makeBolt(std: FStd, size: string, L: number, grade?: string): Pa
 /** Espárrago totalmente roscado: z ∈ [0, L] */
 export function makeStud(std: FStd, size: string, L: number, grade?: string): PartDoc {
   const f = fsize(std, size)!;
-  const g = grade ?? (std === 'EN' ? '8.8' : 'A193 B7');
+  const g = grade ?? (std === 'EN' ? '8.8' : 'SA-193 B7');
   const pn = std === 'EN' ? `Espárrago ${size}x${L} - ${g} (DIN 976-1 / EN 1515-1)` : `ASME B18.31.2 Stud ${f.thread} x ${lengthLabel(std, L)} - ${g}`;
   const d = base(pn, std === 'EN' ? `Espárrago ${size}×${L}` : `Espárrago ${f.name} × ${lengthLabel(std, L)}`, MAT);
   const c = r2(Math.max(0.5, f.p * 0.8));
@@ -126,7 +126,7 @@ export function makeStud(std: FStd, size: string, L: number, grade?: string): Pa
 /** Tuerca: z ∈ [0, m] */
 export function makeNut(std: FStd, size: string, grade?: string): PartDoc {
   const f = fsize(std, size)!;
-  const g = grade ?? (std === 'EN' ? '8' : 'A194 2H');
+  const g = grade ?? (std === 'EN' ? '8' : 'SA-194 2H');
   const d = base(std === 'EN' ? `ISO 4032 - ${size} - ${g}` : `ASME B18.2.2 HH Nut - ${f.thread} - ${g}`, std === 'EN' ? `Tuerca hexagonal ${size}` : `Tuerca hexagonal pesada ${f.name}`, MAT);
   d.parameters = [{ name: 'd', expr: `${f.d} mm`, comment: '' }, { name: 's', expr: `${f.s} mm`, comment: 'Entrecaras' }, { name: 'm', expr: `${f.m} mm`, comment: 'Altura' }];
   d.features = [

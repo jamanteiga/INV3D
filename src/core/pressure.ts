@@ -9,15 +9,15 @@ export interface MatStress { name: string; code: 'B31.3' | 'EN'; T: number[]; S:
 const TT = [20, 100, 150, 200, 250, 300, 350, 400];
 /** Tensión admisible S (B31.3, MPa) o tensión de diseño f (EN 13480 / 13445, MPa) a temperatura */
 export const STRESS: MatStress[] = [
-  { name: 'ASTM A106 Gr. B', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 130, 119, 116, 90], E: 203e3 },
-  { name: 'ASTM A53 Gr. B', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 130, 119, 116, 90], E: 203e3 },
+  { name: 'SA-106 Gr. B', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 130, 119, 116, 90], E: 203e3 },
+  { name: 'SA-53 Gr. B', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 130, 119, 116, 90], E: 203e3 },
   { name: 'API 5L Gr. B', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 130, 119, 116, 90], E: 203e3 },
-  { name: 'ASTM A333 Gr. 6', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 130, 119, 116, 90], E: 203e3 },
-  { name: 'ASTM A335 P11', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 138, 135, 132, 128], E: 203e3 },
-  { name: 'ASTM A335 P22', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 138, 136, 134, 131], E: 203e3 },
-  { name: 'ASTM A312 TP304L', code: 'B31.3', T: TT, S: [115, 115, 110, 103, 98, 94, 90, 88], E: 195e3 },
-  { name: 'ASTM A312 TP316L', code: 'B31.3', T: TT, S: [115, 115, 108, 101, 97, 92, 88, 86], E: 195e3 },
-  { name: 'ASTM A790 S31803 (dúplex)', code: 'B31.3', T: TT, S: [207, 207, 199, 192, 187, 184, 184, 184], E: 200e3 },
+  { name: 'SA-333 Gr. 6', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 130, 119, 116, 90], E: 203e3 },
+  { name: 'SA-335 P11', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 138, 135, 132, 128], E: 203e3 },
+  { name: 'SA-335 P22', code: 'B31.3', T: TT, S: [138, 138, 138, 138, 138, 136, 134, 131], E: 203e3 },
+  { name: 'SA-312 TP304L', code: 'B31.3', T: TT, S: [115, 115, 110, 103, 98, 94, 90, 88], E: 195e3 },
+  { name: 'SA-312 TP316L', code: 'B31.3', T: TT, S: [115, 115, 108, 101, 97, 92, 88, 86], E: 195e3 },
+  { name: 'SA-790 S31803 (dúplex)', code: 'B31.3', T: TT, S: [207, 207, 199, 192, 187, 184, 184, 184], E: 200e3 },
   { name: 'P235GH (EN 10216-2)', code: 'EN', T: TT, S: [150, 132, 125, 113, 100, 88, 80, 75], E: 210e3 },
   { name: 'P265GH (EN 10216-2)', code: 'EN', T: TT, S: [171, 151, 142, 128, 114, 103, 94, 89], E: 210e3 },
   { name: 'L245NB (EN ISO 3183)', code: 'EN', T: TT, S: [163, 138, 130, 118, 104, 92, 84, 78], E: 210e3 },
@@ -64,7 +64,7 @@ const B165_150: Record<string, number[]> = {
   '2.2': [19.0, 18.4, 16.2, 14.8, 13.7, 12.1, 10.2, 9.3, 8.4, 7.4, 6.5, 5.5],
   '2.3': [15.9, 15.3, 13.3, 12.0, 11.2, 10.5, 10.0, 9.3, 8.4, 7.4, 6.5, 5.5],
 };
-export const B165_GROUPS: Record<string, string> = { '1.1': 'Grupo 1.1 · A105, A216 WCB, A350 LF2', '2.2': 'Grupo 2.2 · A182 F316, F304', '2.3': 'Grupo 2.3 · A182 F304L, F316L' };
+export const B165_GROUPS: Record<string, string> = { '1.1': 'Grupo 1.1 · SA-105N, SA-216 WCB, SA-350 LF2', '2.2': 'Grupo 2.2 · SA-182 F316, F304', '2.3': 'Grupo 2.3 · SA-182 F304L, F316L' };
 export function b165Rating(group: string, cls: number, T: number): number {
   if (cls === 150) return interp(B165_T, B165_150[group] ?? B165_150['1.1'], Math.max(38, T));
   return interp(B165_T, B165_300[group] ?? B165_300['1.1'], Math.max(38, T)) * (cls / 300);

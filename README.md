@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.27.4
+## Versión 0.27.5
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.27.5**
+- Materiales de tubería, accesorios y bridas con designación ASME Sección II: **SA-105N** (antes ASTM A105) y **SA-…** en lugar de ASTM A… (SA-106 Gr. B, SA-234 WPB, SA-182 F316L, SA-350 LF2…); tornillería SA-193 B7 / SA-194 2H. Los ficheros antiguos se actualizan solos al abrirlos. La arandela ASTM F436 no cambia (no tiene equivalente SA).
 
 **Novedades 0.27.4**
 - Ensamblaje: **Mayús + doble clic** sobre una pieza → la vista gira en torno a ella (se centra y se marca su centro). Mayús + doble clic en vacío vuelve a girar en torno a todo el ensamblaje.

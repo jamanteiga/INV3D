@@ -283,6 +283,12 @@ export function styled(e: SkEntity, st: 'normal' | 'construction' | 'center'): S
   if (st === 'center') return e.type === 'line' ? { ...e, center: true, construction: true } : e;
   return { ...e, construction: true };
 }
+/** Materiales ASTM antiguos → designación ASME Sección II (SA-…; ASTM A105 → SA-105N). Las normas ASTM F (arandelas F436) no cambian. */
+export function migrateMaterials<T>(data: T): T {
+  const j = JSON.stringify(data);
+  if (!/ASTM A\d|"A19[34] /.test(j) && !/A19[34] (B7|2H)/.test(j)) return data;
+  return JSON.parse(j.replace(/ASTM A105\b/g, 'SA-105N').replace(/ASTM A(\d+)/g, 'SA-$1').replace(/(^|[^-])\bA193 B7/g, '$1SA-193 B7').replace(/(^|[^-])\bA194 2H/g, '$1SA-194 2H')) as T;
+}
 function makeSafeEval(doc: PartDoc) { const e = makeEval(docParams(doc)); return (x: string) => { try { return e(x); } catch { return NaN; } }; }
 /** Vuelve a resolver los bocetos con restricciones (p. ej. tras cambiar un parámetro). */
 function resolveAll(doc: PartDoc, skip?: string) {
@@ -354,6 +360,7 @@ export const useStore = create<State>((set, get) => ({
   },
   addDocument: (kind, data, fileName, activate = true, id) => {
     const nid = id ?? uid('d');
+    data = migrateMaterials(data);
     if (kind === 'part') { data = clone(data); resolveAll(data as PartDoc); }
     set({ docs: [...get().docs, { id: nid, kind, fileName, data, past: [], future: [], dirty: false, hidden: !activate && kind !== 'drawing' ? true : undefined }] });
     if (activate) get().activate(nid);
