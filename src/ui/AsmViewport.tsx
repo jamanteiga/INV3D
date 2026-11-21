@@ -728,6 +728,24 @@ export default function AsmViewport() {
       const s = useStore.getState();
       if (s.tool) return;
       const hit = hitAt(ev);
+      // Mayús + doble clic: la vista gira en torno a esa pieza (en vacío: en torno a todo el ensamblaje)
+      if (ev.shiftKey) {
+        const bb = new THREE.Box3();
+        if (hit?.object.userData.kind === 'occ') {
+          const top = topOf(s, hit.object.userData.id);
+          for (const m of pickables) if (m.userData.kind === 'occ' && topOf(s, m.userData.id) === top) { m.geometry.computeBoundingBox(); bb.union(m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld)); }
+        } else for (const m of pickables) if (m.visible !== false) { m.geometry.computeBoundingBox(); bb.union(m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld)); }
+        if (bb.isEmpty()) return;
+        const c = bb.getCenter(new THREE.Vector3());
+        // se desplaza la cámara junto con el objetivo para que la imagen no salte
+        const d = c.clone().sub(V.controls.target);
+        V.controls.target.add(d); camera.position.add(d); V.controls.update();
+        V.showPoint(vArr(c, 3) as V3); setTimeout(() => V.showPoint(null), 1500);
+        V.request();
+        const o = hit?.object.userData.kind === 'occ' ? findOcc(s, hit.object.userData.id) : null;
+        s.notify(o ? `Centro de giro: ${o.name} · Mayús + doble clic en vacío para volver al ensamblaje` : 'Centro de giro: todo el ensamblaje');
+        return;
+      }
       if (hit?.object.userData.kind === 'occ') {
         const o = findOcc(s, hit.object.userData.id);
         // doble clic: propiedades físicas y cotas editables de la pieza (editar en contexto: menú contextual o Ensamblar › Editar)
