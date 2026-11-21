@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.27.6
+## Versión 0.27.7
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.27.7**
+- Desarrollo de chapa: los rótulos de pliegue (ARRIBA/ABAJO, ángulo, R) van **paralelos a su línea de pliegue**, centrados y legibles, en el diálogo, en el DXF exportado y en la vista de desarrollo del plano (P1, P2…).
 
 **Novedades 0.27.6**
 - **Chapa › Desarrollo**: ya desarrolla **pestañas sobre pestañas** (en el extremo o en el lateral de otra pestaña, a cualquier nivel), no solo sobre aristas de la cara base. Cada pestaña se despliega desde la posición plana de su pestaña madre con su desarrollo de pliegue (ángulo · (R + K·t)).

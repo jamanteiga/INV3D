@@ -588,6 +588,14 @@ export function frameAndOverlays(drw: DrawingDoc): Prim[] {
   return P;
 }
 
+/** Posición y giro de un texto paralelo a un segmento (y hacia arriba), legible, a «off» mm de la línea */
+export function bendTextPos(a: P2, b: P2, off: number): { x: number; y: number; rot: number } {
+  let ang = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+  if (ang > 90) ang -= 180; else if (ang <= -90) ang += 180;
+  const r = (ang * Math.PI) / 180, n: P2 = [-Math.sin(r), Math.cos(r)];
+  return { x: (a[0] + b[0]) / 2 + n[0] * off, y: (a[1] + b[1]) / 2 + n[1] * off, rot: Math.round(ang * 100) / 100 };
+}
+
 // ---------- Hoja completa ----------
 export interface SheetInput {
   drw: DrawingDoc;
@@ -643,7 +651,9 @@ export function buildSheet({ drw, proj, bom }: SheetInput): Prim[] {
     for (const l of g.brk ?? []) P.push({ t: 'pl', cls: 'thin', pts: l, id: v.id });
     for (const [i, b] of (g.bends ?? []).entries()) {
       P.push({ t: 'pl', cls: 'center', pts: [b.a, b.b], id: v.id });
-      P.push({ t: 'txt', cls: 'annt', x: b.b[0], y: b.b[1] + 2, h: 2.5, text: `P${i + 1}`, anchor: 'middle', id: v.id });
+      // rótulo paralelo a la línea de pliegue, legible (ángulo en (−90°, 90°]) y desplazado a un lado
+      const bt = bendTextPos(b.a, b.b, 1.2);
+      P.push({ t: 'txt', cls: 'annt', x: bt.x, y: bt.y, h: 2.5, text: `P${i + 1}`, rot: bt.rot, anchor: 'middle', id: v.id });
     }
     const label = v.kind === 'aux' ? `VISTA ${v.label} (${scaleLabel(v.scale)})` : v.kind === 'flat' ? `DESARROLLO (${scaleLabel(v.scale)})` : v.kind === 'section' ? `SECCIÓN ${v.label}-${v.label} (${scaleLabel(v.scale)})` : v.kind === 'detail' ? `DETALLE ${v.label} (${scaleLabel(v.scale)})` : `${v.name} · ${scaleLabel(v.scale)}`;
     P.push({ t: 'txt', cls: v.kind === 'section' || v.kind === 'detail' || v.kind === 'aux' ? 'vlabel big' : 'vlabel', x: (g.rect[0] + g.rect[2]) / 2, y: g.rect[1] - 7, h: v.kind === 'section' || v.kind === 'detail' ? 3.5 : 3, text: label, anchor: 'middle', id: v.id });

@@ -28,6 +28,7 @@ import { Icon, IconThemePicker } from './icons';
 import { openFile, newIpj, saveText, pickFile, loadPartForPlace } from '../core/files';
 import { cad, type FlatResult } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
+import { bendTextPos } from '../core/sheet';
 import { writeDxf } from '../core/dxf';
 import { asmActions, drwActions, partActions } from './actions';
 import { bomRows, bomCsv, bomPartsOnly, bomTotal, type BomRow } from './bom';
@@ -2866,7 +2867,7 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
     if (!res) return;
     const doc = { layers: [{ name: 'CORTE', color: 7 }, { name: 'PLIEGUE', color: 1, ltype: 'CENTER' as const }, { name: 'TEXTO', color: 3 }],
       lines: [...polys.map((pts) => ({ layer: 'CORTE', pts })), ...res.bends.map((b) => ({ layer: 'PLIEGUE', pts: [b.a, b.b] as P2[] }))],
-      texts: res.bends.map((b) => ({ layer: 'TEXTO', x: (b.a[0] + b.b[0]) / 2, y: (b.a[1] + b.b[1]) / 2 + 2, h: 3, text: b.label })) };
+      texts: res.bends.map((b) => { const q = bendTextPos(b.a as P2, b.b as P2, 1.5); return { layer: 'TEXTO', x: q.x, y: q.y, h: 3, text: b.label, rot: q.rot }; }) };
     saveText(writeDxf(doc), s.fileName.replace(/\.[^.]+$/, '-desarrollo.dxf'), 'DXF', '.dxf', 'application/dxf');
   };
   return (
@@ -2875,7 +2876,7 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
         <div className="flat-view">
           <svg viewBox={`0 0 ${W} ${H}`}>
             {polys.map((p, i) => <polyline key={i} points={p.map(tr).join(' ')} className="ln-vis" />)}
-            {res.bends.map((b, i) => <g key={i}><polyline points={`${tr(b.a)} ${tr(b.b)}`} className="ln-bend" /><text x={(b.a[0] + b.b[0]) / 2 - bb[0] + pad} y={bb[3] - (b.a[1] + b.b[1]) / 2 + pad - 2} className="bend-label">{b.label}</text></g>)}
+            {res.bends.map((b, i) => { const q = bendTextPos(b.a as P2, b.b as P2, 1.5); const x = q.x - bb[0] + pad, y = bb[3] - q.y + pad; return <g key={i}><polyline points={`${tr(b.a)} ${tr(b.b)}`} className="ln-bend" /><text x={x} y={y} transform={`rotate(${-q.rot} ${x} ${y})`} textAnchor="middle" className="bend-label">{b.label}</text></g>; })}
           </svg>
         </div>
         <p className="phelp">Dimensiones del desarrollo: {fmt(bb[2] - bb[0], 1)} × {fmt(bb[3] - bb[1], 1)} mm · t = {res.t} · R = {res.r} · K = {res.k} · {res.bends.length} pliegue(s).</p>
