@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.27.9
+## Versión 0.28
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.28**
+- **Chapa**: clic en una cara (base o pestaña) + **S** (o *Chapa › Iniciar boceto 2D*) para bocetar en ella, y con ese boceto **Corte**, **Punzonado** o **Agujero**.
+- **Desarrollo de chapa con cortes, agujeros y punzonados**: se trasladan al desarrollo (y al DXF y a la vista de desarrollo del plano) si están sobre la cara base o sobre el tramo plano de cualquier pestaña. Los que caen en una zona de pliegue se avisan en el diálogo.
 
 **Novedades 0.27.9**
 - Tecla **T** = **Zoom › Todo** (como AutoCAD) en pieza, ensamblaje y plano (en el plano encuadra la hoja completa). Sigue también con **Inicio**. El texto de boceto pasa a **Mayús+T**. Se puede cambiar en Herramientas › Atajos de teclado.

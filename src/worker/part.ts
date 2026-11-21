@@ -9,7 +9,7 @@ import { makeEval } from '../core/expr';
 import {
   docParams, planeFrame, entityOutline, npolyPoints, toWorld, v3, workPlaneFrame, registerAux, splineBeziers,
   type PartDoc, type SkEntity, type SketchF, type Feature, type EdgeSel, type Frame, type V3, type V2,
-  type WorkPlanes, type BoolOp, type SmFlangeF, type Sketch3dF, type E3,
+  type WorkPlanes, type BoolOp, type SmFlangeF, type SmPunchF, type Sketch3dF, type E3,
 } from '../core/doc';
 
 export interface FeatStatus { ok: boolean; error?: string }
@@ -395,6 +395,23 @@ function flangeSolid(f: SmFlangeF, sh: { t: number; r: number; gap?: number; fla
   return (dr.sketchOnPlane(pl) as any).extrude(len);
 }
 
+/** Contorno 2D de un punzonado en los puntos dados (coordenadas del boceto) */
+function punchDrawing(f: SmPunchF, ev: Ev, pts: V2[]): Drawing {
+  const d = ev(f.d), w = ev(f.w), h = ev(f.h), rot = ev(f.rot);
+  const one = (): Drawing => {
+    switch (f.shape) {
+      case 'round': if (!(d > 0)) throw new Error('Diámetro no válido'); return drawCircle(d / 2);
+      case 'square': if (!(w > 0)) throw new Error('Lado no válido'); return drawRectangle(w, w);
+      case 'rect': if (!(w > 0 && h > 0)) throw new Error('Medidas no válidas'); return drawRectangle(w, h);
+      case 'slot': { if (!(w > h && h > 0)) throw new Error('Ranura: longitud mayor que anchura'); const L = w - h; return draw([-L / 2, -h / 2]).lineTo([L / 2, -h / 2]).threePointsArcTo([L / 2, h / 2], [L / 2 + h / 2, 0]).lineTo([-L / 2, h / 2]).threePointsArcTo([-L / 2, -h / 2], [-L / 2 - h / 2, 0]).close(); }
+    }
+    throw new Error('Forma de punzonado no válida');
+  };
+  let dr: Drawing | null = null;
+  for (const p of pts) { const x = one().rotate(rot, [0, 0]).translate(p[0], p[1]); dr = dr ? dr.fuse(x) : x; }
+  return dr!;
+}
+
 /** Polilínea ordenada de una cadena abierta de líneas de boceto. */
 function lineChain(sk: SketchF, ev: Ev): V2[] {
   const segs = openSegments(sk, ev);
@@ -676,17 +693,7 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
       const pts: V2[] = [];
       for (const e of sk.entities) { if (e.type === 'point' && !e.construction) pts.push([ev(e.cx), ev(e.cy)]); }
       if (!pts.length) throw new Error(`${sk.name}: coloca puntos de boceto como centros de punzonado`);
-      const d = ev(f.d), w = ev(f.w), h = ev(f.h), rot = ev(f.rot);
-      const one = (): Drawing => {
-        switch (f.shape) {
-          case 'round': if (!(d > 0)) throw new Error('Diámetro no válido'); return drawCircle(d / 2);
-          case 'square': if (!(w > 0)) throw new Error('Lado no válido'); return drawRectangle(w, w);
-          case 'rect': if (!(w > 0 && h > 0)) throw new Error('Medidas no válidas'); return drawRectangle(w, h);
-          case 'slot': { if (!(w > h && h > 0)) throw new Error('Ranura: longitud mayor que anchura'); const L = w - h; return draw([-L / 2, -h / 2]).lineTo([L / 2, -h / 2]).threePointsArcTo([L / 2, h / 2], [L / 2 + h / 2, 0]).lineTo([-L / 2, h / 2]).threePointsArcTo([-L / 2, -h / 2], [-L / 2 - h / 2, 0]).close(); }
-        }
-      };
-      let dr: Drawing | null = null;
-      for (const p of pts) { const x = one().rotate(rot, [0, 0]).translate(p[0], p[1]); dr = dr ? dr.fuse(x) : x; }
+      const dr = punchDrawing(f, ev, pts);
       let L = 1000; if (shape) { const b = shape.boundingBox.bounds; L = v3.len(v3.sub(b[1] as V3, b[0] as V3)) * 2 + 10; }
       return { solid: (dr!.sketchOnPlane(makePlane(fr, -L / 2)) as any).extrude(L), op: 'cut' };
     }
@@ -1025,6 +1032,7 @@ export function flatPattern(doc: PartDoc) {
   let flat: Drawing | null = null;
   const sk3 = new Map<string, Sketch3dF>();
   /** tramos planos de las pestañas ya desarrolladas: 3D → plano */
+  const notes: string[] = [];
   const panels: { p0: V3; ax: V3; iE: V3; d: V3; nF: V3; L: number; BA: number; pf: V2; eF: V2; uF: V2 }[] = [];
   for (const f of doc.features) {
     if (f.suppressed) continue;
@@ -1099,6 +1107,66 @@ export function flatPattern(doc: PartDoc) {
     }
   }
   if (!flat) throw new Error('No hay cara base de chapa');
+  // Cortes, agujeros y punzonados: se llevan al desarrollo si están sobre la cara base o sobre el tramo plano de una pestaña
+  if (base) {
+    const bf = base.fr, tolP = t + 0.05;
+    const mapOf = (fr: Frame): ((P: V3) => V2) | null => {
+      if (Math.abs(Math.abs(v3.dot(fr.normal, bf.normal)) - 1) < 1e-3 && Math.abs(v3.dot(v3.sub(fr.origin, bf.origin), bf.normal)) <= tolP + 1e-6)
+        return (P) => { const d = v3.sub(P, bf.origin); return [v3.dot(d, bf.xDir), v3.dot(d, bf.yDir)]; };
+      for (const pn of panels) if (Math.abs(Math.abs(v3.dot(fr.normal, pn.nF)) - 1) < 1e-3 && Math.abs(v3.dot(v3.sub(fr.origin, pn.iE), pn.nF)) <= tolP + 1e-6)
+        return (P) => { const a = v3.dot(v3.sub(P, pn.p0), pn.ax), sA = v3.dot(v3.sub(P, pn.iE), pn.d); return [pn.pf[0] + pn.eF[0] * a + pn.uF[0] * (pn.BA + sA), pn.pf[1] + pn.eF[1] * a + pn.uF[1] * (pn.BA + sA)]; };
+      return null;
+    };
+    /** lleva un dibujo en coordenadas del boceto (marco fr) al desarrollo */
+    const toFlat = (dr: Drawing, fr: Frame): Drawing | null => {
+      const m = mapOf(fr); if (!m) return null;
+      const A = m(fr.origin), X = m(v3.add(fr.origin, fr.xDir)), Y = m(v3.add(fr.origin, fr.yDir));
+      const bx: V2 = [X[0] - A[0], X[1] - A[1]], by: V2 = [Y[0] - A[0], Y[1] - A[1]];
+      let d2 = dr;
+      if (bx[0] * by[1] - bx[1] * by[0] < 0) d2 = d2.mirror([1, 0], [0, 0], 'plane');   // simetría respecto al eje X (y → −y)
+      return d2.rotate((Math.atan2(bx[1], bx[0]) * 180) / Math.PI, [0, 0]).translate(A[0], A[1]);
+    };
+    const skipped: string[] = [];
+    const apply = (name: string, dr: Drawing | null, fr: Frame) => {
+      const fd = dr && toFlat(dr, fr);
+      if (!fd) { skipped.push(name); return; }
+      try { flat = flat!.cut(fd); } catch { skipped.push(name); }
+    };
+    for (const f of doc.features) {
+      if (f.suppressed) continue;
+      try {
+        if (f.type === 'extrude' && f.op === 'cut') { const sk = sketches.get(f.profile); if (sk) apply(f.name, sketchProfile(sk, ev), planeFrame(sk.plane, ev, work)); }
+        else if (f.type === 'sm_punch') {
+          const sk = sketches.get(f.sketch); if (!sk) continue;
+          const pts: V2[] = sk.entities.filter((e) => e.type === 'point' && !e.construction).map((e) => [ev((e as { cx: string }).cx), ev((e as { cy: string }).cy)] as V2);
+          if (pts.length) apply(f.name, punchDrawing(f, ev, pts), planeFrame(sk.plane, ev, work));
+        } else if (f.type === 'hole') {
+          const D = ev(f.dia); if (!(D > 0)) continue;
+          let fr: Frame; const cs: V2[] = [];
+          if (f.face) {
+            const F = f.face, n0 = v3.norm(F.normal as V3), P = F.point as V3;
+            let x = v3.cross([0, 0, 1], n0); if (v3.len(x) < 1e-6) x = [1, 0, 0]; x = v3.norm(x);
+            fr = { origin: P, xDir: x, normal: n0, yDir: v3.cross(n0, x) };
+            const loc = (q: V3): V2 => { const d = v3.sub(q, P); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
+            if (F.e1 && F.e2 && F.d1 && F.d2) {
+              const L = [F.e1, F.e2].map((e) => { const A = loc(e.a as V3), B = loc(e.b as V3); const u: V2 = [B[0] - A[0], B[1] - A[1]]; const l = Math.hypot(u[0], u[1]) || 1; let w: V2 = [-u[1] / l, u[0] / l]; if (-(A[0] * w[0] + A[1] * w[1]) < 0) w = [-w[0], -w[1]]; return { A, w }; });
+              const dd = [ev(F.d1), ev(F.d2)];
+              const [a1, b1] = L[0].w, [a2, b2] = L[1].w, r1 = dd[0] + L[0].A[0] * a1 + L[0].A[1] * b1, r2 = dd[1] + L[1].A[0] * a2 + L[1].A[1] * b2, det = a1 * b2 - a2 * b1;
+              if (Math.abs(det) > 1e-9) cs.push([(r1 * b2 - r2 * b1) / det, (a1 * r2 - a2 * r1) / det]);
+            } else cs.push([0, 0]);
+          } else {
+            const sk = sketches.get(f.sketch); if (!sk) continue;
+            fr = planeFrame(sk.plane, ev, work);
+            for (const e of sk.entities) if (e.type === 'point' || e.type === 'circle') cs.push([ev(e.cx), ev(e.cy)]);
+          }
+          let dr: Drawing | null = null;
+          for (const c of cs) { const x = drawCircle(D / 2).translate(c[0], c[1]); dr = dr ? dr.fuse(x) : x; }
+          if (dr) apply(f.name, dr, fr);
+        }
+      } catch { skipped.push(f.name); }
+    }
+    if (skipped.length) notes.push(`No se llevan al desarrollo (no están en un tramo plano): ${skipped.join(', ')}`);
+  }
   const paths = flat.toSVGPaths();
-  return { paths: (Array.isArray(paths[0]) ? (paths as string[][]).flat() : paths) as string[], bends, t, r, k };
+  return { paths: (Array.isArray(paths[0]) ? (paths as string[][]).flat() : paths) as string[], bends, t, r, k, notes };
 }

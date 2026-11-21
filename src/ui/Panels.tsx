@@ -2882,6 +2882,7 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
           </svg>
         </div>
         <p className="phelp">Dimensiones del desarrollo: {fmt(bb[2] - bb[0], 1)} × {fmt(bb[3] - bb[1], 1)} mm · t = {res.t} · R = {res.r} · K = {res.k} · {res.bends.length} pliegue(s).</p>
+        {res.notes?.map((n, i) => <p key={i} className="phelp" style={{ color: '#a66a00' }}>⚠ {n}</p>)}
       </>)}
       <div className="modal-btns"><span className="grow" /><button className="btn" disabled={!res} onClick={exportDxf}>Exportar DXF</button><button className="btn primary" onClick={onClose}>Cerrar</button></div>
     </Modal>
