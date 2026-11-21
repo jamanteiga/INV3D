@@ -181,7 +181,7 @@ const AXES: Record<string, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
 interface Ctx {
   ev: Ev; sketches: Map<string, SketchF>; work: WorkPlanes;
   tools: Map<string, { solid: Shape3D; op: BoolOp }>;
-  sheet: { t: number; r: number; k: number } | null;
+  sheet: { t: number; r: number; k: number; gap: number; flanges: SmFlangeF[] } | null;
   sk3d: Map<string, Sketch3dF>;
   surfaces: Map<string, Shape3D>;
 }
@@ -345,17 +345,37 @@ function holeTool(f: Extract<Feature, { type: 'hole' }>, P: V3, n: V3, ev: Ev, t
   return (polyDrawing(pts).sketchOnPlane(pl) as any).revolve(n, { origin: P });
 }
 
-function flangeSolid(f: SmFlangeF, sh: { t: number; r: number }, ev: Ev): Shape3D {
+/** Desahogo de esquina: si otra pestaña nace en una arista contigua (mismo vértice, no paralela), esta pestaña se recorta
+ *  en ese extremo lo que ocupa el pliegue de la otra (R + t) más la holgura, para que los pliegues no se pisen. */
+export function flangeEnds(f: SmFlangeF, sh: { t: number; r: number; gap?: number; flanges?: SmFlangeF[] }): { p0: V3; p1: V3; trim0: number; trim1: number } {
+  let { p0, p1 } = f.edge!;
+  const n = v3.norm(f.edge!.n), w = v3.norm(f.edge!.w);
+  if (v3.dot(v3.cross(w, n), v3.sub(p1, p0)) < 0) [p0, p1] = [p1, p0];
+  const g = sh.gap ?? 0.5;
+  if (g < 0 || !sh.flanges) return { p0, p1, trim0: 0, trim1: 0 };
+  const ax = v3.norm(v3.sub(p1, p0)), tol = sh.t + 0.1;
+  const trimAt = (P: V3) => sh.flanges!.some((o) => {
+    if (o.id === f.id || !o.edge) return false;
+    const oa = v3.norm(v3.sub(o.edge.p1, o.edge.p0));
+    if (Math.abs(v3.dot(oa, ax)) > 0.95) return false;                               // paralela: no es esquina
+    if (Math.abs(v3.dot(v3.norm(o.edge.n), n)) < 0.9) return false;                  // otra cara
+    return v3.len(v3.sub(o.edge.p0, P)) <= tol || v3.len(v3.sub(o.edge.p1, P)) <= tol;
+  });
+  const s = sh.r + sh.t + g;
+  const len = v3.len(v3.sub(p1, p0));
+  const trim0 = trimAt(p0) ? Math.min(s, len / 2 - 0.5) : 0, trim1 = trimAt(p1) ? Math.min(s, len / 2 - 0.5) : 0;
+  return { p0: v3.add(p0, v3.mul(ax, trim0)), p1: v3.sub(p1, v3.mul(ax, trim1)), trim0, trim1 };
+}
+
+function flangeSolid(f: SmFlangeF, sh: { t: number; r: number; gap?: number; flanges?: SmFlangeF[] }, ev: Ev): Shape3D {
   if (!f.edge) throw new Error('Selecciona la arista de la pestaña');
   const { t, r } = sh;
   const L = ev(f.length), th = (ev(f.angle) * Math.PI) / 180;
   if (!(L > 0)) throw new Error('Longitud no válida');
   if (!(th > 0 && th <= Math.PI)) throw new Error('Ángulo entre 0 y 180°');
-  let { p0, p1 } = f.edge;
+  const { p0, p1 } = flangeEnds(f, sh);
   const n = v3.norm(f.edge.n), w = v3.norm(f.edge.w);
-  let ax = v3.cross(w, n);
-  if (v3.dot(ax, v3.sub(p1, p0)) < 0) { [p0, p1] = [p1, p0]; }
-  ax = v3.norm(v3.sub(p1, p0));
+  const ax = v3.norm(v3.sub(p1, p0));
   const len = v3.len(v3.sub(p1, p0));
   const ri = r, ro = r + t;
   const arc = (rad: number, a: number): V2 => [rad * Math.sin(a), r - rad * Math.cos(a)];
@@ -693,7 +713,7 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
   const status: Record<string, FeatStatus> = {};
   const ctx: Ctx = {
     ev, sketches: new Map(), work: new Map(), tools: new Map(),
-    sheet: doc.sheet ? { t: ev(doc.sheet.t), r: ev(doc.sheet.r), k: ev(doc.sheet.k) } : null,
+    sheet: doc.sheet ? { t: ev(doc.sheet.t), r: ev(doc.sheet.r), k: ev(doc.sheet.k), gap: doc.sheet.gap != null && doc.sheet.gap !== '' ? ev(doc.sheet.gap) : 0.5, flanges: doc.features.filter((x): x is SmFlangeF => x.type === 'sm_flange' && !x.suppressed && !!x.edge) } : null,
     sk3d: new Map(), surfaces: new Map(),
   };
   let shape: Shape3D | null = null;
@@ -1040,9 +1060,8 @@ export function flatPattern(doc: PartDoc) {
       const th = (ev(f.angle) * Math.PI) / 180, L = ev(f.length);
       const BA = th * (r + k * t);
       // misma orientación de la arista que en flangeSolid
-      let p0 = f.edge.p0, p1 = f.edge.p1;
+      const { p0, p1 } = flangeEnds(f, { t, r, gap: doc.sheet.gap != null && doc.sheet.gap !== '' ? ev(doc.sheet.gap) : 0.5, flanges: doc.features.filter((x): x is SmFlangeF => x.type === 'sm_flange' && !x.suppressed && !!x.edge) });
       const n3 = v3.norm(f.edge.n), w3 = v3.norm(f.edge.w);
-      if (v3.dot(v3.cross(w3, n3), v3.sub(p1, p0)) < 0) [p0, p1] = [p1, p0];
       // ¿sobre qué tramo plano está la arista? la cara base o una pestaña anterior (pestaña sobre pestaña)
       const fr = base.fr, tol = t + 0.05;
       let toFlat: ((P: V3) => V2) | null = null, dirFlat: ((v: V3) => V2) | null = null;

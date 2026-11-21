@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.27.7
+## Versión 0.27.8
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.27.8**
+- **Desahogo de esquina en chapa**: cuando dos pestañas nacen en aristas contiguas, cada una se recorta en esa esquina R + t + holgura y los pliegues ya no se pisan; el desarrollo sale con la esquina desahogada. Holgura por defecto 0,5 mm, regulable o desactivable en **Chapa › Estilo de chapa › Desahogo de esquina**.
 
 **Novedades 0.27.7**
 - Desarrollo de chapa: los rótulos de pliegue (ARRIBA/ABAJO, ángulo, R) van **paralelos a su línea de pliegue**, centrados y legibles, en el diálogo, en el DXF exportado y en la vista de desarrollo del plano (P1, P2…).

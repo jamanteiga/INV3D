@@ -2833,13 +2833,15 @@ const SHEET_STYLES = [
 
 function SheetStyleDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const [st, setSt] = useState(() => ({ ...(s.doc.sheet ?? { t: '2 mm', r: '2 mm', k: '0.44' }) }));
+  const [st, setSt] = useState<{ t: string; r: string; k: string; gap?: string }>(() => ({ ...(s.doc.sheet ?? { t: '2 mm', r: '2 mm', k: '0.44' }) }));
   return (
     <Modal title="Estilo de chapa" onClose={onClose}>
       <Row label="Espesor t"><Expr value={st.t} live onCommit={(v) => setSt({ ...st, t: v })} /></Row>
       <Row label="Radio plegado"><Expr value={st.r} live onCommit={(v) => setSt({ ...st, r: v })} /></Row>
       <Row label="Factor K"><Expr value={st.k} unit="ul" live onCommit={(v) => setSt({ ...st, k: v })} /></Row>
-      <p className="phelp">Desarrollo con tolerancia de pliegue BA = θ·(R + K·t). Valores típicos de K: 0,33 (R &lt; t) a 0,50 (R &gt; 3t).</p>
+      <Row label="Desahogo de esquina"><select value={st.gap === '-1' ? 'none' : 'gap'} onChange={(e) => setSt({ ...st, gap: e.target.value === 'none' ? '-1' : '0.5 mm' })}><option value="gap">Recortar pliegues + holgura</option><option value="none">Sin desahogo</option></select>
+        {st.gap !== '-1' && <Expr value={st.gap ?? '0.5 mm'} live onCommit={(v) => setSt({ ...st, gap: v })} />}</Row>
+      <p className="phelp">Desarrollo con tolerancia de pliegue BA = θ·(R + K·t). Valores típicos de K: 0,33 (R &lt; t) a 0,50 (R &gt; 3t).<br />Desahogo de esquina: cuando dos pestañas nacen en aristas contiguas, cada una se recorta en la esquina R + t + holgura para que los pliegues no se pisen (también en el desarrollo).</p>
       <div className="psec-title">Biblioteca de estilos</div>
       <div className="chips">
         {[...SHEET_STYLES, ...(s.libs.sheetStyles ?? [])].map((x) => <button key={x.name} className="chip" title={`t ${x.t} · R ${x.r} · K ${x.k}`} onClick={() => setSt({ t: x.t, r: x.r, k: x.k })}>{x.name}</button>)}
