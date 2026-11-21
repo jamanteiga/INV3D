@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.28.1
+## Versión 0.28.2
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.28.2**
+- **Chapa › Estilo de chapa**: K por defecto **0,273** en chapas y conductos nuevos. Al cambiar el espesor, el radio pasa al **mínimo DIN 6935** (S235) para ese espesor; se muestra el R y K recomendados (K DIN 6935 = (0,65 + 0,5·log R/t)/2) con botón *Usar recomendados*, botón *K = 0,273*, aviso si R es menor que el mínimo y **tabla de valores recomendados** por espesor (0,5–15 mm). La biblioteca de estilos usa esos valores.
 
 **Novedades 0.28.1**
 - Chapa: **Corte** y **Punzonado** ya no reutilizan el boceto de la cara base. Con el cuadro abierto y sin boceto libre, haz clic en una cara plana: se abre un boceto en ella y al pulsar «Terminar boceto» vuelve la operación con ese boceto. También: clic en la cara + **S**.

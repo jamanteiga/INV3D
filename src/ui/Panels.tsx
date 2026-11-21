@@ -29,6 +29,7 @@ import { openFile, newIpj, saveText, pickFile, loadPartForPlace } from '../core/
 import { cad, type FlatResult } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
 import { bendTextPos } from '../core/sheet';
+import { REC_STYLES, REC_THK, recR, recK, K_DEFAULT } from '../core/sheetrec';
 import { writeDxf } from '../core/dxf';
 import { asmActions, drwActions, partActions } from './actions';
 import { bomRows, bomCsv, bomPartsOnly, bomTotal, type BomRow } from './bom';
@@ -2826,24 +2827,31 @@ function BomDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-const SHEET_STYLES = [
-  { name: 'Galvanizado 0,6', t: '0.6 mm', r: '0.6 mm', k: '0.35' }, { name: 'Galvanizado 0,8', t: '0.8 mm', r: '0.8 mm', k: '0.35' },
-  { name: 'Galvanizado 1', t: '1 mm', r: '1 mm', k: '0.38' }, { name: 'Galvanizado 1,2', t: '1.2 mm', r: '1.2 mm', k: '0.4' },
-  { name: 'Acero 2', t: '2 mm', r: '2 mm', k: '0.44' }, { name: 'Acero 3', t: '3 mm', r: '4 mm', k: '0.44' }, { name: 'Acero 5', t: '5 mm', r: '6 mm', k: '0.45' },
-  { name: 'Inox 1,5', t: '1.5 mm', r: '1.5 mm', k: '0.42' }, { name: 'Aluminio 2', t: '2 mm', r: '3 mm', k: '0.43' },
-];
+const SHEET_STYLES = REC_STYLES;
 
 function SheetStyleDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const [st, setSt] = useState<{ t: string; r: string; k: string; gap?: string }>(() => ({ ...(s.doc.sheet ?? { t: '2 mm', r: '2 mm', k: '0.44' }) }));
+  const [st, setSt] = useState<{ t: string; r: string; k: string; gap?: string }>(() => ({ ...(s.doc.sheet ?? { t: '2 mm', r: '2.5 mm', k: String(K_DEFAULT) }) }));
+  const ev = useEval();
+  const num = (x: string) => { try { return ev(x); } catch { return NaN; } };
+  const tN = num(st.t), rN = num(st.r), rRec = tN > 0 ? recR(tN) : NaN, kRec = tN > 0 ? recK(rRec, tN) : NaN;
+  const c = (n: number) => String(n).replace('.', ',');
+  /** al cambiar el espesor, el radio pasa al recomendado (DIN 6935); K no se toca */
+  const setT = (v: string) => { const t = num(v); setSt({ ...st, t: v, r: t > 0 ? `${recR(t)} mm` : st.r }); };
   return (
     <Modal title="Estilo de chapa" onClose={onClose}>
-      <Row label="Espesor t"><Expr value={st.t} live onCommit={(v) => setSt({ ...st, t: v })} /></Row>
+      <Row label="Espesor t"><Expr value={st.t} live onCommit={setT} /></Row>
       <Row label="Radio plegado"><Expr value={st.r} live onCommit={(v) => setSt({ ...st, r: v })} /></Row>
       <Row label="Factor K"><Expr value={st.k} unit="ul" live onCommit={(v) => setSt({ ...st, k: v })} /></Row>
       <Row label="Desahogo de esquina"><select value={st.gap === '-1' ? 'none' : 'gap'} onChange={(e) => setSt({ ...st, gap: e.target.value === 'none' ? '-1' : '0.5 mm' })}><option value="gap">Recortar pliegues + holgura</option><option value="none">Sin desahogo</option></select>
         {st.gap !== '-1' && <Expr value={st.gap ?? '0.5 mm'} live onCommit={(v) => setSt({ ...st, gap: v })} />}</Row>
-      <p className="phelp">Desarrollo con tolerancia de pliegue BA = θ·(R + K·t). Valores típicos de K: 0,33 (R &lt; t) a 0,50 (R &gt; 3t).<br />Desahogo de esquina: cuando dos pestañas nacen en aristas contiguas, cada una se recorta en la esquina R + t + holgura para que los pliegues no se pisen (también en el desarrollo).</p>
+      {tN > 0 && <div className="ai-row" style={{ gap: 8, margin: '2px 0 6px' }}><span className="phelp" style={{ margin: 0 }}>Recomendado para t = {c(tN)}: <b>R {c(rRec)}</b> (DIN 6935) · <b>K {c(kRec)}</b></span><span className="grow" />
+        <button className="btn" onClick={() => setSt({ ...st, r: `${rRec} mm`, k: String(kRec) })}>Usar recomendados</button><button className="btn" title="K por defecto" style={{ whiteSpace: "nowrap" }} onClick={() => setSt({ ...st, k: String(K_DEFAULT) })}>K = {c(K_DEFAULT)}</button></div>}
+      {rN > 0 && tN > 0 && rN < rRec - 1e-6 && <p className="phelp" style={{ color: '#c0392b', margin: '0 0 6px' }}>R menor que el mínimo DIN 6935 para t = {c(tN)} ({c(rRec)} mm): riesgo de grieta en acero S235.</p>}
+      <details><summary className="phelp" style={{ cursor: 'pointer' }}>Tabla de valores recomendados</summary>
+        <table className="ptable" style={{ fontSize: 12, margin: '4px 0' }}><thead><tr><th>t</th><th>R mín. (DIN 6935)</th><th>K (DIN 6935)</th><th /></tr></thead>
+          <tbody>{REC_THK.map((t) => { const r = recR(t), k = recK(r, t); return <tr key={t}><td>{c(t)}</td><td>{c(r)}</td><td>{c(k)}</td><td><button className="btn" style={{ padding: '0 6px' }} onClick={() => setSt({ ...st, t: `${t} mm`, r: `${r} mm`, k: String(k) })}>Usar</button></td></tr>; })}</tbody></table></details>
+      <p className="phelp">R: radio interior de plegado. K: posición de la fibra neutra (fracción de t desde la cara interior). Longitud del pliegue = θ·(R + K·t). K por defecto {c(K_DEFAULT)}; DIN 6935: K = (0,65 + 0,5·log(R/t))/2, 0,5 si R/t ≥ 5. Para acero S235; inox y aluminio duro necesitan más radio. El dato bueno es el del taller (pieza de prueba).<br />Desahogo de esquina: cuando dos pestañas nacen en aristas contiguas, cada una se recorta en la esquina R + t + holgura para que los pliegues no se pisen (también en el desarrollo).</p>
       <div className="psec-title">Biblioteca de estilos</div>
       <div className="chips">
         {[...SHEET_STYLES, ...(s.libs.sheetStyles ?? [])].map((x) => <button key={x.name} className="chip" title={`t ${x.t} · R ${x.r} · K ${x.k}`} onClick={() => setSt({ t: x.t, r: x.r, k: x.k })}>{x.name}</button>)}

@@ -145,7 +145,7 @@ function makeRectDuctSheet(s: HvacSpec, t: number): PartDoc {
   endJoints(b, s, t, L);
   const d = doc(s, `Conducto ${sizeLabel(s)} L=${L} e=${t}`, `Conducto rectangular de chapa plegada ${sizeLabel(s)} · L ${L} mm · chapa ${String(t).replace('.', ',')} mm · 3 pliegues R${String(r).replace('.', ',')} y cierre engatillado en la cuarta esquina${endsLabel(s)}`,
     [['W', W, 'Anchura interior'], ['H', H, 'Altura interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']]);
-  d.sheet = { t: `${t} mm`, r: `${r} mm`, k: '0.44' };
+  d.sheet = { t: `${t} mm`, r: `${r} mm`, k: '0.273' };
   d.features = b.f; return d;
 }
 
@@ -226,7 +226,7 @@ function makeTransition(s: HvacSpec): PartDoc {
   const same = s.shape === sh2 && (s.shape === 'round' ? s.D === s.D2 : s.W === s.W2 && s.H === s.H2);
   const nm = same ? 'Desvío' : s.shape !== sh2 ? 'Transición' : 'Reducción';
   const d = doc(s, `${nm} ${sizeLabel(s)}-${sizeLabel(s, true)} L=${L}`, `${nm} ${SHAPE_NAME[s.shape]}${s.shape !== sh2 ? `-${SHAPE_NAME[sh2]}` : ''} ${sizeLabel(s)} → ${sizeLabel(s, true)} · L ${L}${ex || ey ? ` · desplazamiento ${ex}/${ey}` : ''} · chapa ${String(t).replace(".", ",")} mm`);
-  d.sheet = { t: `${t} mm`, r: `${t} mm`, k: '0.4' };
+  d.sheet = { t: `${t} mm`, r: `${t} mm`, k: '0.273' };
   d.features = b.f; return d;
 }
 

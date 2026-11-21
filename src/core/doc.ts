@@ -545,7 +545,7 @@ export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft
 export function newSheetDoc(): PartDoc {
   const d = newDoc();
   d.iProperties.partNumber = 'Chapa1';
-  d.sheet = { t: '2 mm', r: '2 mm', k: '0.44' };
+  d.sheet = { t: '2 mm', r: '2.5 mm', k: '0.273' };
   d.parameters = [];
   return d;
 }
