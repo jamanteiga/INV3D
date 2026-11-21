@@ -498,7 +498,7 @@ export default function DrawingView() {
   };
   const onUp = () => { pan.current = null; drag.current = null; };
   const onWheel = (e: React.WheelEvent) => {
-    const p = toSheet(e); const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+    const p = toSheet(e); const sp = useStore.getState().settings.zoomSpeed ?? 2, k = e.deltaY > 0 ? 1.15 ** sp : 1.15 ** -sp;
     const yTop = H - p[1];
     setVb([p[0] - (p[0] - vb[0]) * k, yTop - (yTop - vb[1]) * k, vb[2] * k, vb[3] * k]);
   };

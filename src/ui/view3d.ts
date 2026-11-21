@@ -64,6 +64,7 @@ export class View3D {
     this.controls.screenSpacePanning = true;
     this.controls.zoomToCursor = true;
     this.controls.enableDamping = false;
+    this.controls.zoomSpeed = View3D.zoomSpeed; View3D.all.add(this);
     this.controls.rotateSpeed = 0.9;
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa3b2, 2.2));
     const key = new THREE.DirectionalLight(0xffffff, 2.2); cam.add(key); key.position.set(0.4, 0.8, 1);
@@ -102,7 +103,12 @@ export class View3D {
     loop();
   }
 
+  /** Velocidad de zoom con la rueda, común a todas las vistas 3D (Opciones › General) */
+  static zoomSpeed = 2;
+  static all = new Set<View3D>();
+  static setZoomSpeed(v: number) { View3D.zoomSpeed = v; for (const w of View3D.all) w.controls.zoomSpeed = v; }
   dispose() {
+    View3D.all.delete(this);
     if (activeView === this) activeView = null;
     this.unsubClip?.(); this.pickOff?.();
     cancelAnimationFrame(this.raf); this.ro.disconnect(); this.controls.dispose(); this.renderer.dispose(); this.cube?.dispose();

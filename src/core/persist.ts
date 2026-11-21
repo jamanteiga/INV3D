@@ -26,6 +26,8 @@ export interface AppSettings {
   iconTheme?: IconTheme;
   /** Referencias a objetos (tipo osnap): activadas y modos */
   osnap?: { on: boolean; modes: string[] };
+  /** Velocidad del zoom con la rueda (1 = la de serie de three.js; por defecto 2) */
+  zoomSpeed?: number;
 }
 export const DEFAULT_SETTINGS: AppSettings = {
   userName: '', company: '', defaultMaterial: 'Acero S275JR', restoreSession: true, autosave: true, autosaveFolder: true, autosaveMin: 2,

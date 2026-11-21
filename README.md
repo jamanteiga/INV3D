@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.26.1
+## Versión 0.26.2
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.26.2**
+- Zoom con la rueda el doble de rápido por defecto y regulable en **Herramientas › Opciones › General › Velocidad del zoom** (0,5× a 6×), en 3D y en planos.
 
 **Novedades 0.26.1**
 - **Fijación** reconoce la brida del taladro (ASME B16.5/B16.47 o EN 1092-1: clase/PN, tamaño, tipo y nº × métrica de pernos) y elige montaje: ASME → espárrago + 2 tuercas + 2 arandelas (B16.5, rosca UNC/8UN); EN → tornillo + arandela + tuerca (EN 1515-1). Si entre las bridas solo hay el hueco de las caras realzadas, suma la junta (espirometálica B16.20 3,2 mm / plana EN 1514-1 2 mm); si la junta está modelada, la mide.

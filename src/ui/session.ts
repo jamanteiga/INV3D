@@ -7,6 +7,7 @@ import {
   type AppSettings, type UserLibs, type RecentItem, type Config,
 } from '../core/persist';
 import { openFile, recentCtl } from '../core/files';
+import { View3D } from './view3d';
 
 const S = () => useStore.getState();
 let ready = false;
@@ -29,6 +30,7 @@ export async function initSession() {
   useStore.setState(st);
   applyLibs(S().libs);
   useStore.setState({ showEdges: S().settings.showEdges });
+  View3D.setZoomSpeed(S().settings.zoomSpeed ?? 2);
 
   const fs = await restoreFolder();
   useStore.setState({ folder: { name: folderName(), state: fs } });

@@ -37,7 +37,7 @@ import { CONTENT } from '../core/content';
 import { FASTENER_SIZES, planFix, fsize, type FStd, type FixKind } from '../core/fasteners';
 export interface FastDraft { std?: FStd; kind?: FixKind; size?: string; grip?: string; gasket?: boolean; gasketT?: string; headWasher?: boolean; all?: boolean; flange?: string; gasketName?: string; holes?: { p: [number, number, number]; d: [number, number, number]; grip: number; gap?: number; occ?: string }[] }
 import { JOINT_NAMES, JOINT_DOF, MOTION_NAMES, motionBase } from '../core/asm';
-import { activeView } from './view3d';
+import { activeView, View3D } from './view3d';
 import { COMMANDS, CTX_NAMES, comboOf, keysOf, conflicts, type Ctx } from './commands';
 import { HOLE_TYPES, THREAD_STDS, threadsOf, threadByName, clearance, cboreFor, csinkFor, FASTENERS, SCREW_SIZES, FIT_NAMES, type ThreadStd, type Fastener, type Fit } from '../core/holes';
 import { osCfg, setOsCfg, OS_MODES, OS_NAMES, OS_GLYPH, type OsMode } from './osnap';
@@ -1891,6 +1891,7 @@ function OptionsDialog({ onClose }: { onClose: () => void }) {
         {txt('userName', 'Usuario (diseñador)')}{txt('company', 'Empresa')}
         <Row label="Material por defecto"><select value={st.defaultMaterial} onChange={(e) => setS({ defaultMaterial: e.target.value })}>{MATERIALS.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>
         <label className="check"><input type="checkbox" checked={st.showEdges} onChange={(e) => { setS({ showEdges: e.target.checked }); s.set({ showEdges: e.target.checked }); }} />Mostrar aristas en el modelo</label>
+        <Row label="Velocidad del zoom (rueda)"><input type="range" min={0.5} max={6} step={0.25} value={st.zoomSpeed ?? 2} onChange={(e) => { const v = +e.target.value; setS({ zoomSpeed: v }); View3D.setZoomSpeed(v); }} style={{ width: 200 }} /><span className="ro" style={{ marginLeft: 8, minWidth: 40 }}>{(st.zoomSpeed ?? 2).toFixed(2)}×</span><button className="btn" style={{ marginLeft: 6 }} onClick={() => { setS({ zoomSpeed: 2 }); View3D.setZoomSpeed(2); }}>Por defecto</button></Row>
         <p className="phelp">El usuario y la empresa rellenan el diseñador de las piezas nuevas y el cajetín de los planos.</p>
         <div className="psec-title" style={{ marginTop: 8 }}>Estilo de iconos</div>
         <IconThemePicker />
