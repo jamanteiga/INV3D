@@ -185,6 +185,9 @@ export default function DrawingView() {
   const [vb, setVb] = useState<[number, number, number, number]>([-10, -10, W + 20, H + 20]);
   const [vmenu, setVmenu] = useState<{ x: number; y: number; id: string } | null>(null);
   useEffect(() => setVb([-10, -10, W + 20, H + 20]), [W, H]);
+  // Zoom › Todo (T o Inicio): la hoja completa
+  const viewCmd = useStore((s) => s.view);
+  useEffect(() => { if (viewCmd.name === 'fit' || viewCmd.name === 'home') setVb([-10, -10, W + 20, H + 20]); }, [viewCmd]);
   const [clicks, setClicks] = useState<{ view?: string; pts: P2[]; refs: any[] }>({ pts: [], refs: [] });
   const [cursor, setCursor] = useState<P2 | null>(null);
   const drag = useRef<{ id: string; kind: 'view' | 'block' | 'note' | 'ann' | 'dim' | 'table'; start: P2; orig: any; pushed?: boolean } | null>(null);

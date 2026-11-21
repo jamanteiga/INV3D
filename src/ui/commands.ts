@@ -34,7 +34,7 @@ export const COMMANDS: Command[] = [
   { id: 'tools.osnapcfg', label: 'Referencias a objetos (modos)', ctx: 'all', keys: [], run: (s) => s.open({ kind: 'osnap' }) },
   // Vista
   { id: 'view.home', label: 'Vista inicial', ctx: 'all', keys: ['F6'], run: view('home') },
-  { id: 'view.fit', label: 'Zoom para ajustar', ctx: 'all', keys: ['Home'], run: view('fit') },
+  { id: 'view.fit', label: 'Zoom › Todo (como AutoCAD)', ctx: 'all', keys: ['T', 'Home'], run: view('fit') },
   { id: 'view.iso', label: 'Vista isométrica', ctx: 'all', keys: [], run: view('iso') },
   { id: 'view.front', label: 'Vista frontal', ctx: 'all', keys: [], run: view('front') },
   { id: 'view.top', label: 'Vista superior', ctx: 'all', keys: [], run: view('top') },
@@ -85,7 +85,7 @@ export const COMMANDS: Command[] = [
   { id: 'sk.trim', label: 'Recortar', ctx: 'sketch', keys: ['X'], run: tool('trim') },
   { id: 'sk.extend', label: 'Alargar', ctx: 'sketch', keys: [], run: tool('extend') },
   { id: 'sk.fillet', label: 'Empalme 2D', ctx: 'sketch', keys: [], run: tool('fillet2d') },
-  { id: 'sk.text', label: 'Texto', ctx: 'sketch', keys: ['T'], run: tool('text') },
+  { id: 'sk.text', label: 'Texto', ctx: 'sketch', keys: ['Shift+T'], run: tool('text') },
   { id: 'sk.cons', label: 'Mostrar restricciones', ctx: 'sketch', keys: ['F8', 'F9'], run: (s) => s.set({ showCons: !s.showCons }) },
   { id: 'sk.finish', label: 'Terminar boceto', ctx: 'sketch', keys: [], run: (s) => s.finishSketch() },
   // Ensamblaje
