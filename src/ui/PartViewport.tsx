@@ -386,6 +386,7 @@ export default function PartViewport() {
         if (selPts.length) overlayGroup.add(V.segs(selPts, V.lineMat(css('--accent'), 4, false, false)));
       }
       if (m && d && d.type === 'sm_flange' && d.edge) overlayGroup.add(V.segs([...d.edge.p0, ...d.edge.p1], V.lineMat(css('--accent'), 4, false, false)));
+      if (m && d && d.type === 'sm_bend') for (const e of [d.edgeA, d.edgeB]) if (e) overlayGroup.add(V.segs([...e.p0, ...e.p1], V.lineMat(css('--accent'), 4, false, false)));
       if (m && d && (d.type === 'shell' || d.type === 'draft' || d.type === 'split' || d.type === 'thicken' || d.type === 'thread' || d.type === 'combine' || d.type === 'movebody')) {
         for (const p of (d.faces ?? []) as V3[]) { const gi = faceGroupContaining(m, p); if (gi >= 0) overlayGroup.add(faceOverlay(m, gi, css('--accent'), 0.45)); }
         if (hoverFace >= 0 && hoverFace < m.faceGroups.length) overlayGroup.add(faceOverlay(m, hoverFace, css('--hover'), 0.35));
@@ -1286,14 +1287,14 @@ export default function PartViewport() {
         // boceto «libre» = no lo usa ya otra operación (p. ej. el boceto de la cara base)
         const usedSk = consumedSketches({ ...s.doc, features: s.doc.features.filter((f) => f.id !== dd?.id) });
         const freeSk = (id: unknown) => typeof id === 'string' && !!id && !usedSk.has(id);
-        const wants = dd && !s.tool && !(s.dialog && 'editId' in s.dialog && s.dialog.editId) && ((dd.type === 'extrude' && dd.op === 'cut' && !freeSk(dd.profile)) || (dd.type === 'sm_punch' && !freeSk(dd.sketch)));
+        const wants = dd && !s.tool && !(s.dialog && 'editId' in s.dialog && s.dialog.editId) && ((dd.type === 'extrude' && dd.op === 'cut' && !freeSk(dd.profile)) || (['sm_punch', 'sm_fold', 'sm_rip', 'sm_mark'].includes(String(dd.type)) && !freeSk(dd.sketch)));
         if (wants) {
           const fh = faceHit(ev);
           if (fh && fh.planar && fh.mesh === state.mesh) {
             const draft = { ...dd! }; delete draft.profile; delete draft.sketch;
             useStore.setState({ pendingFeature: { type: String(dd!.type), draft }, dialog: null });
             s.startSketch(planeOfFace(fh));
-            s.notify(`Boceto en la cara: dibuja el ${dd!.type === 'sm_punch' ? 'punto o puntos del punzonado' : 'perfil del corte'} y pulsa «Terminar boceto»; se vuelve a la operación con él`);
+            s.notify(`Boceto en la cara: dibuja el ${({ sm_punch: 'punto o puntos del punzonado', sm_fold: 'línea de plegado', sm_rip: 'línea o líneas de la rasgadura', sm_mark: 'texto o geometría a marcar' } as Record<string, string>)[String(dd!.type)] ?? 'perfil del corte'} y pulsa «Terminar boceto»; se vuelve a la operación con él`);
             return;
           }
         }
@@ -1361,6 +1362,13 @@ export default function PartViewport() {
         const e = flangeEdgeFrom(hit.group);
         if (!e) { s.notify('Elige una arista recta del borde de la chapa', 'error'); return; }
         s.updateDraft({ edge: e });
+        return;
+      }
+      if (s.tool === 'pickFlangeEdge' && d?.type === 'sm_bend') {
+        const hit = V.nearestEdge(ev, pickMesh()!, null, occluders()); if (!hit) return;
+        const e = flangeEdgeFrom(hit.group);
+        if (!e) { s.notify('Elige una arista recta del borde de una cara de chapa', 'error'); return; }
+        if ((d.pick ?? 'a') === 'a') s.updateDraft({ edgeA: e, pick: 'b' } as never); else s.updateDraft({ edgeB: e } as never);
         return;
       }
       if (s.tool === 'measure') {

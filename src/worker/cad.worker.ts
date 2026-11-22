@@ -71,7 +71,8 @@ function props(shape: Shape3D) {
     const sp = measureShapeSurfaceProperties(shape);
     const bb = shape.boundingBox;
     const c = vp.centerOfMass;
-    const out = { volume: vp.volume, area: sp.area, cog: [c[0], c[1], c[2]] as V3, bbox: [bb.bounds[0], bb.bounds[1]] as [V3, V3] };
+    let bodies = 1; try { bodies = ((shape as any).solids?.length) || 1; } catch { /* */ }
+    const out = { volume: vp.volume, area: sp.area, cog: [c[0], c[1], c[2]] as V3, bbox: [bb.bounds[0], bb.bounds[1]] as [V3, V3], bodies };
     vp.delete?.(); sp.delete?.();
     return out;
   } catch { return null; }

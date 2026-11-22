@@ -16,7 +16,7 @@ const ICON: Record<Feature['type'], string> = {
   sm_face: 'smface', sm_flange: 'smflange', rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken',
   thread: 'thread', workaxis: 'axis', workpoint: 'point',
   sketch3d: 'sketch3d', surf_extrude: 'surfext', surf_revolve: 'surfrev', surf_loft: 'surfloft', surf_patch: 'patch', stitch: 'stitch', sm_loft: 'smloft',
-  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch',
+  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch', sm_roll: 'smroll', sm_bend: 'smbend', sm_fold: 'smfold', sm_seam: 'smseam', sm_rip: 'smrip', sm_unfold: 'smunfold', sm_refold: 'smrefold', sm_mark: 'smmark', skpattern: 'skpattern',
 };
 
 type Menu = { x: number; y: number; items: { label: string; danger?: boolean; run: () => void }[] } | null;

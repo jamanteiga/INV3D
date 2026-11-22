@@ -82,13 +82,14 @@ export type Tool = null
 export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hole' | 'pattern' | 'mirror' | 'shell'
   | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange' | 'rib' | 'coil' | 'split' | 'draft' | 'thicken' | 'thread' | 'workaxis' | 'workpoint'
   | 'combine' | 'movebody' | 'derive' | 'pathpattern' | 'sm_contour' | 'sm_punch'
-  | 'surf_extrude' | 'surf_revolve' | 'surf_loft' | 'surf_patch' | 'stitch' | 'sm_loft';
+  | 'surf_extrude' | 'surf_revolve' | 'surf_loft' | 'surf_patch' | 'stitch' | 'sm_loft'
+  | 'sm_roll' | 'sm_bend' | 'sm_fold' | 'sm_seam' | 'sm_rip' | 'sm_unfold' | 'sm_refold' | 'sm_mark' | 'skpattern';
 export type AsmDialogKind = 'joint' | 'frame' | 'weld' | 'bolt' | 'skel' | 'endtreat' | 'asmwp';
 export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' | 'ucs' }
   | { kind: 'contentf'; fam: string }
   | { kind: 'fastener'; fx: Record<string, unknown> }
   | { kind: 'projto'; mode: 'face' | 'surf' }
@@ -561,7 +562,13 @@ export const useStore = create<State>((set, get) => ({
     const skId = s0.sketchId, pf = s0.pendingFeature;
     set({ mode: 'model', sketchId: null, tool: null, selEntity: null, selEntities: [], selCon: null, skInfo: null, view: { name: 'restore', n: get().view.n + 1 }, skStyle: 'normal', pendingFeature: null });
     // se vuelve a la operación que pidió el boceto, ya con él seleccionado
-    if (pf && skId) setTimeout(() => { const st = get(); st.openFeatureDialog(pf.type as FeatDialogKind); st.updateDraft({ ...pf.draft, ...(pf.type === 'sm_punch' || pf.type === 'hole' ? { sketch: skId } : { profile: skId }) }); }, 0);
+    if (pf && skId) setTimeout(() => {
+      const st = get(); st.openFeatureDialog(pf.type as FeatDialogKind);
+      const usesSketch = ['sm_punch', 'hole', 'sm_fold', 'sm_rip', 'sm_mark', 'skpattern'].includes(pf.type);
+      const extra: Record<string, unknown> = {};
+      if (pf.type === 'sm_fold') { const sk = st.doc.features.find((f) => f.id === skId) as SketchF | undefined; extra.line = sk?.entities.find((e) => e.type === 'line' && !e.construction)?.id ?? ''; }
+      st.updateDraft({ ...pf.draft, ...(usesSketch ? { sketch: skId } : { profile: skId }), ...extra });
+    }, 0);
   },
   setTool: (tool) => {
     const s = get();
@@ -655,6 +662,27 @@ export const useStore = create<State>((set, get) => ({
         }
         case 'pathpattern': draft = { id, name, type: 'pathpattern', features: body ? [body] : [], path: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')), count: '5', align: false }; break;
         case 'sm_contour': draft = { id, name, type: 'sm_contour', profile: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line' && !e.construction)), width: '100 mm', dir: 'normal', side: 'in' }; break;
+        case 'sm_roll': {
+          const pid = lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line' && !e.construction && !e.center));
+          const sk = doc.features.find((f) => f.id === pid) as SketchF | undefined;
+          const ax = sk?.entities.find((e) => e.type === 'line' && e.center) ?? sk?.entities.find((e) => e.type === 'line' && e.construction);
+          draft = { id, name, type: 'sm_roll', profile: pid, axis: ax?.id ?? 'sy', angle: '360 deg', side: 'in' }; break;
+        }
+        case 'sm_bend': draft = { id, name, type: 'sm_bend', edgeA: null, edgeB: null, pick: 'a' }; break;
+        case 'sm_fold': {
+          const sid = lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line'));
+          const sk = doc.features.find((f) => f.id === sid) as SketchF | undefined;
+          draft = { id, name, type: 'sm_fold', sketch: sid, line: sk?.entities.find((e) => e.type === 'line')?.id ?? '', angle: '90 deg', dir: 'up', flip: false }; break;
+        }
+        case 'sm_seam': {
+          const fl = doc.features.filter((f) => f.type === 'sm_flange' && !f.suppressed);
+          draft = { id, name, type: 'sm_seam', a: fl[fl.length - 2]?.id ?? '', b: fl[fl.length - 1]?.id ?? '', gap: '0.5 mm', kind: 'overlap' }; break;
+        }
+        case 'sm_rip': draft = { id, name, type: 'sm_rip', sketch: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line')), gap: '0.5 mm' }; break;
+        case 'sm_unfold': draft = { id, name, type: 'sm_unfold' }; break;
+        case 'sm_refold': draft = { id, name, type: 'sm_refold' }; break;
+        case 'sm_mark': draft = { id, name, type: 'sm_mark', sketch: lastSketch(doc, (k) => k.entities.length > 0) }; break;
+        case 'skpattern': draft = { id, name, type: 'skpattern', features: body ? [body] : [], sketch: lastSketch(doc, (k) => k.entities.filter((e) => e.type === 'point').length > 1) }; break;
         case 'sm_punch': draft = { id, name, type: 'sm_punch', sketch: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'point')), shape: 'round', d: '10 mm', w: '20 mm', h: '10 mm', rot: '0 deg' }; break;
       }
     }
@@ -726,7 +754,7 @@ export const useStore = create<State>((set, get) => ({
 function toolFor(f: Feature): Tool {
   if ((f.type === 'fillet' || f.type === 'chamfer') && f.edges.mode === 'picked') return 'pickEdges';
   if (f.type === 'shell' || f.type === 'draft' || f.type === 'thicken' || f.type === 'thread' || f.type === 'combine' || f.type === 'movebody') return 'pickFaces';
-  if (f.type === 'sm_flange') return 'pickFlangeEdge';
+  if (f.type === 'sm_flange' || f.type === 'sm_bend') return 'pickFlangeEdge';
   // taladro sin boceto con puntos: se coloca en una cara
   if (f.type === 'hole' && !f.sketch && !f.face) return 'holeFace';
   return null;

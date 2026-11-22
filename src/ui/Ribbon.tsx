@@ -5,7 +5,7 @@ import { Icon } from './icons';
 import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { toggleClipTool } from './ClipBar';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
-import { demoDoc, MATERIALS } from '../core/doc';
+import { demoDoc, MATERIALS, nextName } from '../core/doc';
 import { asmActions, drwActions, partActions } from './actions';
 import { demoStair } from './demo';
 
@@ -183,31 +183,66 @@ export default function Ribbon() {
           <Group label="Insertar"><Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} /></Group>
           <Group label="Salir"><Big icon="finish" label="Terminar boceto" onClick={s.finishSketch} kbd="Esc" /></Group>
         </>)}
-        {k === 'part' && cur === 'sheet' && (<>
+        {k === 'part' && cur === 'sheet' && (() => { const F = (k2: Parameters<typeof s.openFeatureDialog>[0], patch?: Record<string, unknown>) => () => { s.openFeatureDialog(k2); if (patch) s.updateDraft(patch as never); }; const unf = (() => { let u = false; for (const f of s.doc.features) { if (f.suppressed) continue; if (f.type === 'sm_unfold') u = true; if (f.type === 'sm_refold') u = false; } return u; })(); return (<>
           <Group label="Boceto"><Big icon="sketch" label="Iniciar boceto 2D" kbd="S" active={tool === 'pickPlane'} onClick={P.startSketch} /></Group>
-          <Group label="Configuración"><Big icon="style" label="Estilo de chapa" onClick={() => s.open({ kind: 'sheetstyle' })} title="Espesor, radio de plegado y factor K" /></Group>
           <Group label="Crear">
-            <Big icon="smface" label="Cara" onClick={() => s.openFeatureDialog('sm_face')} />
-            <Big icon="smcontour" label="Pestaña de contorno" onClick={() => s.openFeatureDialog('sm_contour')} title="Perfil abierto de líneas con pliegues automáticos" />
-            <Big icon="smflange" label="Pestaña" disabled={!hasSolid} onClick={() => s.openFeatureDialog('sm_flange')} />
-            <Big icon="smloft" label="Pestaña solevada" onClick={() => s.openFeatureDialog('sm_loft')} title="Transición entre dos contornos (rectangular a circular, reducciones) con desarrollo por triangulación" />
+            <Big icon="smface" label="Cara" onClick={F('sm_face')} title="Cara base: perfil cerrado con el espesor de la chapa" />
+            <Big icon="smflange" label="Pestaña" disabled={!hasSolid} onClick={F('sm_flange')} title="Pestaña en una arista del borde" />
+            <Big icon="smcontour" label="Pestaña de contorno" onClick={F('sm_contour')} title="Perfil abierto de líneas con pliegues automáticos" />
             <Col>
-              <Small icon="hem" label="Dobladillo" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('sm_flange'); s.updateDraft({ angle: '180 deg', length: '10 mm', name: 'Dobladillo' }); }} title="Pestaña plegada a 180°" />
-              <Small icon="fillet" label="Redondeo de esquina" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('fillet'); s.updateDraft({ radius: '5 mm' }); }} />
-              <Small icon="chamfer" label="Chaflán de esquina" disabled={!hasSolid} onClick={() => s.openFeatureDialog('chamfer')} />
+              <Small icon="smloft" label="Pestaña solevada" onClick={F('sm_loft')} title="Transición entre dos contornos (rectangular a circular, reducciones) con desarrollo por triangulación" />
+              <Small icon="smroll" label="Rodillo de contorno" onClick={F('sm_roll')} title="Perfil abierto girado alrededor de un eje: virolas, conos, canales curvados" />
+              <Small icon="hem" label="Dobladillo" disabled={!hasSolid} onClick={F('sm_flange', { angle: '180 deg', length: '10 mm', name: 'Dobladillo' })} title="Pestaña plegada a 180°" />
+            </Col>
+            <Col>
+              <Small icon="smbend" label="Pliegue" disabled={!hasSolid} onClick={F('sm_bend')} title="Une dos caras de chapa con un pliegue (o doble pliegue) entre dos aristas paralelas" />
+              <Small icon="smfold" label="Plegado" disabled={!hasSolid} onClick={F('sm_fold')} title="Pliega la chapa por una línea de boceto" />
+              <Small icon="derive" label="Derivar" onClick={F('derive')} title="Pieza derivada: copia de otra pieza con escala y simetría" />
             </Col>
           </Group>
           <Group label="Modificar">
-            <Big icon="extrude" label="Corte" disabled={!hasSolid} title="Corte a través de la chapa" onClick={() => { s.openFeatureDialog('extrude'); s.updateDraft({ op: 'cut', dir: 'symmetric', extent: 'through' }); }} />
-            <Big icon="punch" label="Punzonado" disabled={!hasSolid} onClick={() => s.openFeatureDialog('sm_punch')} title="Punzonado redondo, cuadrado, rectangular o coliso en puntos de boceto" />
+            <Big icon="extrude" label="Corte" disabled={!hasSolid} title="Corte a través de la chapa" onClick={F('extrude', { op: 'cut', dir: 'symmetric', extent: 'through' })} />
+            <Big icon="smseam" label="Costura de esquina" disabled={!hasSolid} onClick={F('sm_seam')} title="Cierra la esquina entre dos pestañas contiguas (solape con holgura)" />
+            <Big icon="punch" label="Punzonado" disabled={!hasSolid} onClick={F('sm_punch')} title="Herramienta de punzonado: redondo, cuadrado, rectangular o coliso en puntos de boceto" />
             <Col>
-              <Small icon="hole" label="Agujero" disabled={!hasSolid} onClick={() => s.openFeatureDialog('hole')} />
-              <Small icon="mirror" label="Simetría" disabled={!hasSolid} onClick={() => s.openFeatureDialog('mirror')} />
-              <Small icon="prect" label="Patrón" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pattern')} />
+              <Small icon="smrip" label="Rasgadura" disabled={!hasSolid} onClick={F('sm_rip')} title="Abre la chapa a lo largo de líneas de boceto con una holgura" />
+              <Small icon="smunfold" label="Desplegar" disabled={!hasSolid || unf} onClick={F('sm_unfold')} title="Desarrolla el modelo para cortar sobre el plano (cortes que cruzan pliegues, etc.)" />
+              <Small icon="smrefold" label="Volver a plegar" disabled={!unf} onClick={F('sm_refold')} title="Vuelve a plegar llevando los cortes hechos sobre el desarrollo" />
+            </Col>
+            <Col>
+              <Small icon="hole" label="Agujero" disabled={!hasSolid} onClick={F('hole')} />
+              <Small icon="slot" label="Ranura" disabled={!hasSolid} onClick={F('sm_punch', { shape: 'slot', w: '30 mm', h: '10 mm', name: nextName(s.doc, 'sm_punch').replace('Punzonado', 'Ranura') })} title="Ranura (coliso) en puntos de boceto" />
+              <Small icon="fillet" label="Redondeo de esquina" disabled={!hasSolid} onClick={F('fillet', { radius: '5 mm' })} />
+            </Col>
+            <Col>
+              <Small icon="chamfer" label="Chaflán de esquina" disabled={!hasSolid} onClick={F('chamfer')} />
+              <Small icon="smmark" label="Marcar" disabled={!hasSolid} onClick={F('sm_mark')} title="Marca (texto o geometría) que va al desarrollo sin cortar: grabado láser, rotulado" />
             </Col>
           </Group>
-          <Group label="Desarrollo"><Big icon="flat" label="Desarrollo" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Patrón desarrollado y DXF para corte" /></Group>
-        </>)}
+          <Group label="Operaciones de trabajo">
+            <Big icon="workplane" label="Plano" onClick={F('workplane')} title="Plano de trabajo desfasado o girado" />
+            <Col>
+              <Small icon="workaxis" label="Eje" onClick={F('workaxis')} />
+              <Small icon="workpoint" label="Punto" onClick={F('workpoint')} />
+              <Small icon="ucs" label="SCU" onClick={() => s.open({ kind: 'ucs' })} title="Sistema de coordenadas de usuario: origen, planos y ejes" />
+            </Col>
+          </Group>
+          <Group label="Patrón">
+            <Col>
+              <Small icon="prect" label="Rectangular" disabled={!hasSolid} onClick={F('pattern')} />
+              <Small icon="pcirc" label="Circular" disabled={!hasSolid} onClick={F('pattern', { ptype: 'circ' })} />
+              <Small icon="mirror" label="Simetría" disabled={!hasSolid} onClick={F('mirror')} />
+            </Col>
+            <Col><Small icon="skpattern" label="Controlado por boceto" disabled={!hasSolid} onClick={F('skpattern')} title="Copia operaciones en los puntos de un boceto" /></Col>
+          </Group>
+          <Group label="Configuración"><Big icon="style" label="Valores de chapa" onClick={() => s.open({ kind: 'sheetstyle' })} title="Valores por defecto de chapa: espesor, radio de plegado, factor K y desahogo" /></Group>
+          <Group label="Patrón plano">
+            <Big icon="aside" label="Definir cara A" disabled={!hasSolid} onClick={partActions.defineASide} title="Clic en una cara plana y luego aquí: el desarrollo se ve desde esa cara" />
+            <Big icon="flat" label="Crear patrón plano" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Desarrollo con líneas de pliegue, marcas y DXF para corte" />
+            <Big icon="newpart" label="Crear pieza" disabled={!hasSolid} onClick={partActions.makePart} title="Pieza derivada de esta chapa" />
+            <Big icon="makecomp" label="Crear componentes" disabled={!hasSolid} onClick={partActions.makeComponents} title="Una pieza por cuerpo y un ensamblaje con todas" />
+          </Group>
+        </>); })()}
         {cur === 'hvac' && (() => { const H = (hk: string) => () => s.open({ kind: 'hvac', hk }); return (<>
           <Group label="Conductos (EN 1505/1506 · SMACNA)">
             <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular, circular, espiral u oval plano" />

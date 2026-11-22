@@ -39,6 +39,62 @@ function P_style(st: 'construction' | 'center') {
 }
 
 export const partActions = {
+  /** Chapa › Definir cara A: la cara plana seleccionada es la cara A del desarrollo */
+  defineASide: () => {
+    const s = S();
+    const pl = s.selFacePlane;
+    if (!pl || pl.kind !== 'custom') { s.notify('Haz clic en una cara plana de la chapa y vuelve a pulsar «Definir cara A»', 'info'); return; }
+    s.commit((d) => { if (d.sheet) d.sheet.aSide = [...pl.normal] as V3; });
+    s.notify('Cara A definida: el desarrollo se ve desde esa cara');
+  },
+  /** Chapa › Crear pieza: pieza derivada (copia asociada en el momento) de la chapa activa */
+  makePart: () => {
+    const s = S();
+    const src = s.doc, srcName = s.fileName;
+    const nd = newDoc();
+    nd.iProperties = { ...src.iProperties, partNumber: src.iProperties.partNumber + '-DER', description: `${src.iProperties.description || src.iProperties.partNumber} (derivada)` };
+    nd.features = [{ id: uid('f'), name: 'Derivada', type: 'derive', source: s.active, sourceName: srcName, doc: structuredClone(src), scale: '1', mirror: '', op: 'join' }];
+    s.addDocument('part', nd, srcName.replace(/\.i3p$/i, '') + '-DER.i3p', true);
+    s.notify('Pieza derivada creada');
+  },
+  /** Chapa › Crear componentes: una pieza por cuerpo y un ensamblaje con todas en su sitio */
+  makeComponents: () => {
+    const s = S();
+    const n = s.result?.props?.bodies ?? 1;
+    if (n < 2) { s.notify('La pieza tiene un solo cuerpo. Crea varios cuerpos con «Nuevo sólido» (Combinar, Extrusión…) para separarlos en componentes', 'info'); return; }
+    const src = s.doc, srcName = s.fileName, base = srcName.replace(/\.i3p$/i, '');
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const nd = newDoc();
+      nd.iProperties = { ...src.iProperties, partNumber: `${src.iProperties.partNumber}-${i + 1}`, description: `${src.iProperties.description || src.iProperties.partNumber} · cuerpo ${i + 1}` };
+      nd.features = [{ id: uid('f'), name: `Cuerpo ${i + 1}`, type: 'derive', source: s.active, sourceName: srcName, doc: structuredClone(src), scale: '1', mirror: '', op: 'join', body: i }];
+      ids.push(s.addDocument('part', nd, `${base}-${i + 1}.i3p`, false));
+    }
+    S().newDocument('assembly');
+    S().commitAsm((a) => { ids.forEach((pid, i) => a.occurrences.push({ id: uid('o'), name: `${base}-${i + 1}:1`, part: pid, xf: { ...IDENTITY, pos: [0, 0, 0], quat: [0, 0, 0, 1] }, grounded: true })); });
+    S().notify(`${n} componentes creados en un ensamblaje nuevo`);
+  },
+  /** SCU: punto, tres planos y tres ejes de trabajo de un sistema de coordenadas de usuario */
+  addUcs: (o: V3, rz: number, rx: number) => {
+    const s = S();
+    const rad = Math.PI / 180, cz = Math.cos(rz * rad), sz = Math.sin(rz * rad), cx = Math.cos(rx * rad), sx = Math.sin(rx * rad);
+    // giro Z y luego X (sobre el nuevo eje X)
+    const X: V3 = [cz, sz, 0];
+    const Y: V3 = [-sz * cx, cz * cx, sx];
+    const Z: V3 = v3.cross(X, Y);
+    const r6 = (v: V3) => v.map((x) => Math.round(x * 1e6) / 1e6) as V3;
+    const str = (v: V3) => r6(v).map(String) as [string, string, string];
+    let k = 1; const names = new Set(s.doc.features.map((f) => f.name)); while (names.has(`SCU${k} XY`)) k++;
+    const N = `SCU${k}`;
+    s.commit((d) => {
+      d.features.push({ id: uid('f'), name: `${N} origen`, type: 'workpoint', origin: str(o) });
+      for (const [nm, x, nrm] of [['XY', X, Z], ['XZ', X, v3.mul(Y, -1)], ['YZ', Y, X]] as [string, V3, V3][])
+        d.features.push({ id: uid('f'), name: `${N} ${nm}`, type: 'workplane', base: { kind: 'custom', label: `${N} ${nm}`, origin: r6(o), xDir: r6(x), normal: r6(nrm) }, offset: '0 mm', angle: '0 deg' });
+      for (const [nm, dv] of [['X', X], ['Y', Y], ['Z', Z]] as [string, V3][])
+        d.features.push({ id: uid('f'), name: `${N} eje ${nm}`, type: 'workaxis', origin: str(o), dir: str(dv) });
+    });
+    s.notify(`${N}: origen, planos XY/XZ/YZ y ejes X/Y/Z creados`);
+  },
   startSketch: () => {
     const s = S();
     // cara plana seleccionada antes: boceto directamente en ella

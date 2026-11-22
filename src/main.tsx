@@ -13,3 +13,5 @@ initSpaceMouse();
 
 import { initSession } from './ui/session';
 initSession();
+import { cad } from './core/cadClient';
+(window as unknown as { __cad: typeof cad }).__cad = cad;

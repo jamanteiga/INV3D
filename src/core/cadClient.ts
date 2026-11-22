@@ -7,7 +7,7 @@ export interface MeshData {
   faceGroups: { start: number; count: number; faceId: number }[];
   lines: Float32Array; edgeGroups: { start: number; count: number; edgeId: number }[];
 }
-export interface MassProps { volume: number; area: number; cog: V3; bbox: [V3, V3] }
+export interface MassProps { volume: number; area: number; cog: V3; bbox: [V3, V3]; bodies?: number }
 export interface RegenResult {
   mesh: MeshData | null;
   /** Cuerpos de superficie (se muestran translúcidos) */
@@ -30,7 +30,7 @@ export interface AsmResult {
   /** Ensamblaje aplanado (con subensamblajes): ocurrencias virtuales «padre/hijo» */
   view?: AsmDoc;
 }
-export interface FlatResult { paths: string[]; bends: { a: V2; b: V2; label: string }[]; t: number; r: number; k: number; notes?: string[] }
+export interface FlatResult { paths: string[]; bends: { a: V2; b: V2; label: string }[]; t: number; r: number; k: number; notes?: string[]; /** marcas (grabado): polilíneas en el plano del desarrollo */ marks?: V2[][] }
 export interface Projection { visible: string[]; hidden: string[]; center: V3; cut: number[]; anchors?: { id: string; c: [number, number]; r: [number, number, number, number]; z: number }[]; /** centro de gravedad (modelo) y en la vista */ cog?: V3; cogUV?: [number, number] }
 export type ProjSource = { kind: 'part'; doc: PartDoc } | { kind: 'asm'; asm: AsmDoc; parts: Record<string, PartDoc> };
 

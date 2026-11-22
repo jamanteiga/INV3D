@@ -115,7 +115,7 @@ export interface CombineF extends FBase { type: 'combine'; faces: V3[]; op: 'joi
 /** Mover o copiar cuerpo: traslación + giro (eje por el origen). Sin caras = todos los cuerpos */
 export interface MoveBodyF extends FBase { type: 'movebody'; faces: V3[]; dx: string; dy: string; dz: string; axis: AxisName; angle: string; copy: boolean }
 /** Pieza derivada: copia de otra pieza (instantánea), con escala y simetría */
-export interface DeriveF extends FBase { type: 'derive'; source: string; sourceName: string; doc: PartDoc | null; scale: string; mirror: '' | 'XY' | 'XZ' | 'YZ'; op: BoolOp }
+export interface DeriveF extends FBase { type: 'derive'; source: string; sourceName: string; doc: PartDoc | null; scale: string; mirror: '' | 'XY' | 'XZ' | 'YZ'; op: BoolOp; /** solo este cuerpo (0, 1…) de la pieza origen */ body?: number }
 /** Patrón a lo largo de una trayectoria de boceto */
 export interface PathPatternF extends FBase { type: 'pathpattern'; features: string[]; path: string; count: string; align: boolean }
 /** Chapa: pestaña de contorno, dobladillo y punzonado */
@@ -144,10 +144,28 @@ export interface SmLoftF extends FBase { type: 'sm_loft'; a: string; b: string; 
 export const SURFACE_FEATURES = ['surf_extrude', 'surf_revolve', 'surf_loft', 'surf_patch'] as const;
 
 export interface SmFlangeF extends FBase { type: 'sm_flange'; edge: EdgeRef | null; length: string; angle: string; dir: 'up' | 'down' }
+/** Rodillo de contorno: perfil abierto de líneas girado alrededor de un eje (cilindros, conos, perfiles curvados) */
+export interface SmRollF extends FBase { type: 'sm_roll'; profile: string; axis: string; angle: string; side: 'in' | 'out' }
+/** Pliegue entre dos caras de chapa (aristas paralelas): crea el pliegue y alarga hasta los puntos de tangencia */
+export interface SmBendF extends FBase { type: 'sm_bend'; edgeA: EdgeRef | null; edgeB: EdgeRef | null; pick?: 'a' | 'b' }
+/** Plegado por una línea de boceto sobre una cara: la línea es el eje del pliegue */
+export interface SmFoldF extends FBase { type: 'sm_fold'; sketch: string; line: string; angle: string; dir: 'up' | 'down'; flip: boolean }
+/** Costura de esquina entre dos pestañas contiguas: una cubre a la otra con holgura */
+export interface SmSeamF extends FBase { type: 'sm_seam'; a: string; b: string; gap: string; kind: 'overlap' | 'inverse' }
+/** Rasgadura: corte fino a lo largo de las líneas de un boceto */
+export interface SmRipF extends FBase { type: 'sm_rip'; sketch: string; gap: string }
+/** Desplegar / volver a plegar el modelo (los cortes entre ambos se hacen sobre el desarrollo) */
+export interface SmUnfoldF extends FBase { type: 'sm_unfold' }
+export interface SmRefoldF extends FBase { type: 'sm_refold' }
+/** Marcado (grabado láser, rotulado): geometría del boceto que va al desarrollo sin cortar */
+export interface SmMarkF extends FBase { type: 'sm_mark'; sketch: string }
+/** Patrón controlado por boceto: copia las operaciones en cada punto del boceto (el primero es la base) */
+export interface SkPatternF extends FBase { type: 'skpattern'; features: string[]; sketch: string }
 export type Feature = SketchF | ExtrudeF | RevolveF | FilletF | ChamferF | ImportF | HoleF | PatternF | MirrorF | ShellF
   | WorkPlaneF | LoftF | SweepF | SmFaceF | SmFlangeF | RibF | CoilF | SplitF | DraftF | ThickenF | ThreadF | WorkAxisF | WorkPointF
   | CombineF | MoveBodyF | DeriveF | PathPatternF | SmContourF | SmPunchF
-  | Sketch3dF | SurfExtrudeF | SurfRevolveF | SurfLoftF | SurfPatchF | StitchF | SmLoftF;
+  | Sketch3dF | SurfExtrudeF | SurfRevolveF | SurfLoftF | SurfPatchF | StitchF | SmLoftF
+  | SmRollF | SmBendF | SmFoldF | SmSeamF | SmRipF | SmUnfoldF | SmRefoldF | SmMarkF | SkPatternF;
 export type FeatureType = Feature['type'];
 
 export interface IProps {
@@ -170,7 +188,7 @@ export interface PartDoc {
   features: Feature[];
   /** Pieza de chapa: espesor, radio de plegado interior y factor K */
   /** Chapa: espesor, radio, factor K y holgura del desahogo de esquina (por defecto 0,5 mm; «0» sin holgura; «-1» sin desahogo) */
-  sheet?: { t: string; r: string; k: string; gap?: string };
+  sheet?: { t: string; r: string; k: string; gap?: string; /** Cara A (lado de referencia del desarrollo): normal de la cara elegida */ aSide?: V3 };
   /** ePoints: puntos de conexión para ensamblar (coincidencia, inserción, compuesto) */
   epoints?: import('./epoints').EPoint[];
   /** Parámetros de modelo de las operaciones: { idOperación: { campo: 'c7' } } (c1, c2… automáticos) */
@@ -179,7 +197,7 @@ export interface PartDoc {
 
 // ---------- Parámetros de modelo c1, c2… (un parámetro por cada valor de cada operación y cada cota de boceto) ----------
 /** Campos de operación que nunca son valores (referencias, textos, modos) */
-const NOT_VALUE = new Set(['dirMode', 'std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec']);
+const NOT_VALUE = new Set(['dirMode', 'std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec', 'line', 'pick', 'flip', 'body']);
 /** Nombre legible de cada campo (para la tabla de parámetros) */
 export const FIELD_NAMES: Record<string, string> = {
   distance: 'Distancia', distance2: 'Distancia 2', angle: 'Ángulo', radius: 'Radio', depth: 'Profundidad', dia: 'Diámetro', thickness: 'Espesor', offset: 'Desfase',
@@ -493,6 +511,7 @@ export const FEATURE_NAMES: Record<FeatureType, string> = {
   thicken: 'Engrosar', thread: 'Rosca', workaxis: 'Eje de trabajo', workpoint: 'Punto de trabajo',
   combine: 'Combinar', movebody: 'Mover cuerpo', derive: 'Pieza derivada', pathpattern: 'Patrón por trayectoria', sm_contour: 'Pestaña de contorno', sm_punch: 'Punzonado',
   sketch3d: 'Boceto 3D', surf_extrude: 'Superficie extruida', surf_revolve: 'Superficie de revolución', surf_loft: 'Superficie solevada', surf_patch: 'Parche', stitch: 'Coser', sm_loft: 'Pestaña solevada',
+  sm_roll: 'Rodillo de contorno', sm_bend: 'Pliegue', sm_fold: 'Plegado', sm_seam: 'Costura de esquina', sm_rip: 'Rasgadura', sm_unfold: 'Desplegar', sm_refold: 'Volver a plegar', sm_mark: 'Marca', skpattern: 'Patrón de boceto',
 };
 
 export const OP_NAMES: Record<BoolOp, string> = { join: 'Unir', cut: 'Cortar', intersect: 'Intersección', new: 'Nuevo sólido' };
@@ -525,7 +544,9 @@ export function consumedSketches(doc: PartDoc): Set<string> {
   for (const f of doc.features) {
     if (f.type === 'extrude' || f.type === 'revolve' || f.type === 'sm_face' || f.type === 'rib' || f.type === 'coil' || f.type === 'sm_contour') s.add(f.profile);
     if (f.type === 'pathpattern') s.add(f.path);
-    if (f.type === 'sm_punch') s.add(f.sketch);
+    if (f.type === 'sm_punch' || f.type === 'sm_fold' || f.type === 'sm_rip' || f.type === 'sm_mark') s.add(f.sketch);
+    if (f.type === 'sm_roll') s.add(f.profile);
+    if (f.type === 'skpattern') s.add(f.sketch);
     if (f.type === 'sweep') { s.add(f.profile); s.add(f.path); }
     if (f.type === 'loft') f.sections.forEach((x) => s.add(x));
     if (f.type === 'hole') s.add(f.sketch);
@@ -540,7 +561,7 @@ export function consumedSketches(doc: PartDoc): Set<string> {
 }
 
 /** Operaciones que generan o quitan material (las que se pueden repetir en patrones y simetrías). */
-export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil', 'derive', 'sm_punch', 'stitch'];
+export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil', 'derive', 'sm_punch', 'stitch', 'sm_rip'];
 
 export function newSheetDoc(): PartDoc {
   const d = newDoc();

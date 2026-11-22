@@ -1,7 +1,7 @@
 // Reconstrucción de piezas (incluida chapa) sobre OpenCascade vía replicad.
 import {
   Plane, draw, drawRectangle, drawCircle, drawEllipse, drawText, loadFont, importSTEP, compoundShapes, genericSweep, makeHelix, FaceFinder, EdgeFinder, getOC, cast, measureShapeVolumeProperties,
-  makeLine, makeBSplineApproximation, assembleWire, makeNonPlanarFace, makeAx1, loft, makeSolid, Vector,
+  makeLine, makeBSplineApproximation, assembleWire, makeNonPlanarFace, makeAx1, loft, makeSolid, Vector, makeBox, measureVolume,
 } from 'replicad';
 import { openSegments, findLoops, loopPolyline, polyArea, pointInPoly, type Seg } from '../core/sketch';
 import type { Drawing, Shape3D } from 'replicad';
@@ -9,8 +9,9 @@ import { makeEval } from '../core/expr';
 import {
   docParams, planeFrame, entityOutline, npolyPoints, toWorld, v3, workPlaneFrame, registerAux, splineBeziers,
   type PartDoc, type SkEntity, type SketchF, type Feature, type EdgeSel, type Frame, type V3, type V2,
-  type WorkPlanes, type BoolOp, type SmFlangeF, type SmPunchF, type Sketch3dF, type E3,
+  type WorkPlanes, type BoolOp, type SmFlangeF, type SmPunchF, type Sketch3dF, type E3, type SmSeamF, type SmFoldF, type SmRollF, type SmBendF,
 } from '../core/doc';
+import { flattenPath } from '../core/svgpath';
 
 export interface FeatStatus { ok: boolean; error?: string }
 type Ev = (s: string) => number;
@@ -181,7 +182,9 @@ const AXES: Record<string, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
 interface Ctx {
   ev: Ev; sketches: Map<string, SketchF>; work: WorkPlanes;
   tools: Map<string, { solid: Shape3D; op: BoolOp }>;
-  sheet: { t: number; r: number; k: number; gap: number; flanges: SmFlangeF[] } | null;
+  sheet: SheetCtx | null;
+  /** estado desplegado (Desplegar … Volver a plegar) */
+  unfold?: { folded: Shape3D | null; core: FlatCore; from: number };
   sk3d: Map<string, Sketch3dF>;
   surfaces: Map<string, Shape3D>;
 }
@@ -347,12 +350,35 @@ function holeTool(f: Extract<Feature, { type: 'hole' }>, P: V3, n: V3, ev: Ev, t
 
 /** Desahogo de esquina: si otra pestaña nace en una arista contigua (mismo vértice, no paralela), esta pestaña se recorta
  *  en ese extremo lo que ocupa el pliegue de la otra (R + t) más la holgura, para que los pliegues no se pisen. */
-export function flangeEnds(f: SmFlangeF, sh: { t: number; r: number; gap?: number; flanges?: SmFlangeF[] }): { p0: V3; p1: V3; trim0: number; trim1: number } {
+export interface SheetCtx { t: number; r: number; k: number; gap?: number; flanges?: SmFlangeF[]; seams?: { a: string; b: string; gap: number; kind: SmSeamF['kind'] }[]; ev?: Ev }
+export function sheetCtx(doc: PartDoc, ev: Ev): SheetCtx | null {
+  if (!doc.sheet) return null;
+  const live = doc.features.filter((x) => !x.suppressed);
+  return {
+    t: ev(doc.sheet.t), r: ev(doc.sheet.r), k: ev(doc.sheet.k), gap: doc.sheet.gap != null && doc.sheet.gap !== '' ? ev(doc.sheet.gap) : 0.5,
+    flanges: live.filter((x): x is SmFlangeF => x.type === 'sm_flange' && !!x.edge),
+    seams: live.filter((x): x is SmSeamF => x.type === 'sm_seam').map((x) => { let g = 0.5; try { g = ev(x.gap); } catch { /* */ } return { a: x.a, b: x.b, gap: g, kind: x.kind }; }),
+    ev,
+  };
+}
+export function flangeEnds(f: SmFlangeF, sh: SheetCtx): { p0: V3; p1: V3; trim0: number; trim1: number; ext0: number; ext1: number } {
   let { p0, p1 } = f.edge!;
   const n = v3.norm(f.edge!.n), w = v3.norm(f.edge!.w);
   if (v3.dot(v3.cross(w, n), v3.sub(p1, p0)) < 0) [p0, p1] = [p1, p0];
+  // Costuras de esquina: el tramo recto se alarga en el extremo común con la otra pestaña
+  let ext0 = 0, ext1 = 0;
+  const near = (P: V3, Q: V3) => v3.len(v3.sub(P, Q)) <= sh.t + 0.1;
+  for (const sm of sh.seams ?? []) {
+    if (sm.a !== f.id && sm.b !== f.id) continue;
+    const o = sh.flanges?.find((x) => x.id === (sm.a === f.id ? sm.b : sm.a)); if (!o?.edge) continue;
+    let tho = Math.PI / 2; try { if (sh.ev) tho = (sh.ev(o.angle) * Math.PI) / 180; } catch { /* */ }
+    const cover = sm.kind === 'overlap' ? f.id === sm.a : f.id === sm.b;
+    const e = Math.max(0, cover ? (sh.r + sh.t) * Math.sin(tho) : sh.r * Math.sin(tho) - sm.gap);
+    if (near(p0, o.edge.p0) || near(p0, o.edge.p1)) ext0 = e;
+    else if (near(p1, o.edge.p0) || near(p1, o.edge.p1)) ext1 = e;
+  }
   const g = sh.gap ?? 0.5;
-  if (g < 0 || !sh.flanges) return { p0, p1, trim0: 0, trim1: 0 };
+  if (g < 0 || !sh.flanges) return { p0, p1, trim0: 0, trim1: 0, ext0, ext1 };
   const ax = v3.norm(v3.sub(p1, p0)), tol = sh.t + 0.1;
   const trimAt = (P: V3) => sh.flanges!.some((o) => {
     if (o.id === f.id || !o.edge) return false;
@@ -364,16 +390,17 @@ export function flangeEnds(f: SmFlangeF, sh: { t: number; r: number; gap?: numbe
   const s = sh.r + sh.t + g;
   const len = v3.len(v3.sub(p1, p0));
   const trim0 = trimAt(p0) ? Math.min(s, len / 2 - 0.5) : 0, trim1 = trimAt(p1) ? Math.min(s, len / 2 - 0.5) : 0;
-  return { p0: v3.add(p0, v3.mul(ax, trim0)), p1: v3.sub(p1, v3.mul(ax, trim1)), trim0, trim1 };
+  // el alargamiento de la costura se cuenta desde el extremo recortado
+  return { p0: v3.add(p0, v3.mul(ax, trim0)), p1: v3.sub(p1, v3.mul(ax, trim1)), trim0, trim1, ext0: ext0 ? ext0 + trim0 : 0, ext1: ext1 ? ext1 + trim1 : 0 };
 }
 
-function flangeSolid(f: SmFlangeF, sh: { t: number; r: number; gap?: number; flanges?: SmFlangeF[] }, ev: Ev): Shape3D {
+function flangeSolid(f: SmFlangeF, sh: SheetCtx, ev: Ev): Shape3D {
   if (!f.edge) throw new Error('Selecciona la arista de la pestaña');
   const { t, r } = sh;
   const L = ev(f.length), th = (ev(f.angle) * Math.PI) / 180;
   if (!(L > 0)) throw new Error('Longitud no válida');
   if (!(th > 0 && th <= Math.PI)) throw new Error('Ángulo entre 0 y 180°');
-  const { p0, p1 } = flangeEnds(f, sh);
+  const { p0, p1, ext0, ext1 } = flangeEnds(f, sh);
   const n = v3.norm(f.edge.n), w = v3.norm(f.edge.w);
   const ax = v3.norm(v3.sub(p1, p0));
   const len = v3.len(v3.sub(p1, p0));
@@ -391,8 +418,14 @@ function flangeSolid(f: SmFlangeF, sh: { t: number; r: number; gap?: number; fla
     .threePointsArcTo(pts.oS, pts.oM).close();
   // Plano de la sección: x = w (hacia fuera), y = n; su normal coincide con el eje de la arista
   const pl = new Plane(p0, w, ax);
-  // Pequeño solape con la chapa base para que la unión sea sólida
-  return (dr.sketchOnPlane(pl) as any).extrude(len);
+  let solid = (dr.sketchOnPlane(pl) as any).extrude(len) as Shape3D;
+  // costura de esquina: tramo recto alargado más allá de los extremos
+  if (ext0 > 1e-6 || ext1 > 1e-6) {
+    const st = (draw(pts.iE) as any).lineTo(pts.iF).lineTo(pts.oF).lineTo(pts.oE).close();
+    if (ext1 > 1e-6) solid = solid.fuse((st.sketchOnPlane(new Plane(p1, w, ax)) as any).extrude(ext1));
+    if (ext0 > 1e-6) solid = solid.fuse((st.sketchOnPlane(new Plane(p0, w, ax)) as any).extrude(ext0, { extrusionDirection: v3.mul(ax, -1) }));
+  }
+  return solid;
 }
 
 /** Contorno 2D de un punzonado en los puntos dados (coordenadas del boceto) */
@@ -688,6 +721,21 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
           : (g.profile.sketchOnPlane(makePlane(fr)) as any).extrude(W);
       return { solid, op: 'join' };
     }
+    case 'sm_roll': {
+      if (!ctx.sheet) throw new Error('La pieza no es de chapa');
+      const sk = getSk(f.profile), fr = planeFrame(sk.plane, ev, work);
+      const ang = ev(f.angle); if (!(ang > 0 && ang <= 360)) throw new Error('Ángulo entre 0 y 360°');
+      const { g, ax } = rollGeometry(f, sk, ev, ctx.sheet.t, ctx.sheet.r, ctx.sheet.k);
+      const face = (g.profile.sketchOnPlane(makePlane(fr)) as any).face();
+      const o3 = toWorld(fr, ax.o[0], ax.o[1]), d3 = v3.norm(v3.add(v3.mul(fr.xDir, ax.d[0]), v3.mul(fr.yDir, ax.d[1])));
+      return { solid: revolOf(face, o3, d3, ang), op: 'join' };
+    }
+    case 'sm_rip': {
+      const sk = getSk(f.sketch), fr = planeFrame(sk.plane, ev, work);
+      const dr = ripDrawing(sk, ev, ev(f.gap));
+      let L = 1000; if (shape) { const b = shape.boundingBox.bounds; L = v3.len(v3.sub(b[1] as V3, b[0] as V3)) * 2 + 10; }
+      return { solid: (dr.sketchOnPlane(makePlane(fr, -L / 2)) as any).extrude(L), op: 'cut' };
+    }
     case 'sm_punch': {
       const sk = getSk(f.sketch), fr = planeFrame(sk.plane, ev, work);
       const pts: V2[] = [];
@@ -720,7 +768,7 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
   const status: Record<string, FeatStatus> = {};
   const ctx: Ctx = {
     ev, sketches: new Map(), work: new Map(), tools: new Map(),
-    sheet: doc.sheet ? { t: ev(doc.sheet.t), r: ev(doc.sheet.r), k: ev(doc.sheet.k), gap: doc.sheet.gap != null && doc.sheet.gap !== '' ? ev(doc.sheet.gap) : 0.5, flanges: doc.features.filter((x): x is SmFlangeF => x.type === 'sm_flange' && !x.suppressed && !!x.edge) } : null,
+    sheet: sheetCtx(doc, ev),
     sk3d: new Map(), surfaces: new Map(),
   };
   let shape: Shape3D | null = null;
@@ -879,6 +927,7 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
           const sub = await buildPart(f.doc);
           if (!sub.shape) throw new Error('La pieza de origen no tiene sólido');
           let x = sub.shape.clone();
+          if (f.body != null) { const so = ((x as any).solids ?? [x]) as Shape3D[]; if (!so[f.body]) throw new Error('Cuerpo no encontrado en la pieza origen'); x = so[f.body]; }
           const k = ev(f.scale);
           if (!(k > 0)) throw new Error('Escala no válida');
           if (Math.abs(k - 1) > 1e-9) x = x.scale(k, [0, 0, 0]);
@@ -912,6 +961,127 @@ export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild>
             }
             if (tool) shape = combine(shape, tool, src.op === 'new' ? 'join' : src.op);
           }
+          break;
+        }
+        case 'skpattern': {
+          if (!shape) throw new Error('No hay sólido');
+          const sk = ctx.sketches.get(f.sketch); if (!sk) throw new Error('Boceto de puntos no encontrado');
+          const fr = planeFrame(sk.plane, ev, ctx.work);
+          const pts = sk.entities.filter((e) => e.type === 'point' && !e.construction).map((e) => toWorld(fr, ev((e as { cx: string }).cx), ev((e as { cy: string }).cy)));
+          if (pts.length < 2) throw new Error('El boceto necesita al menos dos puntos (el primero es la base)');
+          const srcs = f.features.map((id) => ctx.tools.get(id)).filter(Boolean) as { solid: Shape3D; op: BoolOp }[];
+          if (!srcs.length) throw new Error('Selecciona operaciones a repetir');
+          for (const src of srcs) {
+            let tool: Shape3D | null = null;
+            for (const P of pts.slice(1)) { const c = src.solid.clone().translate(v3.sub(P, pts[0])); tool = tool ? tool.fuse(c) : c; }
+            if (tool) shape = combine(shape, tool, src.op === 'new' ? 'join' : src.op);
+          }
+          break;
+        }
+        case 'sm_fold': {
+          if (!ctx.sheet) throw new Error('La pieza no es de chapa');
+          if (!shape) throw new Error('No hay chapa que plegar');
+          const sk = ctx.sketches.get(f.sketch); if (!sk) throw new Error('Boceto no encontrado');
+          const ln = (sk.entities.find((e) => e.id === f.line && e.type === 'line') ?? sk.entities.find((e) => e.type === 'line' && !e.construction)) as Extract<SkEntity, { type: 'line' }> | undefined;
+          if (!ln) throw new Error('El boceto no tiene línea de plegado');
+          const fr = planeFrame(sk.plane, ev, ctx.work);
+          const A3 = toWorld(fr, ev(ln.a[0]), ev(ln.a[1])), B3 = toWorld(fr, ev(ln.b[0]), ev(ln.b[1]));
+          if (v3.len(v3.sub(B3, A3)) < 1e-6) throw new Error('Línea de plegado de longitud nula');
+          const { t, r, k } = ctx.sheet;
+          const thD = ev(f.angle), th = (thD * Math.PI) / 180; if (!(th > 0 && th <= Math.PI)) throw new Error('Ángulo entre 0 y 180°');
+          const M = v3.mul(v3.add(A3, B3), 0.5), h = Math.min(t / 4, 0.2);
+          const inside = (c: V3) => { try { return measureVolume(shape!.clone().intersect(makeBox(v3.sub(c, [h, h, h]), v3.add(c, [h, h, h])))) > 1e-9; } catch { return false; } };
+          const matPlus = inside(v3.add(M, v3.mul(fr.normal, t / 2)));
+          if (!matPlus && !inside(v3.sub(M, v3.mul(fr.normal, t / 2)))) throw new Error('La línea de plegado no está sobre la chapa');
+          const G = foldGeom(A3, B3, fr.normal, matPlus, t, r, k, th, f.dir, f.flip);
+          const bb = shape.boundingBox.bounds, big = v3.len(v3.sub(bb[1] as V3, bb[0] as V3)) * 3 + 100;
+          const half = (origin: V3) => (drawRectangle(big, big).sketchOnPlane(new Plane(origin, G.a, G.m)) as any).extrude(big) as Shape3D;
+          const fixed: Shape3D = shape.clone().cut(half(G.T0));
+          const moving = shape.clone().intersect(half(v3.add(G.L0, v3.mul(G.m, G.half))));
+          if (measureVolume(moving) < 1e-6) throw new Error('No hay chapa al lado que se pliega (cambia «Lado que pliega»)');
+          const bends: Shape3D[] = [];
+          for (const fc of (fixed as any).faces as any[]) {
+            try {
+              if (String(fc.geomType) !== 'PLANE') continue;
+              const nn = fc.normalAt(), c = fc.center; const nv: V3 = Array.isArray(nn) ? [nn[0], nn[1], nn[2]] : [nn.x, nn.y, nn.z]; const cv: V3 = Array.isArray(c) ? [c[0], c[1], c[2]] : [c.x, c.y, c.z];
+              if (Math.abs(Math.abs(v3.dot(nv, G.m)) - 1) < 1e-6 && Math.abs(v3.dot(v3.sub(cv, G.T0), G.m)) < 1e-4) bends.push(revolOf(fc, G.C, G.k, thD));
+            } catch { /* cara no válida */ }
+          }
+          if (!bends.length) throw new Error('No se encuentra la sección de la chapa en la línea de plegado');
+          let res: Shape3D = fixed.fuse(moving.translate(v3.mul(G.m, -G.BA)).rotate(thD, G.C, G.k));
+          for (const b of bends) res = res.fuse(b);
+          shape = res;
+          break;
+        }
+        case 'sm_bend': {
+          if (!ctx.sheet) throw new Error('La pieza no es de chapa');
+          const A = f.edgeA, B = f.edgeB;
+          if (!A || !B) throw new Error('Selecciona las aristas de las dos caras');
+          const { t, r, k } = ctx.sheet;
+          const ax = v3.norm(v3.sub(A.p1, A.p0)), axB = v3.norm(v3.sub(B.p1, B.p0));
+          if (Math.abs(v3.dot(ax, axB)) < 0.999) throw new Error('Las aristas deben ser paralelas');
+          const X = v3.norm(A.w), Y = v3.norm(A.n);
+          const to2 = (P: V3): V2 => { const d = v3.sub(P, A.p0); return [v3.dot(d, X), v3.dot(d, Y)]; };
+          const d2 = (v: V3): V2 => [v3.dot(v, X), v3.dot(v, Y)];
+          let b0 = to2(B.p0), nB = d2(v3.norm(B.n));
+          const wB = d2(v3.norm(B.w)), wl = Math.hypot(wB[0], wB[1]);
+          if (wl < 0.5) throw new Error('Las aristas deben ser perpendiculares a la sección');
+          const wb: V2 = [wB[0] / wl, wB[1] / wl];
+          // la cara de B elegida debe continuar la cara de A (si no, se toma la opuesta)
+          if (-(-wb[1]) * nB[0] + (-wb[0]) * nB[1] < 0) { b0 = [b0[0] - nB[0] * t, b0[1] - nB[1] * t]; nB = [-nB[0], -nB[1]]; }
+          const cr = 1 * wb[1] - 0 * wb[0];
+          let pts: V2[];
+          if (Math.abs(cr) < 1e-6) {
+            if (wb[0] > -0.99) throw new Error('Caras paralelas: las aristas deben estar enfrentadas');
+            if (Math.abs(b0[1]) < 1e-6) pts = [[0, 0], b0];
+            else { const s4 = b0[0] / 4; if (!(s4 > 0)) throw new Error('Las aristas no están enfrentadas'); pts = [[0, 0], [s4, 0], [b0[0] - s4, b0[1]], b0]; }
+          } else {
+            // corte de la recta y = 0 con la recta b0 + u·wb
+            const u = -b0[1] / wb[1], C: V2 = [b0[0] + u * wb[0], 0];
+            if (C[0] < -1e-6 || u < -1e-6) throw new Error('Las caras no se encuentran por delante de las aristas');
+            pts = [[0, 0], C, b0];
+          }
+          const g = contourGeometry(pts, t, r, k, 'out');
+          const aA = [0, v3.len(v3.sub(A.p1, A.p0))], aB = [v3.dot(v3.sub(B.p0, A.p0), ax), v3.dot(v3.sub(B.p1, A.p0), ax)].sort((p, q) => p - q);
+          const lo = Math.max(aA[0], aB[0]), hi = Math.min(aA[1], aB[1]);
+          if (hi - lo < 1e-3) throw new Error('Las aristas no se solapan a lo largo');
+          const N = v3.norm(v3.cross(X, Y));
+          const org = v3.add(A.p0, v3.mul(ax, v3.dot(N, ax) > 0 ? lo : hi));
+          const sol = (g.profile.sketchOnPlane(new Plane(org, X, N)) as any).extrude(hi - lo) as Shape3D;
+          ctx.tools.set(f.id, { solid: sol.clone(), op: 'join' });
+          shape = combine(shape, sol, 'join');
+          break;
+        }
+        case 'sm_seam': {
+          const fl = ctx.sheet?.flanges ?? [];
+          const a = fl.find((x) => x.id === f.a), b = fl.find((x) => x.id === f.b);
+          if (!a || !b) throw new Error('Elige dos pestañas');
+          if (a.id === b.id) throw new Error('Elige dos pestañas distintas');
+          const tol = (ctx.sheet?.t ?? 1) + 0.1, near = (P: V3, Q: V3) => v3.len(v3.sub(P, Q)) <= tol;
+          if (![a.edge!.p0, a.edge!.p1].some((P) => near(P, b.edge!.p0) || near(P, b.edge!.p1))) throw new Error('Las pestañas no comparten esquina');
+          break;   // el alargamiento se aplica al construir las pestañas
+        }
+        case 'sm_mark': {
+          const sk = ctx.sketches.get(f.sketch); if (!sk) throw new Error('Boceto no encontrado');
+          if (!sk.entities.some((e) => !e.construction)) throw new Error('El boceto de la marca está vacío');
+          break;   // sin cambio de geometría: va al desarrollo (capa MARCADO)
+        }
+        case 'sm_unfold': {
+          if (!ctx.sheet) throw new Error('La pieza no es de chapa');
+          if (!shape) throw new Error('No hay chapa que desplegar');
+          if (ctx.unfold) throw new Error('El modelo ya está desplegado');
+          const i = doc.features.indexOf(f);
+          const u = unfoldedSolid(doc, i);
+          ctx.unfold = { folded: shape, core: u.core, from: i };
+          shape = u.solid;
+          break;
+        }
+        case 'sm_refold': {
+          const u = ctx.unfold; if (!u || !u.folded) throw new Error('No hay un «Desplegar» anterior');
+          const i = doc.features.indexOf(f);
+          const r = refoldCuts(u.folded, u.core, doc.features.slice(u.from + 1, i).filter((x) => !x.suppressed), ctx.sketches, ctx.work);
+          shape = r.shape; ctx.unfold = undefined;
+          if (r.skipped.length) status[f.id] = { ok: true, error: `Cruzan un pliegue (no se aplican en la zona del pliegue): ${r.skipped.join(', ')}` };
           break;
         }
         case 'shell': {
@@ -1021,24 +1191,154 @@ export function developTransition(A0: V3[], B0: V3[]): { outline: V2[]; lines: [
   return { outline: [...a2, ...[...b2].reverse()], lines };
 }
 
-export function flatPattern(doc: PartDoc) {
+// ---------- Chapa: geometría auxiliar (plegado, rodillo, rasgadura) ----------
+const rotV = (v: V3, k: V3, th: number): V3 => { const c = Math.cos(th), sn = Math.sin(th); return v3.add(v3.add(v3.mul(v, c), v3.mul(v3.cross(k, v), sn)), v3.mul(k, v3.dot(k, v) * (1 - c))); };
+const rotP = (P: V3, C: V3, k: V3, th: number): V3 => v3.add(C, rotV(v3.sub(P, C), k, th));
+
+/** Plegado por la línea A–B (eje del pliegue centrado). o = normal del boceto; matPlus = el material está del lado +o del plano del boceto. */
+function foldGeom(A3: V3, B3: V3, n: V3, matPlus: boolean, t: number, R: number, K: number, th: number, dir: 'up' | 'down', flip: boolean) {
+  const a = v3.norm(v3.sub(B3, A3)), o = v3.norm(n);
+  const L0 = v3.add(A3, v3.mul(o, matPlus ? t : 0));                 // sobre la cara del lado o
+  let m = v3.norm(v3.cross(o, a)); if (flip) m = v3.mul(m, -1);
+  const BA = th * (R + K * t), half = BA / 2;
+  const T0 = v3.sub(L0, v3.mul(m, half));
+  const up = dir === 'up';
+  const C = up ? v3.add(T0, v3.mul(o, R)) : v3.sub(T0, v3.mul(o, R + t));
+  const k = v3.norm(up ? v3.cross(m, o) : v3.cross(o, m));
+  return { a, o, m, L0, T0, C, k, BA, half };
+}
+
+/** Eje de un rodillo de contorno en coordenadas del boceto */
+function rollAxis(sk: SketchF, axis: string, ev: Ev): { o: V2; d: V2 } {
+  if (axis === 'sx') return { o: [0, 0], d: [1, 0] };
+  if (axis === 'sy') return { o: [0, 0], d: [0, 1] };
+  const ln = sk.entities.find((e) => e.id === axis);
+  if (!ln || ln.type !== 'line') throw new Error('Eje del rodillo no encontrado');
+  const A: V2 = [ev(ln.a[0]), ev(ln.a[1])], B: V2 = [ev(ln.b[0]), ev(ln.b[1])], l = Math.hypot(B[0] - A[0], B[1] - A[1]);
+  if (l < 1e-9) throw new Error('Eje de longitud nula');
+  return { o: A, d: [(B[0] - A[0]) / l, (B[1] - A[1]) / l] };
+}
+function rollGeometry(f: SmRollF, sk: SketchF, ev: Ev, t: number, R: number, K: number) {
+  const ax = rollAxis(sk, f.axis, ev);
+  const pts = lineChain({ ...sk, entities: sk.entities.filter((e) => e.id !== f.axis) }, ev);
+  const g = contourGeometry(pts, t, R, K, f.side);
+  // radio neutro medio (ponderado por longitud) para el desarrollo
+  const dist = (p: V2) => Math.abs((p[0] - ax.o[0]) * ax.d[1] - (p[1] - ax.o[1]) * ax.d[0]);
+  const s = f.side === 'in' ? 1 : -1;
+  let sw = 0, sl = 0, conic = false;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const u: V2 = [pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]], l = Math.hypot(u[0], u[1]); if (l < 1e-9) continue;
+    const un: V2 = [u[0] / l, u[1] / l], mid: V2 = [(pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2];
+    if (Math.abs(un[0] * ax.d[1] - un[1] * ax.d[0]) > 1e-3) conic = true;
+    const od: V2 = [-un[1] * s, un[0] * s], d0 = dist(mid), outward = dist([mid[0] + od[0] * 0.01, mid[1] + od[1] * 0.01]) > d0;
+    sw += (outward ? d0 + K * t : d0 - t + K * t) * l; sl += l;
+  }
+  const rN = sl ? sw / sl : 0;
+  return { g, ax, rN, conic };
+}
+
+/** Rasgadura: rectángulos finos a lo largo de las líneas del boceto */
+function ripDrawing(sk: SketchF, ev: Ev, gap: number): Drawing {
+  if (!(gap > 0)) throw new Error('Holgura no válida');
+  let dr: Drawing | null = null;
+  for (const e of sk.entities) {
+    if (e.type !== 'line' || e.construction) continue;
+    const A: V2 = [ev(e.a[0]), ev(e.a[1])], B: V2 = [ev(e.b[0]), ev(e.b[1])], L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+    if (L < 1e-6) continue;
+    const x = drawRectangle(L, gap).rotate((Math.atan2(B[1] - A[1], B[0] - A[0]) * 180) / Math.PI, [0, 0]).translate((A[0] + B[0]) / 2, (A[1] + B[1]) / 2);
+    dr = dr ? dr.fuse(x) : x;
+  }
+  if (!dr) throw new Error(`${sk.name}: dibuja las líneas de la rasgadura`);
+  return dr;
+}
+
+/** Contornos 2D (en su boceto) de las operaciones que quitan material de la chapa */
+function cutDrawings(f: Feature, sketches: Map<string, SketchF>, ev: Ev, work: WorkPlanes): { dr: Drawing; fr: Frame }[] {
+  if (f.suppressed) return [];
+  if (f.type === 'extrude' && f.op === 'cut') { const sk = sketches.get(f.profile); return sk ? [{ dr: sketchProfile(sk, ev), fr: planeFrame(sk.plane, ev, work) }] : []; }
+  if (f.type === 'sm_rip') { const sk = sketches.get(f.sketch); return sk ? [{ dr: ripDrawing(sk, ev, ev(f.gap)), fr: planeFrame(sk.plane, ev, work) }] : []; }
+  if (f.type === 'sm_punch') {
+    const sk = sketches.get(f.sketch); if (!sk) return [];
+    const pts: V2[] = sk.entities.filter((e) => e.type === 'point' && !e.construction).map((e) => [ev((e as { cx: string }).cx), ev((e as { cy: string }).cy)] as V2);
+    return pts.length ? [{ dr: punchDrawing(f, ev, pts), fr: planeFrame(sk.plane, ev, work) }] : [];
+  }
+  if (f.type === 'hole') {
+    const D = ev(f.dia); if (!(D > 0)) return [];
+    let fr: Frame; const cs: V2[] = [];
+    if (f.face) {
+      const F = f.face, n0 = v3.norm(F.normal as V3), P = F.point as V3;
+      let x = v3.cross([0, 0, 1], n0); if (v3.len(x) < 1e-6) x = [1, 0, 0]; x = v3.norm(x);
+      fr = { origin: P, xDir: x, normal: n0, yDir: v3.cross(n0, x) };
+      const loc = (q: V3): V2 => { const d = v3.sub(q, P); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
+      if (F.e1 && F.e2 && F.d1 && F.d2) {
+        const L = [F.e1, F.e2].map((e) => { const A = loc(e.a as V3), B = loc(e.b as V3); const u: V2 = [B[0] - A[0], B[1] - A[1]]; const l = Math.hypot(u[0], u[1]) || 1; let w: V2 = [-u[1] / l, u[0] / l]; if (-(A[0] * w[0] + A[1] * w[1]) < 0) w = [-w[0], -w[1]]; return { A, w }; });
+        const dd = [ev(F.d1), ev(F.d2)];
+        const [a1, b1] = L[0].w, [a2, b2] = L[1].w, r1 = dd[0] + L[0].A[0] * a1 + L[0].A[1] * b1, r2 = dd[1] + L[1].A[0] * a2 + L[1].A[1] * b2, det = a1 * b2 - a2 * b1;
+        if (Math.abs(det) > 1e-9) cs.push([(r1 * b2 - r2 * b1) / det, (a1 * r2 - a2 * r1) / det]);
+      } else cs.push([0, 0]);
+    } else {
+      const sk = sketches.get(f.sketch); if (!sk) return [];
+      fr = planeFrame(sk.plane, ev, work);
+      for (const e of sk.entities) if (e.type === 'point' || e.type === 'circle') cs.push([ev(e.cx), ev(e.cy)]);
+    }
+    let dr: Drawing | null = null;
+    for (const c of cs) { const x = drawCircle(D / 2).translate(c[0], c[1]); dr = dr ? dr.fuse(x) : x; }
+    return dr ? [{ dr, fr }] : [];
+  }
+  return [];
+}
+
+/** Lleva un dibujo en coordenadas de su boceto (marco fr) al desarrollo con la aplicación m (3D → plano) */
+function mapDrawing(dr: Drawing, fr: Frame, m: (P: V3) => V2): Drawing {
+  const A = m(fr.origin), X = m(v3.add(fr.origin, fr.xDir)), Y = m(v3.add(fr.origin, fr.yDir));
+  const bx: V2 = [X[0] - A[0], X[1] - A[1]], by: V2 = [Y[0] - A[0], Y[1] - A[1]];
+  let d2 = dr;
+  if (bx[0] * by[1] - bx[1] * by[0] < 0) d2 = d2.mirror([1, 0], [0, 0], 'plane');   // simetría respecto al eje X (y → −y)
+  return d2.rotate((Math.atan2(bx[1], bx[0]) * 180) / Math.PI, [0, 0]).translate(A[0], A[1]);
+}
+
+interface Panel { p0: V3; ax: V3; iE: V3; d: V3; nF: V3; L: number; BA: number; pf: V2; eF: V2; uF: V2; region: V2[] }
+export interface FlatCore {
+  t: number; r: number; k: number; ev: Ev; work: WorkPlanes; sketches: Map<string, SketchF>;
+  base: { fr: Frame; prof: Drawing } | null;
+  flat: Drawing; bends: { a: V2; b: V2; label: string }[]; panels: Panel[]; bendStrips: V2[][]; foldZones: V2[][]; notes: string[];
+  mapOf: (fr: Frame) => ((P: V3) => V2) | null;
+}
+/** Plano 3D de un tramo plano (pestaña o lado plegado) cuyas coordenadas 2D son las del desarrollo */
+function panelPlane(pn: Panel, shift: number): Plane {
+  const X = v3.add(v3.mul(pn.ax, pn.eF[0]), v3.mul(pn.d, pn.uF[0])), Y = v3.add(v3.mul(pn.ax, pn.eF[1]), v3.mul(pn.d, pn.uF[1]));
+  const N = v3.norm(v3.cross(X, Y));
+  const O = v3.sub(v3.sub(pn.iE, v3.mul(pn.ax, pn.pf[0] * pn.eF[0] + pn.pf[1] * pn.eF[1])), v3.mul(pn.d, pn.pf[0] * pn.uF[0] + pn.pf[1] * pn.uF[1] + pn.BA));
+  return new Plane(v3.add(O, v3.mul(N, shift)), X, N);
+}
+const BIG = 1e5;
+
+/** Desarrollo base: cara base, pestañas (sobre la base o sobre otras pestañas), plegados, pestaña de contorno, rodillo y pestaña solevada. */
+export function flatCore(doc: PartDoc): FlatCore {
   if (!doc.sheet) throw new Error('La pieza no es de chapa');
   const ev = makeEval(docParams(doc));
-  const t = ev(doc.sheet.t), r = ev(doc.sheet.r), k = ev(doc.sheet.k);
+  const sh = sheetCtx(doc, ev)!;
+  const { t, r, k } = sh;
   const work: WorkPlanes = new Map();
   const sketches = new Map<string, SketchF>();
   let base: { fr: Frame; prof: Drawing } | null = null;
   const bends: { a: V2; b: V2; label: string }[] = [];
   let flat: Drawing | null = null;
   const sk3 = new Map<string, Sketch3dF>();
-  /** tramos planos de las pestañas ya desarrolladas: 3D → plano */
   const notes: string[] = [];
-  const panels: { p0: V3; ax: V3; iE: V3; d: V3; nF: V3; L: number; BA: number; pf: V2; eF: V2; uF: V2 }[] = [];
+  const panels: Panel[] = [], bendStrips: V2[][] = [], foldZones: V2[][] = [];
+  const toB = (P: V3): V2 => { const d = v3.sub(P, base!.fr.origin); return [v3.dot(d, base!.fr.xDir), v3.dot(d, base!.fr.yDir)]; };
+  const dirB = (v: V3): V2 => [v3.dot(v, base!.fr.xDir), v3.dot(v, base!.fr.yDir)];
+  const deg = (x: number) => Math.round((x * 180) / Math.PI);
+  let unfolded = false;
   for (const f of doc.features) {
     if (f.suppressed) continue;
+    if (f.type === 'sm_unfold') { unfolded = true; continue; }
+    if (f.type === 'sm_refold') { unfolded = false; continue; }
     if (f.type === 'sketch') sketches.set(f.id, f);
     if (f.type === 'sketch3d') sk3.set(f.id, f);
     if (f.type === 'workplane' || f.type === 'workpoint' || f.type === 'workaxis') registerAux(work, f, ev);
+    if (unfolded) continue;
     if (f.type === 'sm_loft' && !base && !flat) {
       const wire = (id: string) => { const a = sk3.get(id); if (a) return wire3d(a, ev); const sk = sketches.get(id); if (!sk) throw new Error('Boceto no encontrado'); return (sketchProfile(sk, ev, true).sketchOnPlane(makePlane(planeFrame(sk.plane, ev, work))) as any).wire; };
       const N = Math.max(8, Math.min(200, Math.round(ev(f.segments) || 24)));
@@ -1051,31 +1351,57 @@ export function flatPattern(doc: PartDoc) {
       for (const [a, b] of dev.lines) bends.push({ a, b, label: '' });
       continue;
     }
-    if (f.type === 'sm_contour' && !base && !flat) {
+    if ((f.type === 'sm_contour' || f.type === 'sm_roll') && !base && !flat) {
       const sk = sketches.get(f.profile); if (!sk) continue;
-      const W = ev(f.width);
-      const g = contourGeometry(lineChain(sk, ev), t, r, k, f.side);
+      let W: number, g: ReturnType<typeof contourGeometry>;
+      if (f.type === 'sm_contour') { W = ev(f.width); g = contourGeometry(lineChain(sk, ev), t, r, k, f.side); }
+      else {
+        const rg = rollGeometry(f, sk, ev, t, r, k); g = rg.g; W = (ev(f.angle) * Math.PI / 180) * rg.rN;
+        if (rg.conic) notes.push(`${f.name}: tramos cónicos; desarrollo aproximado con el radio neutro medio (R ${Math.round(rg.rN * 10) / 10})`);
+      }
       flat = polyDrawing([[0, 0], [g.flatLength, 0], [g.flatLength, W], [0, W]]);
-      for (const b of g.flatBends) bends.push({ a: [b.x, 0], b: [b.x, W], label: `${b.up ? 'ARRIBA' : 'ABAJO'} ${Math.round((b.angle * 180) / Math.PI)}° R${r}` });
+      for (const b of g.flatBends) bends.push({ a: [b.x, 0], b: [b.x, W], label: `${b.up ? 'ARRIBA' : 'ABAJO'} ${deg(b.angle)}° R${r}` });
+      if (f.type === 'sm_roll') bends.push({ a: [0, W / 2], b: [g.flatLength, W / 2], label: `ROLAR ${Math.round(ev(f.angle))}° Rn ${Math.round(rollGeometry(f, sk, ev, t, r, k).rN * 10) / 10}` });
       continue;
     }
+    if (f.type === 'sm_face' && base) { notes.push(`${f.name}: solo se desarrolla la primera cara base`); continue; }
+    if (f.type === 'sm_bend') { notes.push(`${f.name}: el pliegue entre caras no se desarrolla`); continue; }
     if (f.type === 'sm_face' && !base) {
       const sk = sketches.get(f.profile); if (!sk) continue;
       base = { fr: planeFrame(sk.plane, ev, work), prof: sketchProfile(sk, ev) };
       flat = base.prof;
     }
+    if (f.type === 'sm_fold' && base) {
+      const sk = sketches.get(f.sketch); if (!sk) continue;
+      const ln = (sk.entities.find((e) => e.id === f.line && e.type === 'line') ?? sk.entities.find((e) => e.type === 'line')) as Extract<SkEntity, { type: 'line' }> | undefined; if (!ln) continue;
+      const fr = planeFrame(sk.plane, ev, work), bf = base.fr;
+      const sgn = v3.dot(fr.normal, bf.normal), dn = v3.dot(v3.sub(fr.origin, bf.origin), bf.normal);
+      const inMat = (x: number) => x > 0 && x < t;
+      const matPlus = inMat(dn + sgn * t / 2);
+      if (Math.abs(Math.abs(sgn) - 1) > 1e-3 || (!matPlus && !inMat(dn - sgn * t / 2))) { notes.push(`${f.name}: solo se desarrolla el plegado sobre la cara base`); continue; }
+      const A3 = toWorld(fr, ev(ln.a[0]), ev(ln.a[1])), B3 = toWorld(fr, ev(ln.b[0]), ev(ln.b[1]));
+      const th = (ev(f.angle) * Math.PI) / 180;
+      const G = foldGeom(A3, B3, fr.normal, matPlus, t, r, k, th, f.dir, f.flip);
+      const pf = toB(G.T0), eF = dirB(G.a), uF = dirB(G.m);
+      const d = rotV(G.m, G.k, th);
+      const at = (p: V2, e: number, u: number): V2 => [p[0] + eF[0] * e + uF[0] * u, p[1] + eF[1] * e + uF[1] * u];
+      panels.push({ p0: G.T0, ax: G.a, iE: rotP(G.T0, G.C, G.k, th), d, nF: v3.norm(v3.cross(G.a, d)), L: 1e6, BA: G.BA, pf, eF, uF, region: [at(pf, -BIG, G.BA), at(pf, BIG, G.BA), at(pf, BIG, G.BA + BIG), at(pf, -BIG, G.BA + BIG)] });
+      bendStrips.push([at(pf, -BIG, 0), at(pf, BIG, 0), at(pf, BIG, G.BA), at(pf, -BIG, G.BA)]);
+      foldZones.push([at(pf, -BIG, 0), at(pf, BIG, 0), at(pf, BIG, BIG), at(pf, -BIG, BIG)]);
+      bends.push({ a: toB(A3), b: toB(B3), label: `${f.dir === 'up' ? 'ARRIBA' : 'ABAJO'} ${deg(th)}° R${r}` });
+      continue;
+    }
     if (f.type === 'sm_flange' && base && f.edge) {
       const th = (ev(f.angle) * Math.PI) / 180, L = ev(f.length);
       const BA = th * (r + k * t);
       // misma orientación de la arista que en flangeSolid
-      const { p0, p1 } = flangeEnds(f, { t, r, gap: doc.sheet.gap != null && doc.sheet.gap !== '' ? ev(doc.sheet.gap) : 0.5, flanges: doc.features.filter((x): x is SmFlangeF => x.type === 'sm_flange' && !x.suppressed && !!x.edge) });
+      const { p0, p1, ext0, ext1 } = flangeEnds(f, sh);
       const n3 = v3.norm(f.edge.n), w3 = v3.norm(f.edge.w);
-      // ¿sobre qué tramo plano está la arista? la cara base o una pestaña anterior (pestaña sobre pestaña)
+      // ¿sobre qué tramo plano está la arista? la cara base o una pestaña / lado plegado anterior
       const fr = base.fr, tol = t + 0.05;
       let toFlat: ((P: V3) => V2) | null = null, dirFlat: ((v: V3) => V2) | null = null;
       if (Math.abs(v3.dot(v3.sub(p0, fr.origin), fr.normal)) <= tol && Math.abs(v3.dot(v3.sub(p1, fr.origin), fr.normal)) <= tol && Math.abs(v3.dot(w3, fr.normal)) < 0.2) {
-        toFlat = (P) => { const d = v3.sub(P, fr.origin); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
-        dirFlat = (v) => [v3.dot(v, fr.xDir), v3.dot(v, fr.yDir)];
+        toFlat = toB; dirFlat = dirB;
       } else {
         for (const pn of [...panels].reverse()) {
           const on = (P: V3) => { const sAlong = v3.dot(v3.sub(P, pn.iE), pn.d), off = v3.dot(v3.sub(P, pn.iE), pn.nF); return sAlong > -0.05 && sAlong < pn.L + tol && Math.abs(off) <= tol; };
@@ -1094,79 +1420,121 @@ export function flatPattern(doc: PartDoc) {
       const wl = Math.hypot(wv[0], wv[1]);
       if (wl < 0.3) throw new Error(`${f.name}: dirección de la pestaña no válida para el desarrollo`);
       const u: V2 = [wv[0] / wl, wv[1] / wl], ext = BA + L;
-      const q = (p: V2, s2: number): V2 => [p[0] + u[0] * s2, p[1] + u[1] * s2];
-      flat = flat!.fuse(polyDrawing([q0, q1, q(q1, ext), q(q0, ext)]));
-      bends.push({ a: q(q0, BA / 2), b: q(q1, BA / 2), label: `${f.dir === 'up' ? 'ARRIBA' : 'ABAJO'} ${Math.round((th * 180) / Math.PI)}° R${r}` });
+      const q = (p: V2, s2: number, e = 0): V2 => [p[0] + u[0] * s2 + eF[0] * e, p[1] + u[1] * s2 + eF[1] * e];
+      const straight = [q(q0, BA, -ext0), q(q1, BA, ext1), q(q1, ext, ext1), q(q0, ext, -ext0)];
+      flat = ext0 || ext1 ? flat!.fuse(polyDrawing([q0, q1, q(q1, BA), q(q0, BA)])).fuse(polyDrawing(straight)) : flat!.fuse(polyDrawing([q0, q1, q(q1, ext), q(q0, ext)]));
+      bends.push({ a: q(q0, BA / 2), b: q(q1, BA / 2), label: `${f.dir === 'up' ? 'ARRIBA' : 'ABAJO'} ${deg(th)}° R${r}` });
+      bendStrips.push([q0, q1, q(q1, BA), q(q0, BA)]);
       // tramo plano de esta pestaña en 3D (como en flangeSolid) para las pestañas que cuelguen de ella
       const sg = f.dir === 'down' ? -1 : 1;
       const iEx = r * Math.sin(th), iEy = f.dir === 'down' ? -t - (r - r * Math.cos(th)) : r - r * Math.cos(th);
       const iE = v3.add(p0, v3.add(v3.mul(w3, iEx), v3.mul(n3, iEy)));
       const d3 = v3.norm(v3.add(v3.mul(w3, Math.cos(th)), v3.mul(n3, sg * Math.sin(th))));
       const ax = v3.norm(v3.sub(p1, p0));
-      panels.push({ p0, ax, iE, d: d3, nF: v3.norm(v3.cross(ax, d3)), L, BA, pf: q0, eF, uF: u });
+      panels.push({ p0, ax, iE, d: d3, nF: v3.norm(v3.cross(ax, d3)), L, BA, pf: q0, eF, uF: u, region: straight });
     }
   }
   if (!flat) throw new Error('No hay cara base de chapa');
-  // Cortes, agujeros y punzonados: se llevan al desarrollo si están sobre la cara base o sobre el tramo plano de una pestaña
-  if (base) {
-    const bf = base.fr, tolP = t + 0.05;
-    const mapOf = (fr: Frame): ((P: V3) => V2) | null => {
-      if (Math.abs(Math.abs(v3.dot(fr.normal, bf.normal)) - 1) < 1e-3 && Math.abs(v3.dot(v3.sub(fr.origin, bf.origin), bf.normal)) <= tolP + 1e-6)
-        return (P) => { const d = v3.sub(P, bf.origin); return [v3.dot(d, bf.xDir), v3.dot(d, bf.yDir)]; };
-      for (const pn of panels) if (Math.abs(Math.abs(v3.dot(fr.normal, pn.nF)) - 1) < 1e-3 && Math.abs(v3.dot(v3.sub(fr.origin, pn.iE), pn.nF)) <= tolP + 1e-6)
-        return (P) => { const a = v3.dot(v3.sub(P, pn.p0), pn.ax), sA = v3.dot(v3.sub(P, pn.iE), pn.d); return [pn.pf[0] + pn.eF[0] * a + pn.uF[0] * (pn.BA + sA), pn.pf[1] + pn.eF[1] * a + pn.uF[1] * (pn.BA + sA)]; };
-      return null;
-    };
-    /** lleva un dibujo en coordenadas del boceto (marco fr) al desarrollo */
-    const toFlat = (dr: Drawing, fr: Frame): Drawing | null => {
-      const m = mapOf(fr); if (!m) return null;
-      const A = m(fr.origin), X = m(v3.add(fr.origin, fr.xDir)), Y = m(v3.add(fr.origin, fr.yDir));
-      const bx: V2 = [X[0] - A[0], X[1] - A[1]], by: V2 = [Y[0] - A[0], Y[1] - A[1]];
-      let d2 = dr;
-      if (bx[0] * by[1] - bx[1] * by[0] < 0) d2 = d2.mirror([1, 0], [0, 0], 'plane');   // simetría respecto al eje X (y → −y)
-      return d2.rotate((Math.atan2(bx[1], bx[0]) * 180) / Math.PI, [0, 0]).translate(A[0], A[1]);
-    };
-    const skipped: string[] = [];
-    const apply = (name: string, dr: Drawing | null, fr: Frame) => {
-      const fd = dr && toFlat(dr, fr);
-      if (!fd) { skipped.push(name); return; }
-      try { flat = flat!.cut(fd); } catch { skipped.push(name); }
-    };
-    for (const f of doc.features) {
-      if (f.suppressed) continue;
+  const tolP = t + 0.05;
+  const mapOf = (fr: Frame): ((P: V3) => V2) | null => {
+    if (!base) return null;
+    const bf = base.fr;
+    if (Math.abs(Math.abs(v3.dot(fr.normal, bf.normal)) - 1) < 1e-3 && Math.abs(v3.dot(v3.sub(fr.origin, bf.origin), bf.normal)) <= tolP + 1e-6) return toB;
+    for (const pn of panels) if (Math.abs(Math.abs(v3.dot(fr.normal, pn.nF)) - 1) < 1e-3 && Math.abs(v3.dot(v3.sub(fr.origin, pn.iE), pn.nF)) <= tolP + 1e-6)
+      return (P) => { const a = v3.dot(v3.sub(P, pn.p0), pn.ax), sA = v3.dot(v3.sub(P, pn.iE), pn.d); return [pn.pf[0] + pn.eF[0] * a + pn.uF[0] * (pn.BA + sA), pn.pf[1] + pn.eF[1] * a + pn.uF[1] * (pn.BA + sA)]; };
+    return null;
+  };
+  return { t, r, k, ev, work, sketches, base, flat, bends, panels, bendStrips, foldZones, notes, mapOf };
+}
+
+/** Desarrollo con los cortes, agujeros, punzonados y rasgaduras que caen en tramos planos */
+function flatWithCuts(core: FlatCore, doc: PartDoc, upTo = doc.features.length): { flat: Drawing; skipped: string[] } {
+  let flat = core.flat;
+  const skipped: string[] = [];
+  if (!core.base) return { flat, skipped };
+  for (const f of doc.features.slice(0, upTo)) {
+    try {
+      for (const { dr, fr } of cutDrawings(f, core.sketches, core.ev, core.work)) {
+        const m = core.mapOf(fr);
+        if (!m) { skipped.push(f.name); continue; }
+        try { flat = flat.cut(mapDrawing(dr, fr, m)); } catch { skipped.push(f.name); }
+      }
+    } catch { skipped.push(f.name); }
+  }
+  return { flat, skipped };
+}
+
+export function flatPattern(doc: PartDoc) {
+  const core = flatCore(doc);
+  const { t, r, k, ev } = core;
+  const { flat: flat0, skipped } = flatWithCuts(core, doc);
+  let flat = flat0;
+  const notes = [...core.notes];
+  if (skipped.length) notes.push(`No se llevan al desarrollo (no están en un tramo plano): ${[...new Set(skipped)].join(', ')}`);
+  // Marcas: geometría de boceto que va al desarrollo sin cortar
+  const marks: V2[][] = [];
+  for (const f of doc.features) {
+    if (f.suppressed || f.type !== 'sm_mark') continue;
+    const sk = core.sketches.get(f.sketch); if (!sk) continue;
+    const fr = planeFrame(sk.plane, ev, core.work), m = core.mapOf(fr);
+    if (!m) { notes.push(`${f.name}: la marca no está en un tramo plano`); continue; }
+    const P = (p: V2): V2 => m(toWorld(fr, p[0], p[1]));
+    for (const e of sk.entities) {
+      if (e.construction) continue;
       try {
-        if (f.type === 'extrude' && f.op === 'cut') { const sk = sketches.get(f.profile); if (sk) apply(f.name, sketchProfile(sk, ev), planeFrame(sk.plane, ev, work)); }
-        else if (f.type === 'sm_punch') {
-          const sk = sketches.get(f.sketch); if (!sk) continue;
-          const pts: V2[] = sk.entities.filter((e) => e.type === 'point' && !e.construction).map((e) => [ev((e as { cx: string }).cx), ev((e as { cy: string }).cy)] as V2);
-          if (pts.length) apply(f.name, punchDrawing(f, ev, pts), planeFrame(sk.plane, ev, work));
-        } else if (f.type === 'hole') {
-          const D = ev(f.dia); if (!(D > 0)) continue;
-          let fr: Frame; const cs: V2[] = [];
-          if (f.face) {
-            const F = f.face, n0 = v3.norm(F.normal as V3), P = F.point as V3;
-            let x = v3.cross([0, 0, 1], n0); if (v3.len(x) < 1e-6) x = [1, 0, 0]; x = v3.norm(x);
-            fr = { origin: P, xDir: x, normal: n0, yDir: v3.cross(n0, x) };
-            const loc = (q: V3): V2 => { const d = v3.sub(q, P); return [v3.dot(d, fr.xDir), v3.dot(d, fr.yDir)]; };
-            if (F.e1 && F.e2 && F.d1 && F.d2) {
-              const L = [F.e1, F.e2].map((e) => { const A = loc(e.a as V3), B = loc(e.b as V3); const u: V2 = [B[0] - A[0], B[1] - A[1]]; const l = Math.hypot(u[0], u[1]) || 1; let w: V2 = [-u[1] / l, u[0] / l]; if (-(A[0] * w[0] + A[1] * w[1]) < 0) w = [-w[0], -w[1]]; return { A, w }; });
-              const dd = [ev(F.d1), ev(F.d2)];
-              const [a1, b1] = L[0].w, [a2, b2] = L[1].w, r1 = dd[0] + L[0].A[0] * a1 + L[0].A[1] * b1, r2 = dd[1] + L[1].A[0] * a2 + L[1].A[1] * b2, det = a1 * b2 - a2 * b1;
-              if (Math.abs(det) > 1e-9) cs.push([(r1 * b2 - r2 * b1) / det, (a1 * r2 - a2 * r1) / det]);
-            } else cs.push([0, 0]);
-          } else {
-            const sk = sketches.get(f.sketch); if (!sk) continue;
-            fr = planeFrame(sk.plane, ev, work);
-            for (const e of sk.entities) if (e.type === 'point' || e.type === 'circle') cs.push([ev(e.cx), ev(e.cy)]);
-          }
-          let dr: Drawing | null = null;
-          for (const c of cs) { const x = drawCircle(D / 2).translate(c[0], c[1]); dr = dr ? dr.fuse(x) : x; }
-          if (dr) apply(f.name, dr, fr);
+        if (e.type === 'text') {
+          const d = drawText(e.text || ' ', { startX: 0, startY: 0, fontSize: ev(e.size), fontFamily: 'DejaVu' }).rotate(ev(e.rot), [0, 0]).translate(ev(e.x), ev(e.y));
+          const sv = d.toSVGPaths() as unknown; const paths = (Array.isArray((sv as unknown[])[0]) ? (sv as string[][]).flat() : sv) as string[];
+          for (const pth of paths) for (const pl of flattenPath(pth)) marks.push(pl.map(([x, y]) => P([x, y])));
+        } else if (e.type !== 'point') {
+          const o = entityOutline(e, ev); if (o.pts.length < 2) continue;
+          marks.push((o.closed ? [...o.pts, o.pts[0]] : o.pts).map(P));
         }
-      } catch { skipped.push(f.name); }
+      } catch { /* entidad sin contorno */ }
     }
-    if (skipped.length) notes.push(`No se llevan al desarrollo (no están en un tramo plano): ${skipped.join(', ')}`);
+  }
+  let bends = core.bends;
+  // Cara A: el desarrollo se ve desde la cara A (si es la opuesta a la del boceto base, se refleja)
+  if (doc.sheet?.aSide && core.base && v3.dot(doc.sheet.aSide as V3, core.base.fr.normal) < 0) {
+    const fy = (p: V2): V2 => [p[0], -p[1]];
+    flat = flat.mirror([1, 0], [0, 0], 'plane');
+    bends = bends.map((b) => ({ a: fy(b.a), b: fy(b.b), label: b.label.replace(/^ARRIBA/, '§').replace(/^ABAJO/, 'ARRIBA').replace(/^§/, 'ABAJO') }));
+    for (let i = 0; i < marks.length; i++) marks[i] = marks[i].map(fy);
   }
   const paths = flat.toSVGPaths();
-  return { paths: (Array.isArray(paths[0]) ? (paths as string[][]).flat() : paths) as string[], bends, t, r, k, notes };
+  return { paths: (Array.isArray(paths[0]) ? (paths as string[][]).flat() : paths) as string[], bends, t, r, k, notes, marks };
+}
+
+/** Desplegar: chapa plana sobre la cara base con los cortes hechos hasta ahora */
+export function unfoldedSolid(doc: PartDoc, upTo: number): { solid: Shape3D; core: FlatCore } {
+  const sub = { ...doc, features: doc.features.slice(0, upTo) };
+  const core = flatCore(sub);
+  if (!core.base) throw new Error('Desplegar necesita una cara base (Cara)');
+  const { flat } = flatWithCuts(core, sub);
+  return { solid: (flat.sketchOnPlane(makePlane(core.base.fr)) as any).extrude(core.t) as Shape3D, core };
+}
+
+/** Volver a plegar: los cortes hechos sobre el desarrollo se llevan a la cara base y a los tramos planos plegados */
+export function refoldCuts(folded: Shape3D, core: FlatCore, feats: Feature[], sketches: Map<string, SketchF>, work: WorkPlanes): { shape: Shape3D; skipped: string[] } {
+  let shape = folded;
+  const skipped: string[] = [];
+  const { t } = core, bf = core.base!.fr;
+  let baseReg = core.base!.prof;
+  for (const z of core.foldZones) { try { baseReg = baseReg.cut(polyDrawing(z)); } catch { /* */ } }
+  const has = (d: Drawing) => { try { return d.toSVGPaths().length > 0; } catch { return false; } };
+  for (const f of feats) {
+    let list: { dr: Drawing; fr: Frame }[] = [];
+    try { list = cutDrawings(f, sketches, core.ev, work); } catch { skipped.push(f.name); continue; }
+    for (const { dr, fr } of list) {
+      const m = core.mapOf(fr);
+      if (!m) { skipped.push(f.name); continue; }
+      const d2 = mapDrawing(dr, fr, m);
+      try { const db = d2.intersect(baseReg); if (has(db)) shape = shape.cut((db.sketchOnPlane(makePlane(bf, -1)) as any).extrude(t + 2)); } catch { /* fuera de la base */ }
+      for (const pn of core.panels) {
+        try { const dp = d2.intersect(polyDrawing(pn.region)); if (has(dp)) shape = shape.cut((dp.sketchOnPlane(panelPlane(pn, -(t + 1))) as any).extrude(2 * t + 2)); } catch { /* fuera del tramo */ }
+      }
+      for (const bs of core.bendStrips) { try { if (has(d2.intersect(polyDrawing(bs)))) skipped.push(f.name); } catch { /* */ } }
+    }
+  }
+  return { shape, skipped: [...new Set(skipped)] };
 }

@@ -111,7 +111,7 @@ const Steps = ({ items, current }: { items: [string, boolean][]; current: number
 const ICONS: Record<string, string> = { extrude: 'extrude', revolve: 'revolve', fillet: 'fillet', chamfer: 'chamfer', hole: 'hole', pattern: 'prect', mirror: 'mirror', shell: 'shell', workplane: 'workplane', loft: 'loft', sweep: 'sweep', sm_face: 'smface', sm_flange: 'smflange',
   rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken', thread: 'thread', workaxis: 'axis', workpoint: 'point',
   surf_extrude: 'surfext', surf_revolve: 'surfrev', surf_loft: 'surfloft', surf_patch: 'patch', stitch: 'stitch', sm_loft: 'smloft', sketch3d: 'sketch3d',
-  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch' };
+  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch', sm_roll: 'smroll', sm_bend: 'smbend', sm_fold: 'smfold', sm_seam: 'smseam', sm_rip: 'smrip', sm_unfold: 'smunfold', sm_refold: 'smrefold', sm_mark: 'smmark', skpattern: 'skpattern', };
 
 /** Selector de plano (origen o de trabajo) con selección en pantalla. */
 function PlanePick({ value, onChange, exclude }: { value: PlaneRef; onChange: (p: PlaneRef) => void; exclude?: string }) {
@@ -480,6 +480,69 @@ function FeatureDialog() {
         <Row label="Espesor hacia"><Seg value={f.side} onChange={(v) => up({ side: v })} options={[['in', 'Dentro'], ['out', 'Fuera']]} /></Row>
         <Row label="Segmentos (desarrollo)"><Expr value={f.segments} unit="ul" live onCommit={(v) => up({ segments: v })} /></Row>
         <div className="pick-info">Transiciones de conductos (rectangular a circular, reducciones…). Espesor {s.doc.sheet?.t}. El desarrollo se calcula por triangulación.</div>
+      </>)}
+      {f.type === 'sm_roll' && (() => {
+        const sk = s.doc.features.find((x) => x.id === f.profile) as SketchF | undefined;
+        const lines = sk?.entities.filter((e) => e.type === 'line') ?? [];
+        return (<>
+          <Row label="Perfil">{skSel(f.profile, 'profile', sketches.filter((x) => x.entities.some((e) => e.type === 'line' && !e.construction)))}</Row>
+          <Row label="Eje"><select value={f.axis} onChange={(e) => up({ axis: e.target.value })}>
+            <option value="sx">Eje X del boceto</option><option value="sy">Eje Y del boceto</option>
+            {lines.map((l, i) => <option key={l.id} value={l.id}>Línea {i + 1}{l.type === 'line' && l.center ? ' (eje)' : l.construction ? ' (constr.)' : ''}</option>)}
+          </select></Row>
+          <Row label="Ángulo"><Expr value={f.angle} unit="deg" live autoFocus onCommit={(v) => up({ angle: v })} /></Row>
+          <Row label="Material"><Seg value={f.side} onChange={(v) => up({ side: v })} options={[['in', 'Izquierda'], ['out', 'Derecha']]} /></Row>
+          <p className="phelp">Perfil abierto de líneas (las que no son eje ni construcción) girado alrededor del eje: virolas, conos, canales curvados. Pliegues con el R y el K del estilo. Desarrollo: longitud del perfil × arco por el radio neutro medio.</p>
+        </>);
+      })()}
+      {f.type === 'sm_bend' && (<>
+        <div className="chips">
+          <button className={`chip ${(f.pick ?? 'a') === 'a' ? 'on' : ''}`} onClick={() => up({ pick: 'a' })}>Arista 1 {f.edgeA ? '✓' : ''}</button>
+          <button className={`chip ${f.pick === 'b' ? 'on' : ''}`} onClick={() => up({ pick: 'b' })}>Arista 2 {f.edgeB ? '✓' : ''}</button>
+        </div>
+        <div className="pick-info">Clic en la arista del borde de cada cara (en la misma cara de la chapa, p. ej. las dos superiores). Las aristas deben ser paralelas. Si los planos se cortan se crea un pliegue de radio R; si son paralelos y desplazados, un doble pliegue (escalón); si son coplanarios, un tramo recto.</div>
+        <div className="pick-info">Radio interior {s.doc.sheet?.r} · K = {s.doc.sheet?.k}</div>
+      </>)}
+      {f.type === 'sm_fold' && (() => {
+        const sk = s.doc.features.find((x) => x.id === f.sketch) as SketchF | undefined;
+        const lines = sk?.entities.filter((e) => e.type === 'line') ?? [];
+        return (<>
+          <Row label="Boceto">{skSel(f.sketch, 'sketch', sketches.filter((x) => x.entities.some((e) => e.type === 'line')))}</Row>
+          <p className="phelp" style={{ margin: '2px 0 6px' }}>¿Sin boceto? Haz clic en la cara a plegar: se abre un boceto en ella; dibuja la línea de plegado (de borde a borde) y al terminar vuelves aquí.</p>
+          <Row label="Línea"><select value={f.line} onChange={(e) => up({ line: e.target.value })}>{!lines.length && <option value="">— sin líneas —</option>}{lines.map((l, i) => <option key={l.id} value={l.id}>Línea {i + 1}</option>)}</select></Row>
+          <Row label="Ángulo"><Expr value={f.angle} unit="deg" live autoFocus onCommit={(v) => up({ angle: v })} /></Row>
+          <Row label="Sentido"><Seg value={f.dir} onChange={(v) => up({ dir: v })} options={[['up', 'Hacia arriba'], ['down', 'Hacia abajo']]} /></Row>
+          <Row label="Lado que pliega"><Seg value={f.flip ? 'b' : 'a'} onChange={(v) => up({ flip: v === 'b' })} options={[['a', 'Izquierda'], ['b', 'Derecha']]} /></Row>
+          <p className="phelp">La línea es el eje del pliegue (centrado): la longitud desarrollada no cambia. Se pliega todo lo que queda al lado elegido.</p>
+        </>);
+      })()}
+      {f.type === 'sm_seam' && (() => {
+        const fl = s.doc.features.filter((x) => x.type === 'sm_flange');
+        const sel = (v: string, k: string) => <select value={v} onChange={(e) => up({ [k]: e.target.value })}><option value="">— elige —</option>{fl.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>;
+        return (<>
+          <Row label="Pestaña 1">{sel(f.a, 'a')}</Row>
+          <Row label="Pestaña 2">{sel(f.b, 'b')}</Row>
+          <Row label="Tipo"><Seg value={f.kind} onChange={(v) => up({ kind: v })} options={[['overlap', 'Solape (1 cubre a 2)'], ['inverse', 'Solape inverso']]} /></Row>
+          <Row label="Holgura"><Expr value={f.gap} live onCommit={(v) => up({ gap: v })} /></Row>
+          <p className="phelp">Pestañas en aristas contiguas: se alargan para cerrar la esquina; la que cubre llega a la cara exterior de la otra y la otra se queda a la holgura de su cara interior. El pliegue conserva el desahogo de esquina.</p>
+        </>);
+      })()}
+      {f.type === 'sm_rip' && (<>
+        <Row label="Boceto">{skSel(f.sketch, 'sketch', sketches.filter((x) => x.entities.some((e) => e.type === 'line')))}</Row>
+        <p className="phelp" style={{ margin: '2px 0 6px' }}>¿Sin boceto? Haz clic en la cara: se abre un boceto en ella; dibuja las líneas de la rasgadura y al terminar vuelves aquí.</p>
+        <Row label="Holgura"><Expr value={f.gap} live autoFocus onCommit={(v) => up({ gap: v })} /></Row>
+        <p className="phelp">Abre la chapa a lo largo de cada línea con la holgura indicada (p. ej. para desarrollar una pieza cerrada).</p>
+      </>)}
+      {(f.type === 'sm_unfold' || f.type === 'sm_refold') && <p className="phelp">{f.type === 'sm_unfold' ? 'Desarrolla el modelo sobre el plano de la cara base. Los cortes, agujeros y punzonados que añadas a continuación se hacen sobre el desarrollo; con «Volver a plegar» se llevan a las caras y pestañas plegadas.' : 'Vuelve a plegar el modelo y lleva los cortes hechos sobre el desarrollo a la cara base y a las pestañas (los que caen en una zona de pliegue se avisan).'}</p>}
+      {f.type === 'sm_mark' && (<>
+        <Row label="Boceto">{skSel(f.sketch, 'sketch', sketches.filter((x) => x.entities.length > 0))}</Row>
+        <p className="phelp" style={{ margin: '2px 0 6px' }}>¿Sin boceto? Haz clic en la cara: se abre un boceto en ella; escribe el texto o dibuja la marca y al terminar vuelves aquí.</p>
+        <p className="phelp">La marca no corta la chapa: va al desarrollo y al DXF en la capa MARCADO (grabado láser, rotulado, líneas de referencia).</p>
+      </>)}
+      {f.type === 'skpattern' && (<>
+        <div className="plabel">Operaciones a repetir</div>{featPick(f.features)}
+        <Row label="Puntos">{skSel(f.sketch, 'sketch', sketches.filter((x) => x.entities.filter((e) => e.type === 'point').length > 1))}</Row>
+        <p className="phelp">Copia las operaciones en cada punto del boceto; el primer punto es la base (donde está la operación original).</p>
       </>)}
       {f.type === 'sm_face' && (<>
         <Row label="Perfil">{skSel(f.profile, 'profile')}</Row>
@@ -2865,6 +2928,23 @@ function SheetStyleDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function UcsDialog({ onClose }: { onClose: () => void }) {
+  const ev = useEval();
+  const [o, setO] = useState(['0 mm', '0 mm', '0 mm']);
+  const [rz, setRz] = useState('0 deg'), [rx, setRx] = useState('0 deg');
+  const n = (x: string) => { try { return ev(x); } catch { return NaN; } };
+  const ok = [...o, rz, rx].every((x) => isFinite(n(x)));
+  return (
+    <Modal title="SCU · Sistema de coordenadas de usuario" onClose={onClose}>
+      <div className="prow3"><span className="plabel">Origen</span>{[0, 1, 2].map((i) => <Expr key={i} value={o[i]} onCommit={(v) => setO(o.map((x, k) => (k === i ? v : x)))} />)}</div>
+      <Row label="Giro sobre Z"><Expr value={rz} unit="deg" onCommit={setRz} /></Row>
+      <Row label="Giro sobre X'"><Expr value={rx} unit="deg" onCommit={setRx} /></Row>
+      <p className="phelp">Crea el punto de origen, los planos XY, XZ e YZ y los ejes X, Y y Z del SCU como operaciones de trabajo (para bocetos, simetrías y patrones).</p>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" disabled={!ok} onClick={() => { partActions.addUcs([n(o[0]), n(o[1]), n(o[2])], n(rz), n(rx)); onClose(); }}>Aceptar</button><button className="btn" onClick={onClose}>Cancelar</button></div>
+    </Modal>
+  );
+}
+
 function FlatDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const [res, setRes] = useState<FlatResult | null>(null);
@@ -2877,8 +2957,8 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
   const tr = (p: P2) => `${(p[0] - bb[0] + pad).toFixed(2)},${(bb[3] - p[1] + pad).toFixed(2)}`;
   const exportDxf = () => {
     if (!res) return;
-    const doc = { layers: [{ name: 'CORTE', color: 7 }, { name: 'PLIEGUE', color: 1, ltype: 'CENTER' as const }, { name: 'TEXTO', color: 3 }],
-      lines: [...polys.map((pts) => ({ layer: 'CORTE', pts })), ...res.bends.map((b) => ({ layer: 'PLIEGUE', pts: [b.a, b.b] as P2[] }))],
+    const doc = { layers: [{ name: 'CORTE', color: 7 }, { name: 'PLIEGUE', color: 1, ltype: 'CENTER' as const }, { name: 'TEXTO', color: 3 }, { name: 'MARCADO', color: 5 }],
+      lines: [...polys.map((pts) => ({ layer: 'CORTE', pts })), ...res.bends.map((b) => ({ layer: 'PLIEGUE', pts: [b.a, b.b] as P2[] })), ...(res.marks ?? []).map((pts) => ({ layer: 'MARCADO', pts: pts as P2[] }))],
       texts: res.bends.map((b) => { const q = bendTextPos(b.a as P2, b.b as P2, 1.5); return { layer: 'TEXTO', x: q.x, y: q.y, h: 3, text: b.label, rot: q.rot }; }) };
     saveText(writeDxf(doc), s.fileName.replace(/\.[^.]+$/, '-desarrollo.dxf'), 'DXF', '.dxf', 'application/dxf');
   };
@@ -2888,10 +2968,11 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
         <div className="flat-view">
           <svg viewBox={`0 0 ${W} ${H}`}>
             {polys.map((p, i) => <polyline key={i} points={p.map(tr).join(' ')} className="ln-vis" />)}
+            {(res.marks ?? []).map((p, i) => <polyline key={'m' + i} points={p.map((x) => tr(x as P2)).join(' ')} fill="none" stroke="#1e6fd9" strokeWidth={0.35} />)}
             {res.bends.map((b, i) => { const q = bendTextPos(b.a as P2, b.b as P2, 1.5); const x = q.x - bb[0] + pad, y = bb[3] - q.y + pad; return <g key={i}><polyline points={`${tr(b.a)} ${tr(b.b)}`} className="ln-bend" /><text x={x} y={y} transform={`rotate(${-q.rot} ${x} ${y})`} textAnchor="middle" className="bend-label">{b.label}</text></g>; })}
           </svg>
         </div>
-        <p className="phelp">Dimensiones del desarrollo: {fmt(bb[2] - bb[0], 1)} × {fmt(bb[3] - bb[1], 1)} mm · t = {res.t} · R = {res.r} · K = {res.k} · {res.bends.length} pliegue(s).</p>
+        <p className="phelp">Dimensiones del desarrollo: {fmt(bb[2] - bb[0], 1)} × {fmt(bb[3] - bb[1], 1)} mm · t = {res.t} · R = {res.r} · K = {res.k} · {res.bends.length} pliegue(s){res.marks?.length ? ' · marcas en azul (capa MARCADO)' : ''}.</p>
         {res.notes?.map((n, i) => <p key={i} className="phelp" style={{ color: '#a66a00' }}>⚠ {n}</p>)}
       </>)}
       <div className="modal-btns"><span className="grow" /><button className="btn" disabled={!res} onClick={exportDxf}>Exportar DXF</button><button className="btn primary" onClick={onClose}>Cerrar</button></div>
@@ -3022,6 +3103,7 @@ export function Modals() {
     case 'interf': return <InterfDialog onClose={() => s.set({ dialog: null, interf: null })} />;
     case 'bom': return <BomDialog onClose={close} />;
     case 'sheetstyle': return <SheetStyleDialog onClose={close} />;
+    case 'ucs': return <UcsDialog onClose={close} />;
     case 'flat': return <FlatDialog onClose={close} />;
     case 'newdoc': return <NewDocDialog onClose={close} />;
     case 'drwview': return <DrwViewDialog onClose={close} />;
