@@ -1914,7 +1914,7 @@ export default function PartViewport() {
     let firstMesh = !s0.result?.mesh;
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'part') return;
-      if (s.flatView && (s.active !== p.active || s.mode === 'sketch' || (s.dialog && 'draft' in s.dialog && s.dialog !== p.dialog) || !s.doc.sheet)) { useStore.setState({ flatView: false }); return; }
+      if (s.flatView && (s.active !== p.active || s.mode === 'sketch' || (s.tool && s.tool !== p.tool) || s.pendingFeature || (s.dialog && 'draft' in s.dialog && s.dialog !== p.dialog) || !s.doc.sheet)) { useStore.setState({ flatView: false }); return; }
       if (s.flatView !== p.flatView || (s.flatView && s.result !== p.result)) { buildFlat(s); if (!s.flatView && p.flatView) setView('home'); }
       if (s.pickBase !== p.pickBase) buildOverlay(s);
       if (s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material || s.fem !== p.fem || s.hud !== p.hud) {
