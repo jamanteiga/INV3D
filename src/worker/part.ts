@@ -12,6 +12,7 @@ import {
   type WorkPlanes, type BoolOp, type SmFlangeF, type SmPunchF, type Sketch3dF, type E3, type SmSeamF, type SmFoldF, type SmRollF, type SmBendF,
 } from '../core/doc';
 import { flattenPath } from '../core/svgpath';
+import { eopTrim } from '../core/doc';
 
 export interface FeatStatus { ok: boolean; error?: string }
 type Ev = (s: string) => number;
@@ -763,7 +764,8 @@ export function faceSig(fc: any): string {
   } catch { return ''; }
 }
 
-export async function buildPart(doc: PartDoc, upTo?: number): Promise<PartBuild> {
+export async function buildPart(doc0: PartDoc, upTo?: number): Promise<PartBuild> {
+  const doc = eopTrim(doc0);
   const ev = makeEval(docParams(doc));
   const status: Record<string, FeatStatus> = {};
   const ctx: Ctx = {
@@ -1464,7 +1466,8 @@ function flatWithCuts(core: FlatCore, doc: PartDoc, upTo = doc.features.length):
   return { flat, skipped };
 }
 
-export function flatPattern(doc: PartDoc) {
+export function flatPattern(doc0: PartDoc) {
+  const doc = eopTrim(doc0);
   const core = flatCore(doc);
   const { t, r, k, ev } = core;
   const { flat: flat0, skipped } = flatWithCuts(core, doc);

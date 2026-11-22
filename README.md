@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.30.1
+## Versión 0.31
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.31**
+- **Fin de pieza arrastrable** (todas las piezas: pieza, chapa, tubería, HVAC, estructura…): en el árbol, arrastra *Fin de pieza* hacia arriba o hacia abajo; las operaciones que quedan debajo se ven atenuadas y no se calculan (tampoco en ensamblajes, planos ni desarrollo). Las operaciones nuevas se crean encima de *Fin de pieza*. Doble clic en *Fin de pieza*: al final. Clic derecho: al final, al principio, subir o bajar una operación; en una operación: *Mover Fin de pieza aquí*. Se guarda con la pieza y se deshace con Ctrl+Z.
 
 **Novedades 0.30.1**
 - Corregido: con el patrón plano en pantalla, *Iniciar boceto 2D* (o cualquier herramienta) no dejaba elegir cara. Ahora el visor vuelve solo al modelo plegado.

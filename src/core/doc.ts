@@ -186,6 +186,8 @@ export interface PartDoc {
   /** Tabla eFamily (familia de piezas) */
   ipart?: { cols: string[]; rows: { name: string; values: string[] }[]; active: number };
   features: Feature[];
+  /** Fin de pieza: id de la última operación activa ('' = antes de todas; sin definir = al final) */
+  eop?: string;
   /** Pieza de chapa: espesor, radio de plegado interior y factor K */
   /** Chapa: espesor, radio, factor K y holgura del desahogo de esquina (por defecto 0,5 mm; «0» sin holgura; «-1» sin desahogo) */
   sheet?: { t: string; r: string; k: string; gap?: string; /** Cara A (lado de referencia del desarrollo): normal de la cara elegida */ aSide?: V3; /** patrón plano creado (nodo en el árbol) */ flat?: boolean };
@@ -606,4 +608,30 @@ export function demoDoc(): PartDoc {
     { id: 'f3', name: 'Empalme1', type: 'fillet', radius: '3 mm', edges: { mode: 'circle', points: [] } },
   ];
   return d;
+}
+
+/** Nº de operaciones activas (las que quedan por encima de Fin de pieza) */
+export function eopIndex(doc: PartDoc): number {
+  if (doc.eop === undefined) return doc.features.length;
+  if (doc.eop === '') return 0;
+  const i = doc.features.findIndex((f) => f.id === doc.eop);
+  return i < 0 ? doc.features.length : i + 1;
+}
+/** Pieza con solo las operaciones por encima de Fin de pieza */
+export function eopTrim(doc: PartDoc): PartDoc {
+  const n = eopIndex(doc);
+  return n >= doc.features.length ? doc : { ...doc, features: doc.features.slice(0, n) };
+}
+/** Tras un cambio: las operaciones nuevas se insertan encima de Fin de pieza (como en Inventor) */
+export function eopNormalize(prev: PartDoc, next: PartDoc) {
+  if (next.eop === undefined) return;
+  if (next.eop !== '' && !next.features.some((f) => f.id === next.eop)) { delete next.eop; return; }
+  const ids = new Set(prev.features.map((f) => f.id));
+  const k = eopIndex(next);
+  const added = next.features.filter((f, i) => i >= k && !ids.has(f.id));
+  if (!added.length) { if (eopIndex(next) >= next.features.length) delete next.eop; return; }
+  next.features = next.features.filter((f) => !added.includes(f));
+  next.features.splice(eopIndex(next), 0, ...added);
+  next.eop = added[added.length - 1].id;
+  if (eopIndex(next) >= next.features.length) delete next.eop;
 }

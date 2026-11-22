@@ -3,8 +3,7 @@ import {
   newDoc, uid, nextName, consumedSketches, newSheetDoc, docParams,
   type PartDoc, type Feature, type PlaneRef, type SkEntity, type SketchF, type V3, type ConstraintType, type SkConstraint,
   syncModelParams,
-  syncCenterAxes,
-} from './doc';
+  syncCenterAxes, eopIndex, eopNormalize } from './doc';
 import { makeEval } from './expr';
 import { solve, applySolution, checkNew } from './sketch';
 import { newAsm, solveAssembly, applyAssociative, type AsmDoc, type Xform } from './asm';
@@ -453,6 +452,7 @@ export const useStore = create<State>((set, get) => ({
     const { doc, past } = get();
     const next = clone(doc);
     fn(next);
+    eopNormalize(doc, next);
     resolveAll(next);
     set({ doc: next, past: [...past.slice(-99), doc], future: [], dirty: true });
   },
@@ -768,7 +768,7 @@ export function previewDoc(s: State): PartDoc | null {
   if (s.kind !== 'part' || !d || !('draft' in d)) return null;
   const doc = clone(s.doc);
   const i = doc.features.findIndex((f) => f.id === d.draft.id);
-  if (i >= 0) doc.features[i] = d.draft; else doc.features.push(d.draft);
+  if (i >= 0) doc.features[i] = d.draft; else { const k = eopIndex(doc); doc.features.splice(k, 0, d.draft); if (doc.eop !== undefined) doc.eop = d.draft.id; }
   return doc;
 }
 

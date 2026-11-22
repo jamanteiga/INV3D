@@ -4,7 +4,7 @@ import { allPages } from '../core/drawing';
 import { useState, Fragment, type ReactNode } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
-import { planeLabel, ENTITY_NAMES, uid, type Feature, type StdPlane, type PartDoc, type V3 } from '../core/doc';
+import { planeLabel, ENTITY_NAMES, uid, eopIndex, type Feature, type StdPlane, type PartDoc, type V3 } from '../core/doc';
 import { profileLabel } from '../core/catalog';
 import { scaleLabel } from '../core/drawing';
 import { asmActions, partActions } from './actions';
@@ -62,6 +62,7 @@ export default function Browser() {
 function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
   const s = useStore();
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
   const status = s.result?.status ?? {};
   const nestOwner = new Map<string, string>();
   for (const f of s.doc.features) {
@@ -96,6 +97,7 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
               ...(kids.length && f.type !== 'sketch' ? [{ label: 'Editar boceto', run: () => s.editSketch(kids[0].id) }] : []),
               { label: 'Cambiar nombre', run: () => setRenaming(f.id) },
               { label: f.suppressed ? 'Reanudar operación' : 'Suprimir operación', run: () => s.toggleSuppress(f.id) },
+              { label: 'Mover Fin de pieza aquí (debajo)', run: () => s.commit((d) => { const i = d.features.findIndex((x) => x.id === f.id); if (i >= d.features.length - 1) delete d.eop; else d.eop = f.id; }) },
               { label: '-', run: () => {} },
               { label: 'Eliminar', danger: true, run: async () => { if (user && !(await s.ask(`${user.name} usa ${f.name}. ¿Eliminar el boceto igualmente?`, 'Eliminar'))) return; s.deleteFeature(f.id); } },
             ] });
@@ -175,8 +177,42 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
         ] }); }}>
         <Icon name="flat" size={16} /><span className="tree-name">Patrón plano</span></div>
     </>}
-    {s.doc.features.filter((x) => !nestOwner.has(x.id)).map((x) => row(x))}
-    <div className="tree-row eop" style={{ paddingLeft: 10 }}><span className="eop-mark" />Fin de pieza</div>
+    {(() => {
+      const feats = s.doc.features, eIdx = eopIndex(s.doc), top = feats.filter((x) => !nestOwner.has(x.id));
+      /** coloca Fin de pieza para que queden activas las n primeras operaciones */
+      const setEop = (n: number) => s.commit((d) => { if (n >= d.features.length) delete d.eop; else d.eop = n <= 0 ? '' : d.features[n - 1].id; });
+      const isEop = (e: React.DragEvent) => e.dataTransfer.types.includes('text/inv3d-eop');
+      const eopRow = (
+        <div key="__eop" className="tree-row eop" style={{ paddingLeft: 10, cursor: 'grab' }} draggable title="Arrastra Fin de pieza hacia arriba o hacia abajo: las operaciones que quedan debajo no se calculan · doble clic: al final"
+          onDragStart={(e) => { e.dataTransfer.setData('text/inv3d-eop', '1'); e.dataTransfer.effectAllowed = 'move'; }}
+          onDragEnd={() => setDropAt(null)}
+          onDoubleClick={() => setEop(feats.length)}
+          onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, items: [
+            { label: 'Mover al final', run: () => setEop(feats.length) },
+            { label: 'Mover al principio', run: () => setEop(0) },
+            { label: 'Subir una operación', run: () => { const prev = [...top].reverse().find((x) => feats.indexOf(x) < eIdx); if (prev) setEop(feats.indexOf(prev)); } },
+            { label: 'Bajar una operación', run: () => { const nx = top.find((x) => feats.indexOf(x) >= eIdx); if (nx) setEop(feats.indexOf(nx) + 1); } },
+          ] }); }}>
+          <span className="eop-mark" />Fin de pieza{eIdx < feats.length ? <span className="tree-count">{feats.length - eIdx} debajo</span> : null}</div>
+      );
+      const out: ReactNode[] = [];
+      let placed = false;
+      for (const x of top) {
+        const i = feats.indexOf(x);
+        if (!placed && i >= eIdx) { out.push(eopRow); placed = true; }
+        const below = i >= eIdx;
+        out.push(
+          <div key={'w' + x.id} className={`eop-wrap ${below ? 'below-eop' : ''} ${dropAt?.id === x.id ? (dropAt.after ? 'drop-after' : 'drop-before') : ''}`}
+            onDragOver={(e) => { if (!isEop(e)) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); const after = e.clientY > r.top + Math.min(r.height, 26) / 2; if (dropAt?.id !== x.id || dropAt.after !== after) setDropAt({ id: x.id, after }); }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropAt(null); }}
+            onDrop={(e) => { if (!isEop(e)) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); const after = e.clientY > r.top + Math.min(r.height, 26) / 2; setDropAt(null); setEop(after ? i + 1 : i); }}>
+            {row(x)}
+          </div>,
+        );
+      }
+      if (!placed) out.push(eopRow);
+      return out;
+    })()}
   </>);
 }
 
