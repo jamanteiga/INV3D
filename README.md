@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.31
+## Versión 0.32
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,15 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.32** — Modelo 3D completo (cinta reorganizada)
+- *Crear*: **Calcomanía** (imagen sobre cara plana), Importar, **Desenrollar** (caras planas, cilíndricas y cónicas a superficie plana).
+- *Modificar*: Agujero, **Ranura** (por líneas o puntos, pasante o con profundidad), Empalme, Chaflán, Vaciado, Inclinación, Rosca, Combinar, Engrosar/Desfase, Dividir, **Directa** (empujar/tirar de caras planas), **Eliminar cara** (rellena taladros y cierra huecos, o deja superficie), **Marcar**, **Acabado** (color y tipo por cara), Mover cuerpo y booleanas.
+- *Explorar*: **Generador de formas** (optimización topológica SIMP con caras fijas y cargas; forma en naranja, exportable a STL).
+- *Operaciones de trabajo*: Plano, ePoint, Eje, Punto, **SCU**. *Patrón*: Rectangular, Circular, **Por boceto**, Simetría, Por trayectoria.
+- *Forma libre*: **Caja** y **Cara** deformables por puntos de control (B-spline, clic en los puntos del visor) y **Convertir** (forma libre con la envolvente del sólido).
+- *Superficie*: Extruir, Revolución, Solevación, Coser, Parche, **Esculpir** (añadir/quitar con superficies), **Superficie reglada** (normal, tangente, vector), **Recortar**, **Alargar**, **Sustituir cara**, **Reparar cuerpos**, **Ajustar a malla** (importa STL/OBJ y ajusta plano, cilindro o esfera a la zona pinchada), Engrosar sup.
+- **Simplificar** (pieza nueva: caja o cilindro envolvente, o sin taladros pequeños), **Análisis de tensiones** y **Convertir a chapa** (la primera extrusión de placa pasa a cara de chapa).
 
 **Novedades 0.31**
 - **Fin de pieza arrastrable** (todas las piezas: pieza, chapa, tubería, HVAC, estructura…): en el árbol, arrastra *Fin de pieza* hacia arriba o hacia abajo; las operaciones que quedan debajo se ven atenuadas y no se calculan (tampoco en ensamblajes, planos ni desarrollo). Las operaciones nuevas se crean encima de *Fin de pieza*. Doble clic en *Fin de pieza*: al final. Clic derecho: al final, al principio, subir o bajar una operación; en una operación: *Mover Fin de pieza aquí*. Se guarda con la pieza y se deshace con Ctrl+Z.

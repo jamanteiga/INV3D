@@ -6,8 +6,10 @@ export interface FemIn {
   h: number; E: number; nu: number;
   fixed: number[];
   loads: { faces: number[]; F?: [number, number, number]; p?: number }[];
+  /** Generador de formas (optimización topológica SIMP): fracción de masa a conservar e iteraciones */
+  topo?: { frac: number; iters: number };
 }
-export interface FemOut { vmVert: Float32Array; dispVert: Float32Array; vmMax: number; dispMax: number; nVox: number; nDof: number; iters: number; ms: number; error?: string; vertices?: Float32Array; normals?: Float32Array; triangles?: Uint32Array }
+export interface FemOut { kept?: number; vmVert: Float32Array; dispVert: Float32Array; vmMax: number; dispMax: number; nVox: number; nDof: number; iters: number; ms: number; error?: string; vertices?: Float32Array; normals?: Float32Array; triangles?: Uint32Array }
 
 function hexKe(h: number, E: number, nu: number) {
   const D = (() => { const c = E / ((1 + nu) * (1 - 2 * nu)); const d = new Float64Array(36); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) d[i * 6 + j] = c * (i === j ? 1 - nu : nu); for (let i = 3; i < 6; i++) d[i * 6 + i] = c * (1 - 2 * nu) / 2; return d; })();
@@ -133,6 +135,7 @@ function run(inp: FemIn): FemOut {
     for (const [id, w] of ns) for (let d = 0; d < 3; d++) f[id * 3 + d] += (Fv[d] * w) / tot;
   }
   for (let i = 0; i < nDof; i++) if (fixed[i]) f[i] = 0;
+  if (inp.topo) return topo(inp, { nVox, nn, nDof, conn, vox, K, fixed, f, nx, ny, nz, NX: nx + 1, NY: ny + 1, NZ: nz + 1, mn, h, fxNodes: [...fx.keys()], loadNodes: inp.loads.flatMap((L) => [...nodesOnFaces(L.faces).keys()]), t0 });
   // ---- K·u sin ensamblar ----
   const Ku = (u: Float64Array, out: Float64Array) => {
     out.fill(0);
@@ -236,6 +239,123 @@ function run(inp: FemIn): FemOut {
   // máximo robusto en superficie: percentil 99,5 de los vértices (la malla es uniforme, ~h/2)
   { const sv = Float32Array.from(vmVert).sort(); vmMax = sv[Math.min(sv.length - 1, Math.floor(sv.length * 0.995))]; }
   return { vmVert, dispVert, vmMax, dispMax, nVox, nDof, iters: it, ms: performance.now() - t0, vertices: new Float32Array(pos), normals: new Float32Array(nor), triangles: new Uint32Array(idx) };
+}
+
+/** Optimización topológica SIMP (penalización 3, filtro de sensibilidades, criterio de optimalidad) */
+function topo(inp: FemIn, g: { nVox: number; nn: number; nDof: number; conn: Int32Array; vox: number[]; K: Float64Array; fixed: Uint8Array; f: Float64Array; nx: number; ny: number; nz: number; NX: number; NY: number; NZ: number; mn: number[]; h: number; fxNodes: number[]; loadNodes: number[]; t0: number }): FemOut {
+  const { nVox, nDof, conn, vox, K, fixed, f, nx, ny, nz, h, mn } = g;
+  const frac = Math.max(0.05, Math.min(0.95, inp.topo!.frac)), iters = Math.max(5, Math.min(80, inp.topo!.iters)), pen = 3, Emin = 1e-6;
+  const vid = (i: number, j: number, k: number) => (i * ny + j) * nz + k;
+  const voxIdx = new Int32Array(nx * ny * nz).fill(-1);
+  for (let e = 0; e < nVox; e++) voxIdx[vid(vox[e * 3], vox[e * 3 + 1], vox[e * 3 + 2])] = e;
+  // vóxeles pasivos (siempre macizos): los que tocan apoyos o cargas
+  const passive = new Uint8Array(nVox);
+  const keyN = new Set([...g.fxNodes, ...g.loadNodes]);
+  for (let e = 0; e < nVox; e++) for (let a = 0; a < 8; a++) if (keyN.has(conn[e * 8 + a])) { passive[e] = 1; break; }
+  const x = new Float64Array(nVox).fill(frac); for (let e = 0; e < nVox; e++) if (passive[e]) x[e] = 1;
+  // vecinos para el filtro (radio 1,5 vóxeles)
+  const nb: number[][] = [], nw: number[][] = [];
+  for (let e = 0; e < nVox; e++) {
+    const i = vox[e * 3], j = vox[e * 3 + 1], k = vox[e * 3 + 2]; const L: number[] = [], W: number[] = [];
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (let dk = -1; dk <= 1; dk++) {
+      const ii = i + di, jj = j + dj, kk = k + dk; if (ii < 0 || jj < 0 || kk < 0 || ii >= nx || jj >= ny || kk >= nz) continue;
+      const q = voxIdx[vid(ii, jj, kk)]; if (q < 0) continue;
+      const w = 1.5 - Math.sqrt(di * di + dj * dj + dk * dk); if (w > 0) { L.push(q); W.push(w); }
+    }
+    nb.push(L); nw.push(W);
+  }
+  const u = new Float64Array(nDof), r = new Float64Array(nDof), z = new Float64Array(nDof), p = new Float64Array(nDof), Ap = new Float64Array(nDof), diag = new Float64Array(nDof);
+  const Ee = new Float64Array(nVox), ue = new Float64Array(24), ce = new Float64Array(nVox), dc = new Float64Array(nVox);
+  const Ku = (v: Float64Array, out: Float64Array) => {
+    out.fill(0);
+    for (let e = 0; e < nVox; e++) {
+      const s = Ee[e];
+      for (let a = 0; a < 8; a++) { const n = conn[e * 8 + a] * 3; ue[a * 3] = v[n]; ue[a * 3 + 1] = v[n + 1]; ue[a * 3 + 2] = v[n + 2]; }
+      for (let i = 0; i < 24; i++) { let q = 0; const rr = i * 24; for (let j = 0; j < 24; j++) q += K[rr + j] * ue[j]; out[conn[e * 8 + ((i / 3) | 0)] * 3 + (i % 3)] += q * s; }
+    }
+    for (let i = 0; i < nDof; i++) if (fixed[i]) out[i] = v[i];
+  };
+  const f2 = Math.sqrt(f.reduce((a, b) => a + b * b, 0)) || 1;
+  let c = 0;
+  for (let it = 0; it < iters; it++) {
+    for (let e = 0; e < nVox; e++) Ee[e] = Emin + x[e] ** pen;
+    diag.fill(0);
+    for (let e = 0; e < nVox; e++) for (let i = 0; i < 24; i++) diag[conn[e * 8 + ((i / 3) | 0)] * 3 + (i % 3)] += K[i * 24 + i] * Ee[e];
+    for (let i = 0; i < nDof; i++) if (fixed[i] || !diag[i]) diag[i] = 1;
+    // PCG con arranque en la solución anterior
+    Ku(u, Ap);
+    for (let i = 0; i < nDof; i++) { r[i] = fixed[i] ? 0 : f[i] - Ap[i]; z[i] = r[i] / diag[i]; p[i] = z[i]; }
+    let rz = 0; for (let i = 0; i < nDof; i++) rz += r[i] * z[i];
+    for (let k = 0; k < (it === 0 ? 600 : 160); k++) {
+      Ku(p, Ap);
+      let pAp = 0; for (let i = 0; i < nDof; i++) pAp += p[i] * Ap[i];
+      if (!pAp) break;
+      const al = rz / pAp; let rr = 0;
+      for (let i = 0; i < nDof; i++) { u[i] += al * p[i]; r[i] -= al * Ap[i]; rr += r[i] * r[i]; }
+      if (Math.sqrt(rr) / f2 < 2e-3) break;
+      let rz2 = 0; for (let i = 0; i < nDof; i++) { z[i] = r[i] / diag[i]; rz2 += r[i] * z[i]; }
+      const be = rz2 / rz; rz = rz2;
+      for (let i = 0; i < nDof; i++) p[i] = z[i] + be * p[i];
+    }
+    // flexibilidad y sensibilidades
+    c = 0;
+    for (let e = 0; e < nVox; e++) {
+      for (let a = 0; a < 8; a++) { const n = conn[e * 8 + a] * 3; ue[a * 3] = u[n]; ue[a * 3 + 1] = u[n + 1]; ue[a * 3 + 2] = u[n + 2]; }
+      let q = 0; for (let i = 0; i < 24; i++) { let t = 0; const rr = i * 24; for (let j = 0; j < 24; j++) t += K[rr + j] * ue[j]; q += ue[i] * t; }
+      ce[e] = q; c += Ee[e] * q; dc[e] = -pen * x[e] ** (pen - 1) * q;
+    }
+    // filtro de sensibilidades
+    const dcf = new Float64Array(nVox);
+    for (let e = 0; e < nVox; e++) { let sw = 0, sv = 0; const L = nb[e], W = nw[e]; for (let m = 0; m < L.length; m++) { sw += W[m]; sv += W[m] * x[L[m]] * dc[L[m]]; } dcf[e] = sv / (Math.max(1e-3, x[e]) * sw); }
+    // criterio de optimalidad con restricción de volumen
+    let l1 = 0, l2 = 1e12; const move = 0.2, xn = new Float64Array(nVox), nAct = nVox;
+    while ((l2 - l1) / (l1 + l2) > 1e-4 && l2 > 1e-40) {
+      const lm = 0.5 * (l1 + l2); let sum = 0;
+      for (let e = 0; e < nVox; e++) {
+        if (passive[e]) { xn[e] = 1; sum += 1; continue; }
+        const b = Math.sqrt(Math.max(0, -dcf[e]) / lm);
+        xn[e] = Math.max(0.001, Math.max(x[e] - move, Math.min(1, Math.min(x[e] + move, x[e] * b)))); sum += xn[e];
+      }
+      if (sum > frac * nAct) l1 = lm; else l2 = lm;
+    }
+    x.set(xn);
+    (self as unknown as Worker).postMessage({ progress: it + 1 });
+  }
+  // ---- superficie de los vóxeles con densidad ≥ 0,5, suavizada ----
+  const solid = new Uint8Array(nx * ny * nz);
+  let kept = 0;
+  for (let e = 0; e < nVox; e++) if (x[e] >= 0.5) { solid[vid(vox[e * 3], vox[e * 3 + 1], vox[e * 3 + 2])] = 1; kept++; }
+  const isS = (i: number, j: number, k: number) => i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz && solid[vid(i, j, k)] === 1;
+  const vmap = new Map<number, number>(), pos: number[] = [], idx: number[] = [];
+  const NY = ny + 1, NZ = nz + 1;
+  const V = (i: number, j: number, k: number) => { const key = (i * NY + j) * NZ + k; let q = vmap.get(key); if (q === undefined) { q = pos.length / 3; vmap.set(key, q); pos.push(mn[0] + i * h, mn[1] + j * h, mn[2] + k * h); } return q; };
+  const quad = (a: number, b: number, cc: number, d: number) => idx.push(a, b, cc, a, cc, d);
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) {
+    if (!isS(i, j, k)) continue;
+    if (!isS(i - 1, j, k)) quad(V(i, j, k), V(i, j, k + 1), V(i, j + 1, k + 1), V(i, j + 1, k));
+    if (!isS(i + 1, j, k)) quad(V(i + 1, j, k), V(i + 1, j + 1, k), V(i + 1, j + 1, k + 1), V(i + 1, j, k + 1));
+    if (!isS(i, j - 1, k)) quad(V(i, j, k), V(i + 1, j, k), V(i + 1, j, k + 1), V(i, j, k + 1));
+    if (!isS(i, j + 1, k)) quad(V(i, j + 1, k), V(i, j + 1, k + 1), V(i + 1, j + 1, k + 1), V(i + 1, j + 1, k));
+    if (!isS(i, j, k - 1)) quad(V(i, j, k), V(i, j + 1, k), V(i + 1, j + 1, k), V(i + 1, j, k));
+    if (!isS(i, j, k + 1)) quad(V(i, j, k + 1), V(i + 1, j, k + 1), V(i + 1, j + 1, k + 1), V(i, j + 1, k + 1));
+  }
+  const nv = pos.length / 3, adj: Set<number>[] = Array.from({ length: nv }, () => new Set());
+  for (let t = 0; t < idx.length; t += 3) for (let a = 0; a < 3; a++) { const p0 = idx[t + a], p1 = idx[t + ((a + 1) % 3)]; adj[p0].add(p1); adj[p1].add(p0); }
+  const P = Float64Array.from(pos);
+  for (let pass = 0; pass < 12; pass++) {
+    const lam = pass % 2 ? -0.53 : 0.5, Q = Float64Array.from(P);
+    for (let v = 0; v < nv; v++) { const A = adj[v]; if (!A.size) continue; let sx = 0, sy = 0, sz = 0; for (const q of A) { sx += P[q * 3]; sy += P[q * 3 + 1]; sz += P[q * 3 + 2]; } const m = A.size; Q[v * 3] += lam * (sx / m - P[v * 3]); Q[v * 3 + 1] += lam * (sy / m - P[v * 3 + 1]); Q[v * 3 + 2] += lam * (sz / m - P[v * 3 + 2]); }
+    P.set(Q);
+  }
+  const N = new Float32Array(nv * 3);
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3, b = idx[t + 1] * 3, cc = idx[t + 2] * 3;
+    const e1 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], e2 = [P[cc] - P[a], P[cc + 1] - P[a + 1], P[cc + 2] - P[a + 2]];
+    const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    for (const q of [a, b, cc]) { N[q] += n[0]; N[q + 1] += n[1]; N[q + 2] += n[2]; }
+  }
+  for (let v = 0; v < nv; v++) { const l = Math.hypot(N[v * 3], N[v * 3 + 1], N[v * 3 + 2]) || 1; N[v * 3] /= l; N[v * 3 + 1] /= l; N[v * 3 + 2] /= l; }
+  return { vmVert: new Float32Array(), dispVert: new Float32Array(), vmMax: c, dispMax: 0, nVox, nDof, iters, ms: performance.now() - g.t0, kept: kept / nVox, vertices: new Float32Array(P), normals: N, triangles: new Uint32Array(idx) };
 }
 
 self.onmessage = (ev: MessageEvent<FemIn>) => {

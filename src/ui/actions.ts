@@ -1,4 +1,5 @@
 import { normalizeAsm } from '../core/subasm';
+import { recR, K_DEFAULT } from '../core/sheetrec';
 import { autoEPointJoints, partEPoints, epJoint } from '../core/epoints';
 const partOf = (s: ReturnType<typeof useStore.getState>, id: string): PartDoc | null => { const d = s.docData(id) as PartDoc | null; return d && d.format === 'inv3d.part' ? d : null; };
 import { docGetter } from '../core/store';
@@ -39,6 +40,41 @@ function P_style(st: 'construction' | 'center') {
 }
 
 export const partActions = {
+  /** Modelo 3D › Convertir a chapa: la primera extrusión de placa pasa a Cara de chapa con su espesor */
+  convertToSheet: () => {
+    const s = S();
+    if (s.doc.sheet) { s.notify('La pieza ya es de chapa (pestaña Chapa)', 'info'); return; }
+    const ev = makeEval(docParams(s.doc));
+    const ex = s.doc.features.find((f) => f.type === 'extrude' && !f.suppressed && (f.op === 'new' || f.op === 'join') && (f.extent ?? 'distance') === 'distance');
+    let t = 2;
+    if (ex && ex.type === 'extrude') { try { t = ev(ex.distance); } catch { /* */ } }
+    if (!(t > 0) || t > 25) t = 2;
+    const r = recR(t);
+    S().commit((d) => {
+      d.sheet = { t: `${t} mm`, r: `${r} mm`, k: String(K_DEFAULT) };
+      const i = ex ? d.features.findIndex((f) => f.id === ex.id) : -1;
+      if (i >= 0 && ex && ex.type === 'extrude') {
+        const sym = ex.dir === 'symmetric', rev = ex.dir === 'reverse';
+        d.features[i] = { id: ex.id, name: ex.name.replace(/Extrusión/i, 'Cara'), type: 'sm_face', profile: ex.profile };
+        if (sym || rev) {
+          // la cara de chapa crece hacia +normal desde el boceto: se desplaza el boceto para conservar la posición
+          const sk = d.features.find((f) => f.id === ex.profile);
+          if (sk && sk.type === 'sketch' && sk.plane.kind === 'std') sk.plane = { ...sk.plane, offset: `(${sk.plane.offset || '0'}) - ${sym ? t / 2 : t}` };
+        }
+      }
+    });
+    S().notify(ex ? `Convertida a chapa: ${ex.name} es ahora la cara base (t = ${t} mm, R = ${r} mm). Pestaña Chapa` : `Pieza de chapa (t = ${t} mm). Crea la cara base con Chapa › Cara`);
+  },
+  /** Modelo 3D › Simplificar: pieza nueva con la envolvente o sin taladros pequeños */
+  makeSimplified: (mode: 'bbox' | 'cyl' | 'holes', axis: 'X' | 'Y' | 'Z', holeMax: string) => {
+    const s = S();
+    const src = s.doc, srcName = s.fileName;
+    const nd = newDoc();
+    nd.iProperties = { ...src.iProperties, partNumber: src.iProperties.partNumber + '-SIMP', description: `${src.iProperties.description || src.iProperties.partNumber} (simplificada)` };
+    nd.features = [{ id: uid('f'), name: 'Simplificación', type: 'simplify', source: s.active, sourceName: srcName, doc: structuredClone(src), mode, axis, holeMax }];
+    s.addDocument('part', nd, srcName.replace(/\.i3p$/i, '') + '-SIMP.i3p', true);
+    s.notify('Pieza simplificada creada en una pestaña nueva');
+  },
   /** Chapa › Desarrollo: crea (si no existe) el patrón plano y lo muestra en el visor; si ya se ve, vuelve al modelo plegado */
   flatPattern: () => {
     const s = S();

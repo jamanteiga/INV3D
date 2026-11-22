@@ -1,7 +1,7 @@
 // Reconstrucción de piezas (incluida chapa) sobre OpenCascade vía replicad.
 import {
   Plane, draw, drawRectangle, drawCircle, drawEllipse, drawText, loadFont, importSTEP, compoundShapes, genericSweep, makeHelix, FaceFinder, EdgeFinder, getOC, cast, measureShapeVolumeProperties,
-  makeLine, makeBSplineApproximation, assembleWire, makeNonPlanarFace, makeAx1, loft, makeSolid, Vector, makeBox, measureVolume,
+  makeLine, makeBSplineApproximation, assembleWire, makeNonPlanarFace, makeAx1, loft, makeSolid, Vector, makeBox, measureVolume, makePolygon, makeSphere,
 } from 'replicad';
 import { openSegments, findLoops, loopPolyline, polyArea, pointInPoly, type Seg } from '../core/sketch';
 import type { Drawing, Shape3D } from 'replicad';
@@ -13,6 +13,7 @@ import {
 } from '../core/doc';
 import { flattenPath } from '../core/svgpath';
 import { eopTrim } from '../core/doc';
+import { pushPull, deleteFaces, unwrapFace, ruledSurface, extendPlanar, sculpt as sculptOp, replaceFace, repair as repairOp, ffBox, ffFace, simplifyShape, facesAt, boolOp } from './part2';
 
 export interface FeatStatus { ok: boolean; error?: string }
 type Ev = (s: string) => number;
@@ -722,6 +723,33 @@ function bodyTool(f: Feature, ctx: Ctx, shape: Shape3D | null): { solid: Shape3D
           : (g.profile.sketchOnPlane(makePlane(fr)) as any).extrude(W);
       return { solid, op: 'join' };
     }
+    case 'slot': {
+      const sk = getSk(f.sketch), fr = planeFrame(sk.plane, ev, work);
+      const w = ev(f.width); if (!(w > 0)) throw new Error('Anchura no válida');
+      let dr: Drawing | null = null;
+      const add = (A: V2, B: V2) => {
+        const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+        let x: Drawing = L > 1e-9 ? drawRectangle(L, w).fuse(drawCircle(w / 2).translate(-L / 2, 0)).fuse(drawCircle(w / 2).translate(L / 2, 0)) : drawCircle(w / 2);
+        x = x.rotate((Math.atan2(B[1] - A[1], B[0] - A[0]) * 180) / Math.PI, [0, 0]).translate((A[0] + B[0]) / 2, (A[1] + B[1]) / 2);
+        dr = dr ? dr.fuse(x) : x;
+      };
+      const Lp = ev(f.length);
+      for (const e of sk.entities) {
+        if (e.construction) continue;
+        if (e.type === 'line') add([ev(e.a[0]), ev(e.a[1])], [ev(e.b[0]), ev(e.b[1])]);
+        else if (e.type === 'point') { const c: V2 = [ev(e.cx), ev(e.cy)]; add([c[0] - Lp / 2, c[1]], [c[0] + Lp / 2, c[1]]); }
+      }
+      if (!dr) throw new Error('Dibuja líneas (eje de cada ranura) o puntos (centro)');
+      let big = 1000; if (shape) { const b = shape.boundingBox.bounds; big = v3.len(v3.sub(b[1] as V3, b[0] as V3)) * 2 + 10; }
+      const solid = f.extent === 'through' ? (dr as Drawing).sketchOnPlane(makePlane(fr, -big / 2)).extrude(big)
+        : ((dr as Drawing).sketchOnPlane(makePlane(fr)) as any).extrude(ev(f.depth), { extrusionDirection: v3.mul(fr.normal, f.flip ? 1 : -1) });
+      return { solid: solid as Shape3D, op: 'cut' };
+    }
+    case 'ffbox': {
+      const o: V3 = [ev(f.origin[0]), ev(f.origin[1]), ev(f.origin[2])], sz: V3 = [ev(f.size[0]), ev(f.size[1]), ev(f.size[2])];
+      if (!(sz[0] > 0 && sz[1] > 0 && sz[2] > 0)) throw new Error('Medidas no válidas');
+      return { solid: ffBox(o, sz, f.n, f.pts), op: f.op };
+    }
     case 'sm_roll': {
       if (!ctx.sheet) throw new Error('La pieza no es de chapa');
       const sk = getSk(f.profile), fr = planeFrame(sk.plane, ev, work);
@@ -962,6 +990,110 @@ export async function buildPart(doc0: PartDoc, upTo?: number): Promise<PartBuild
               tool = tool ? tool.fuse(c) : c;
             }
             if (tool) shape = combine(shape, tool, src.op === 'new' ? 'join' : src.op);
+          }
+          break;
+        }
+        case 'direct': {
+          if (!shape) throw new Error('No hay sólido');
+          shape = pushPull(shape, f.faces as V3[], ev(f.distance));
+          break;
+        }
+        case 'delface': {
+          if (!shape) throw new Error('No hay sólido');
+          const r = deleteFaces(shape, f.faces as V3[], f.heal);
+          if (r.solid) shape = r.solid; else { ctx.surfaces.set(f.id, r.surface!); shape = null; }
+          break;
+        }
+        case 'finish': {
+          if (!shape) throw new Error('No hay sólido');
+          if (!f.faces.length) throw new Error('Selecciona caras');
+          const miss = (f.faces as V3[]).filter((p) => !facesAt(shape!, p).length).length;
+          if (miss) status[f.id] = { ok: true, error: `${miss} cara(s) ya no existen` };
+          break;
+        }
+        case 'decal': {
+          if (!f.plane || !f.center) throw new Error('Haz clic en una cara plana');
+          if (!f.image) throw new Error('Elige una imagen');
+          break;
+        }
+        case 'unwrap': {
+          if (!shape) throw new Error('No hay sólido');
+          if (!f.faces.length) throw new Error('Selecciona caras');
+          const out = (f.faces as V3[]).map((p) => unwrapFace(shape!, p));
+          ctx.surfaces.set(f.id, out.length === 1 ? out[0] : (compoundShapes(out) as unknown as Shape3D));
+          break;
+        }
+        case 'ruled': {
+          if (!shape) throw new Error('No hay sólido');
+          const dv: V3 = [ev(f.dir[0]), ev(f.dir[1]), ev(f.dir[2])];
+          ctx.surfaces.set(f.id, ruledSurface(shape, f.edges.points as V3[], f.mode, ev(f.distance), dv, f.flip));
+          break;
+        }
+        case 'surftrim': {
+          const sf = ctx.surfaces.get(f.surface); if (!sf) throw new Error('Superficie no encontrada');
+          const sk = ctx.sketches.get(f.sketch); if (!sk) throw new Error('Boceto de recorte no encontrado');
+          const b = sf.boundingBox.bounds, big = v3.len(v3.sub(b[1] as V3, b[0] as V3)) * 4 + 100;
+          const fr = planeFrame(sk.plane, ev, ctx.work);
+          const tool = (sketchProfile(sk, ev).sketchOnPlane(makePlane(fr, -big / 2)) as any).extrude(big) as Shape3D;
+          const res = boolOp(sf, tool, f.keep === 'inside' ? 'common' : 'cut');
+          if (!((res as any).faces?.length)) throw new Error('El recorte no deja nada de la superficie');
+          ctx.surfaces.set(f.surface, res);
+          break;
+        }
+        case 'surfextend': {
+          const sf = ctx.surfaces.get(f.surface); if (!sf) throw new Error('Superficie no encontrada');
+          ctx.surfaces.set(f.surface, extendPlanar(sf, ev(f.distance)));
+          break;
+        }
+        case 'sculpt': {
+          const sfs = f.surfaces.map((id) => { const x = ctx.surfaces.get(id); if (!x) throw new Error('Superficie no encontrada'); return x; });
+          shape = sculptOp(shape, sfs, f.mode, f.flip);
+          for (const id of f.surfaces) ctx.surfaces.delete(id);
+          break;
+        }
+        case 'replaceface': {
+          if (!shape) throw new Error('No hay sólido');
+          const sf = ctx.surfaces.get(f.surface); if (!sf) throw new Error('Superficie no encontrada');
+          shape = replaceFace(shape, f.faces as V3[], sf);
+          ctx.surfaces.delete(f.surface);
+          break;
+        }
+        case 'repair': {
+          if (!shape) throw new Error('No hay cuerpo');
+          const r = repairOp(shape, ev(f.tol));
+          shape = r.shape; status[f.id] = { ok: true, error: r.note };
+          break;
+        }
+        case 'ffface': {
+          const fr = planeFrame(f.plane, ev, ctx.work);
+          const sz: [number, number] = [ev(f.size[0]), ev(f.size[1])];
+          if (!(sz[0] > 0 && sz[1] > 0)) throw new Error('Medidas no válidas');
+          ctx.surfaces.set(f.id, ffFace(fr.origin, fr.xDir, fr.yDir, fr.normal, sz, f.n, f.pts));
+          break;
+        }
+        case 'simplify': {
+          if (!f.doc) throw new Error('Pieza de origen no disponible');
+          const sub = await buildPart(f.doc);
+          if (!sub.shape) throw new Error('La pieza de origen no tiene sólido');
+          const x = simplifyShape(sub.shape.clone(), f.mode, f.axis, ev(f.holeMax));
+          ctx.tools.set(f.id, { solid: x.clone(), op: 'join' });
+          shape = combine(shape, x, 'join');
+          break;
+        }
+        case 'meshref': break;   // solo referencia visual
+        case 'meshface': {
+          const ft = f.fit;
+          if (ft.kind === 'plane') {
+            const y = v3.cross(ft.n, ft.x);
+            if (ft.poly.length < 3) throw new Error('Zona sin área');
+            ctx.surfaces.set(f.id, makePolygon(ft.poly.map((q) => v3.add(ft.o, v3.add(v3.mul(ft.x, q[0]), v3.mul(y, q[1])))) as any) as unknown as Shape3D);
+          } else if (ft.kind === 'cyl') {
+            const e2 = v3.cross(ft.d, ft.e1), rad = (a: number) => v3.add(v3.mul(ft.e1, Math.cos(a)), v3.mul(e2, Math.sin(a)));
+            const p0 = v3.add(ft.o, v3.add(v3.mul(ft.d, ft.h0), v3.mul(rad(ft.a0), ft.r))), p1 = v3.add(ft.o, v3.add(v3.mul(ft.d, ft.h1), v3.mul(rad(ft.a0), ft.r)));
+            ctx.surfaces.set(f.id, revolOf(makeLine(p0, p1), ft.o, ft.d, Math.min(360, ((ft.a1 - ft.a0) * 180) / Math.PI)));
+          } else {
+            const sp = makeSphere(ft.r).translate(ft.c) as unknown as Shape3D;
+            ctx.surfaces.set(f.id, compoundShapes(((sp as any).faces as any[]).map((x) => x)) as unknown as Shape3D);
           }
           break;
         }

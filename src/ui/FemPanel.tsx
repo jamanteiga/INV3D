@@ -31,7 +31,7 @@ export function femColor(t: number): [number, number, number] {
 
 const fmt = (x: number, d = 2) => (isFinite(x) ? x.toLocaleString('es-ES', { maximumFractionDigits: d }) : '—');
 
-export default function FemPanel({ onClose }: { onClose: () => void }) {
+export default function FemPanel({ onClose, shape = false }: { onClose: () => void; shape?: boolean }) {
   const s = useStore();
   const fem = s.fem;
   const mesh = s.result?.mesh;
@@ -52,12 +52,15 @@ export default function FemPanel({ onClose }: { onClose: () => void }) {
         for (let i = 0; i < m.vertices.length; i += 3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], m.vertices[i + k]); mx[k] = Math.max(mx[k], m.vertices[i + k]); }
         const d = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]];
         // ~ 60 000 vóxeles para un bloque macizo; se redondea a un valor cómodo
-        h = Math.cbrt((d[0] * d[1] * d[2]) / 60000);
+        h = Math.cbrt((d[0] * d[1] * d[2]) / (shape ? 5000 : 60000));
         h = Math.max(h, Math.max(...d) / 120);
         const nice = [0.1, 0.2, 0.25, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100];
         h = nice.find((x) => x >= h) ?? h;
       }
-      st.set({ fem: { part: st.active, pick: 'fixed', fixed: [], loads: [{ faces: [], kind: 'force', F: [0, 0, -1000], p: 1 }], h, show: 'vm' } });
+      st.set({ fem: { part: st.active, pick: 'fixed', fixed: [], loads: [{ faces: [], kind: 'force', F: [0, 0, -1000], p: 1 }], h, show: 'vm', frac: 0.3, iters: 25 } });
+    } else if (shape && st.fem && !st.fem.shapeRes) {
+      // tamaño de elemento más grueso para la optimización (es iterativa)
+      const m = st.result?.mesh; if (m) { const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity]; for (let i = 0; i < m.vertices.length; i += 3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], m.vertices[i + k]); mx[k] = Math.max(mx[k], m.vertices[i + k]); } const hh = Math.cbrt(((mx[0] - mn[0]) * (mx[1] - mn[1]) * (mx[2] - mn[2])) / 5000); st.set({ fem: { ...st.fem, h: Math.max(st.fem.h, +hh.toPrecision(2)), frac: st.fem.frac ?? 0.3, iters: st.fem.iters ?? 25 } }); }
     }
     st.set({ tool: 'femFace' });
     return () => { wk.current?.terminate(); const t = useStore.getState(); if (t.tool === 'femFace') t.set({ tool: null }); };
@@ -80,7 +83,7 @@ export default function FemPanel({ onClose }: { onClose: () => void }) {
     wk.current?.terminate();
     const w = new Worker(new URL('../worker/fem.worker.ts', import.meta.url), { type: 'module' });
     wk.current = w;
-    upd({ running: true, res: undefined }); setProg(0);
+    upd(shape ? { running: true, shapeRes: undefined } : { running: true, res: undefined }); setProg(0);
     const t0 = useStore.getState().fem!;
     w.onmessage = (ev: MessageEvent<{ progress?: number; done?: FemOut }>) => {
       if (ev.data.progress != null) { setProg(ev.data.progress); return; }
@@ -88,6 +91,7 @@ export default function FemPanel({ onClose }: { onClose: () => void }) {
       w.terminate(); wk.current = null;
       const cur = useStore.getState().fem; if (!cur) return;
       if (r.error) { useStore.getState().set({ fem: { ...cur, running: false } }); useStore.getState().notify(r.error, 'error'); return; }
+      if (shape) { useStore.getState().set({ fem: { ...cur, running: false, shapeRes: { vertices: r.vertices!, normals: r.normals!, triangles: r.triangles!, kept: r.kept ?? 0, ms: r.ms, nVox: r.nVox } }, tool: null }); return; }
       useStore.getState().set({ fem: { ...cur, running: false, show: 'vm', res: { vm: r.vmVert, disp: r.dispVert, vmMax: r.vmMax, dispMax: r.dispMax, nVox: r.nVox, nDof: r.nDof, iters: r.iters, ms: r.ms, mesh, disp3: { vertices: r.vertices!, normals: r.normals!, triangles: r.triangles! } } }, tool: null });
     };
     w.onerror = (e) => { useStore.getState().set({ fem: { ...useStore.getState().fem!, running: false } }); useStore.getState().notify('FEM: ' + e.message, 'error'); };
@@ -95,6 +99,7 @@ export default function FemPanel({ onClose }: { onClose: () => void }) {
       vertices: mesh.vertices.slice(), normals: mesh.normals.slice(), triangles: mesh.triangles.slice(), faceGroups: mesh.faceGroups.map((g) => ({ start: g.start, count: g.count })),
       h: t0.h, E: props.E, nu: props.nu, fixed: t0.fixed,
       loads: t0.loads.filter((l) => l.faces.length).map((l) => (l.kind === 'force' ? { faces: l.faces, F: l.F } : { faces: l.faces, p: l.p })),
+      ...(shape ? { topo: { frac: t0.frac ?? 0.3, iters: t0.iters ?? 25 } } : {}),
     };
     w.postMessage(inp);
   };
@@ -105,7 +110,7 @@ export default function FemPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fem-panel" role="dialog" aria-label="Análisis de tensiones">
-      <div className="modal-head"><span>Análisis de tensiones (FEM lineal)</span><button className="x" onClick={onClose} aria-label="Cerrar"><Icon name="close" size={18} /></button></div>
+      <div className="modal-head"><span>{shape ? 'Generador de formas (optimización topológica)' : 'Análisis de tensiones (FEM lineal)'}</span><button className="x" onClick={onClose} aria-label="Cerrar"><Icon name="close" size={18} /></button></div>
       <div className="modal-body">
         <div className="fem-row"><b>Material</b><span className="muted">{mat}</span></div>
         <div className="fem-row">E {num(props.E, (x) => setProps({ ...props, E: x }), 80)} MPa · ν {num(props.nu, (x) => setProps({ ...props, nu: x }), 54)} · Re {num(props.fy, (x) => setProps({ ...props, fy: x }), 60)} MPa</div>
@@ -124,11 +129,15 @@ export default function FemPanel({ onClose }: { onClose: () => void }) {
         ))}
         <div className="fem-row"><button className="btn sm" onClick={() => upd({ loads: [...fem.loads, { faces: [], kind: 'force', F: [0, 0, -1000], p: 1 }], pick: fem.loads.length })}>+ Añadir carga</button></div>
         <div className="fem-row">Tamaño de elemento {num(fem.h, (x) => upd({ h: Math.max(0.05, x), res: undefined }))} mm <span className="muted">(menor = más preciso y más lento)</span></div>
+        {shape && <div className="fem-row">Masa a conservar {num(Math.round((fem.frac ?? 0.3) * 100), (x) => upd({ frac: Math.max(5, Math.min(95, x)) / 100 }), 54)} % · Iteraciones {num(fem.iters ?? 25, (x) => upd({ iters: Math.max(5, Math.min(80, Math.round(x))) }), 54)}</div>}
+        {shape && <p className="muted" style={{ fontSize: 11.5, margin: '2px 0 6px' }}>Las caras fijas y cargadas se conservan. Busca la forma más rígida con esa masa (SIMP). Usa la forma como guía para remodelar la pieza.</p>}
         <div className="modal-btns">
-          <button className="btn primary" disabled={!!fem.running} onClick={run}>{fem.running ? `Calculando… ${prog ? `(it. ${prog})` : ''}` : 'Calcular'}</button>
+          <button className="btn primary" disabled={!!fem.running} onClick={run}>{fem.running ? `Calculando… ${prog ? `(it. ${prog})` : ''}` : shape ? 'Generar forma' : 'Calcular'}</button>
+          {shape && fem.shapeRes && <><button className="btn sm" onClick={() => exportShapeStl(fem.shapeRes!)}>Exportar STL</button><button className="btn sm" onClick={() => upd({ shapeRes: undefined })}>Quitar forma</button></>}
           {r && <><button className={`btn sm ${fem.show === 'vm' ? 'primary' : ''}`} onClick={() => upd({ show: 'vm' })}>σ von Mises</button><button className={`btn sm ${fem.show === 'disp' ? 'primary' : ''}`} onClick={() => upd({ show: 'disp' })}>Desplazamiento</button></>}
         </div>
-        {r && (
+        {shape && fem.shapeRes && <p className="muted" style={{ fontSize: 12 }}>Forma: {fmt(fem.shapeRes.kept * 100, 0)} % de los elementos ({fem.shapeRes.nVox.toLocaleString('es-ES')}) · {fmt(fem.shapeRes.ms / 1000, 1)} s. Se ve en naranja sobre la pieza transparente.</p>}
+        {!shape && r && (
           <>
             <div className="fem-legend">
               <div className="fem-bar" />
@@ -147,4 +156,15 @@ export default function FemPanel({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+function exportShapeStl(m: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array }) {
+  const n = m.triangles.length / 3, buf = new ArrayBuffer(84 + n * 50), dv = new DataView(buf);
+  dv.setUint32(80, n, true);
+  for (let t = 0; t < n; t++) {
+    const o = 84 + t * 50;
+    for (let k = 0; k < 3; k++) { const v = m.triangles[t * 3 + k] * 3; for (let d = 0; d < 3; d++) dv.setFloat32(o + 12 + k * 12 + d * 4, m.vertices[v + d], true); }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'model/stl' })); a.download = 'forma-generada.stl'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }

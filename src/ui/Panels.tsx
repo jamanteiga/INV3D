@@ -10,7 +10,7 @@ import { FrameCalcDialog, JointCalcDialog } from './CalcDialogs';
 import { PipeNetDialog, PressureDialog, VesselDialog } from './PipeDialogs';
 import { DuctNetDialog } from './DuctNetDialog';
 import { normalizeAsm } from '../core/subasm';
-import { docGetter } from '../core/store';
+import { docGetter, surfaceIds } from '../core/store';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore, activeSketch } from '../core/store';
 import { evaluate, resolveParams, makeEval, fmt, isValidName } from '../core/expr';
@@ -29,6 +29,7 @@ import { openFile, newIpj, saveText, pickFile, loadPartForPlace } from '../core/
 import { cad, type FlatResult } from '../core/cadClient';
 import { flattenPath, bboxOf, type P2 } from '../core/svgpath';
 import { bendTextPos } from '../core/sheet';
+import { parseMesh, toB64, fitLabel } from '../core/meshfit';
 import { REC_STYLES, REC_THK, recR, recK, K_DEFAULT } from '../core/sheetrec';
 import { writeDxf } from '../core/dxf';
 import { asmActions, drwActions, partActions } from './actions';
@@ -111,7 +112,7 @@ const Steps = ({ items, current }: { items: [string, boolean][]; current: number
 const ICONS: Record<string, string> = { extrude: 'extrude', revolve: 'revolve', fillet: 'fillet', chamfer: 'chamfer', hole: 'hole', pattern: 'prect', mirror: 'mirror', shell: 'shell', workplane: 'workplane', loft: 'loft', sweep: 'sweep', sm_face: 'smface', sm_flange: 'smflange',
   rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken', thread: 'thread', workaxis: 'axis', workpoint: 'point',
   surf_extrude: 'surfext', surf_revolve: 'surfrev', surf_loft: 'surfloft', surf_patch: 'patch', stitch: 'stitch', sm_loft: 'smloft', sketch3d: 'sketch3d',
-  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch', sm_roll: 'smroll', sm_bend: 'smbend', sm_fold: 'smfold', sm_seam: 'smseam', sm_rip: 'smrip', sm_unfold: 'smunfold', sm_refold: 'smrefold', sm_mark: 'smmark', skpattern: 'skpattern', };
+  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch', sm_roll: 'smroll', sm_bend: 'smbend', sm_fold: 'smfold', sm_seam: 'smseam', sm_rip: 'smrip', sm_unfold: 'smunfold', sm_refold: 'smrefold', sm_mark: 'smmark', skpattern: 'skpattern', slot: 'slot', direct: 'direct', delface: 'delface', finish: 'finishf', decal: 'decal', unwrap: 'unwrap', ruled: 'ruled', surftrim: 'surftrim', surfextend: 'surfextend', sculpt: 'sculpt', replaceface: 'replaceface', repair: 'repair', ffbox: 'ffbox', ffface: 'ffface', simplify: 'simplify', meshref: 'meshfit', meshface: 'patch', };
 
 /** Selector de plano (origen o de trabajo) con selección en pantalla. */
 function PlanePick({ value, onChange, exclude }: { value: PlaneRef; onChange: (p: PlaneRef) => void; exclude?: string }) {
@@ -481,6 +482,111 @@ function FeatureDialog() {
         <Row label="Segmentos (desarrollo)"><Expr value={f.segments} unit="ul" live onCommit={(v) => up({ segments: v })} /></Row>
         <div className="pick-info">Transiciones de conductos (rectangular a circular, reducciones…). Espesor {s.doc.sheet?.t}. El desarrollo se calcula por triangulación.</div>
       </>)}
+      {(() => {
+        const sfIds = surfaceIds(s.doc).filter((id) => id !== f.id);
+        const sfName = (id: string) => s.doc.features.find((x) => x.id === id)?.name ?? id;
+        const sfSel = (v: string, k: string) => <select value={v} onChange={(e) => up({ [k]: e.target.value })}><option value="">— elige —</option>{sfIds.map((id) => <option key={id} value={id}>{sfName(id)}</option>)}</select>;
+        const facesInfo = (n: number, what = 'caras') => <div className="pick-info">{n ? `${n} ${what} elegida(s) · clic de nuevo para quitar` : `Clic en las ${what} del modelo`}</div>;
+        switch (f.type) {
+          case 'slot': return (<>
+            <Row label="Boceto">{skSel(f.sketch, 'sketch', sketches.filter((x) => x.entities.some((e) => (e.type === 'line' || e.type === 'point') && !e.construction)))}</Row>
+            <p className="phelp" style={{ margin: '2px 0 6px' }}>Cada línea es el eje de una ranura (de centro a centro de los extremos redondos); cada punto, el centro de una ranura de la longitud indicada (según X del boceto).</p>
+            <Row label="Anchura"><Expr value={f.width} live autoFocus onCommit={(v) => up({ width: v })} /></Row>
+            <Row label="Longitud (puntos)"><Expr value={f.length} live onCommit={(v) => up({ length: v })} /></Row>
+            <Row label="Extensión"><Seg value={f.extent} onChange={(v) => up({ extent: v })} options={[['through', 'Pasante'], ['distance', 'Profundidad']]} /></Row>
+            {f.extent === 'distance' && <><Row label="Profundidad"><Expr value={f.depth} live onCommit={(v) => up({ depth: v })} /></Row><label className="check"><input type="checkbox" checked={f.flip} onChange={(e) => up({ flip: e.target.checked })} />Invertir dirección</label></>}
+          </>);
+          case 'direct': return (<>
+            {facesInfo(f.faces.length, 'caras planas')}
+            <Row label="Desplazamiento"><Expr value={f.distance} live autoFocus onCommit={(v) => up({ distance: v })} /></Row>
+            <p className="phelp">Empuja (negativo) o tira (positivo) de las caras planas elegidas según su normal, sin tocar el historial de las operaciones que las crearon. Para mover o girar cuerpos completos: Modificar › Mover cuerpo.</p>
+          </>);
+          case 'delface': return (<>
+            {facesInfo(f.faces.length)}
+            <label className="check"><input type="checkbox" checked={f.heal} onChange={(e) => up({ heal: e.target.checked })} />Reparar (cerrar el hueco)</label>
+            <p className="phelp">{f.heal ? 'Taladros y alojamientos cilíndricos se rellenan; otras caras se quitan y el hueco se cierra con una superficie de relleno apoyada en su contorno.' : 'Sin reparar: el sólido pasa a ser una superficie abierta sin esas caras (para sustituirlas o coserlas después).'}</p>
+          </>);
+          case 'finish': return (<>
+            {facesInfo(f.faces.length)}
+            <Row label="Acabado"><select value={f.kind} onChange={(e) => up({ kind: e.target.value })}>{['Pintura', 'Pintura epoxi', 'Galvanizado en caliente', 'Anodizado', 'Cromado', 'Pulido', 'Granallado', 'Lacado', 'Pavonado', 'Niquelado'].map((k) => <option key={k}>{k}</option>)}</select></Row>
+            <Row label="Color"><input type="color" value={f.color} onChange={(e) => up({ color: e.target.value })} /></Row>
+            <p className="phelp">Aspecto y tipo de acabado en las caras (no cambia la geometría). Se ve en el modelo y en los ensamblajes.</p>
+          </>);
+          case 'decal': return (<>
+            <div className="pick-info">{f.center ? 'Cara elegida · clic en otra cara plana para moverla' : 'Clic en una cara plana: la imagen se centra en ese punto'}</div>
+            <Row label="Imagen"><button className="btn" onClick={() => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.onchange = () => { const fl = i.files?.[0]; if (!fl) return; const r = new FileReader(); r.onload = () => up({ image: String(r.result) }); r.readAsDataURL(fl); }; i.click(); }}>{f.image ? 'Cambiar imagen…' : 'Elegir imagen…'}</button>{f.image && <img src={f.image} alt="" style={{ height: 28, marginLeft: 8, border: '1px solid var(--line)' }} />}</Row>
+            <Row label="Anchura"><Expr value={f.width} live onCommit={(v) => up({ width: v })} /></Row>
+            <Row label="Giro"><Expr value={f.rot} unit="deg" live onCommit={(v) => up({ rot: v })} /></Row>
+          </>);
+          case 'unwrap': return (<>
+            {facesInfo(f.faces.length, 'caras (plana, cilíndrica o cónica)')}
+            <p className="phelp">Cada cara se desarrolla como superficie plana tangente a la cara en el punto del clic (longitud de arco por el radio; conos en sector). Útil para plantillas, etiquetas y cortes en tubo.</p>
+          </>);
+          case 'ruled': return (<>
+            <div className="pick-info">{f.edges.points.length ? `${f.edges.points.length} arista(s) · clic de nuevo para quitar` : 'Clic en las aristas del modelo'}</div>
+            <Row label="Tipo"><Seg value={f.mode} onChange={(v) => up({ mode: v })} options={[['normal', 'Normal'], ['tangent', 'Tangente'], ['vector', 'Vector']]} /></Row>
+            <Row label="Distancia"><Expr value={f.distance} live autoFocus onCommit={(v) => up({ distance: v })} /></Row>
+            {f.mode === 'vector' && <div className="prow3"><span className="plabel">Dirección</span>{[0, 1, 2].map((i) => <Expr key={i} value={f.dir[i]} onCommit={(v) => up({ dir: f.dir.map((x, k) => (k === i ? v : x)) as [string, string, string] })} />)}</div>}
+            <label className="check"><input type="checkbox" checked={f.flip} onChange={(e) => up({ flip: e.target.checked })} />Invertir</label>
+            <p className="phelp">Normal: perpendicular a la cara plana de la arista. Tangente: prolonga la cara hacia fuera. Vector: en la dirección indicada.</p>
+          </>);
+          case 'surftrim': return (<>
+            <Row label="Superficie">{sfSel(f.surface, 'surface')}</Row>
+            <Row label="Contorno">{skSel(f.sketch, 'sketch', sketches.filter((x) => x.entities.length > 0))}</Row>
+            <Row label="Conservar"><Seg value={f.keep} onChange={(v) => up({ keep: v })} options={[['outside', 'Fuera del contorno'], ['inside', 'Dentro']]} /></Row>
+            <p className="phelp">El contorno cerrado del boceto se proyecta según su normal y recorta la superficie.</p>
+          </>);
+          case 'surfextend': return (<>
+            <Row label="Superficie">{sfSel(f.surface, 'surface')}</Row>
+            <Row label="Distancia"><Expr value={f.distance} live autoFocus onCommit={(v) => up({ distance: v })} /></Row>
+            <p className="phelp">Alarga (o acorta, con valor negativo) todo el contorno de una superficie plana.</p>
+          </>);
+          case 'sculpt': return (<>
+            <div className="plabel">Superficies</div>
+            <div className="chips">{sfIds.length ? sfIds.map((id) => <button key={id} className={`chip ${f.surfaces.includes(id) ? 'on' : ''}`} onClick={() => up({ surfaces: f.surfaces.includes(id) ? f.surfaces.filter((x) => x !== id) : [...f.surfaces, id] })}>{sfName(id)}</button>) : <span className="phelp">No hay superficies</span>}</div>
+            <Row label="Operación"><Seg value={f.mode} onChange={(v) => up({ mode: v })} options={[['add', 'Añadir'], ['remove', 'Quitar']]} /></Row>
+            {f.mode === 'remove' && <label className="check"><input type="checkbox" checked={f.flip} onChange={(e) => up({ flip: e.target.checked })} />Quitar el otro lado</label>}
+            <p className="phelp">Añadir: rellena el volumen cerrado entre las superficies y el sólido (o solo entre superficies). Quitar: elimina el material al lado de la normal de cada superficie.</p>
+          </>);
+          case 'replaceface': return (<>
+            {facesInfo(f.faces.length, 'caras a sustituir')}
+            <Row label="Nueva cara">{sfSel(f.surface, 'surface')}</Row>
+            <p className="phelp">Las caras elegidas pasan a la superficie: se quita o se añade el material entre ambas.</p>
+          </>);
+          case 'repair': return (<>
+            <Row label="Tolerancia"><Expr value={f.tol} live onCommit={(v) => up({ tol: v })} /></Row>
+            <p className="phelp">Cose las caras del cuerpo (importado o con huecos) con esa tolerancia, lo cierra en sólido si es posible y unifica caras coplanarias. El resultado se indica en la operación.</p>
+          </>);
+          case 'ffbox': case 'ffface': {
+            const box = f.type === 'ffbox';
+            const dims = box ? (f.n as number[]) : (f.n as number[]);
+            const sel = (f.sel || '').split(',').map((x) => parseInt(x) || 0);
+            const key = sel.slice(0, dims.length).map((x, i) => Math.max(0, Math.min(dims[i] - 1, x))).join(',');
+            const setSel = (i: number, v: number) => { const q = [...sel]; q[i] = Math.max(0, Math.min(dims[i] - 1, v)); up({ sel: q.slice(0, dims.length).join(',') }); };
+            const cur = box ? ((f.pts as Record<string, [number, number, number]>)[key] ?? [0, 0, 0]) : (f.pts as Record<string, number>)[key] ?? 0;
+            const setCur = (v: unknown) => { const pts = { ...(f.pts as Record<string, unknown>) }; const zero = box ? (v as number[]).every((x) => !x) : !v; if (zero) delete pts[key]; else pts[key] = v; up({ pts } as never); };
+            return (<>
+              {box ? <>
+                <div className="prow3"><span className="plabel">Origen</span>{[0, 1, 2].map((i) => <Expr key={i} value={(f as { origin: string[] }).origin[i]} onCommit={(v) => up({ origin: (f as { origin: string[] }).origin.map((x, k) => (k === i ? v : x)) })} />)}</div>
+                <div className="prow3"><span className="plabel">Medidas</span>{[0, 1, 2].map((i) => <Expr key={i} value={f.size[i]} onCommit={(v) => up({ size: (f.size as string[]).map((x, k) => (k === i ? v : x)) })} />)}</div>
+              </> : <>
+                <Row label="Plano"><select value={f.type === 'ffface' && f.plane.kind === 'std' ? f.plane.name : ''} onChange={(e) => up({ plane: { kind: 'std', name: e.target.value, offset: '0' } })}><option value="XY">XY</option><option value="XZ">XZ</option><option value="YZ">YZ</option></select></Row>
+                <div className="prow3"><span className="plabel">Medidas</span>{[0, 1].map((i) => <Expr key={i} value={f.size[i]} onCommit={(v) => up({ size: (f.size as string[]).map((x, k) => (k === i ? v : x)) })} />)}</div>
+              </>}
+              <div className="prow3"><span className="plabel">Puntos de control</span>{dims.map((d, i) => <input key={i} className="num" type="number" min={2} max={box ? 6 : 8} value={d} onChange={(e) => up({ n: dims.map((x, k) => (k === i ? Math.max(2, Math.min(box ? 6 : 8, parseInt(e.target.value) || 2)) : x)) as never, pts: {} })} />)}</div>
+              <div className="plabel" style={{ marginTop: 8 }}>Punto elegido {box ? '(i, j, k)' : '(i, j)'} · clic en un punto naranja del visor</div>
+              <div className="prow3">{dims.map((d, i) => <input key={i} className="num" type="number" min={0} max={d - 1} value={Math.max(0, Math.min(d - 1, sel[i] ?? 0))} onChange={(e) => setSel(i, parseInt(e.target.value) || 0)} />)}</div>
+              {box ? <div className="prow3"><span className="plabel">Desplazar</span>{[0, 1, 2].map((i) => <input key={i} className="num" type="number" step={1} value={(cur as number[])[i]} onChange={(e) => { const v = [...(cur as number[])]; v[i] = parseFloat(e.target.value) || 0; setCur(v); }} />)}</div>
+                : <Row label="Altura"><input className="num" type="number" step={1} value={cur as number} onChange={(e) => setCur(parseFloat(e.target.value) || 0)} /></Row>}
+              <div className="ai-row" style={{ gap: 6 }}><button className="btn" onClick={() => setCur(box ? [0, 0, 0] : 0)}>Restablecer punto</button><button className="btn" onClick={() => up({ pts: {} })}>Restablecer todo</button></div>
+              <div className="phelp" style={{ margin: '2px 0 6px' }}>{Object.keys(f.pts).length} punto(s) movido(s)</div>
+              {box && <Row label="Resultado"><Seg value={(f as { op: string }).op} onChange={(v) => up({ op: v })} options={[['new', 'Nuevo sólido'], ['join', 'Unir'], ['cut', 'Cortar']]} /></Row>}
+              <p className="phelp">{box ? 'Caja de forma libre: cada punto de control deforma la forma de manera suave (superficies B-spline). Más puntos = más control local.' : 'Cara de forma libre: superficie B-spline cuyas alturas se controlan por puntos; engrósala o úsala para esculpir.'}</p>
+            </>);
+          }
+          default: return null;
+        }
+      })()}
       {f.type === 'sm_roll' && (() => {
         const sk = s.doc.features.find((x) => x.id === f.profile) as SketchF | undefined;
         const lines = sk?.entities.filter((e) => e.type === 'line') ?? [];
@@ -2928,6 +3034,60 @@ function SheetStyleDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function MeshFitDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const refs = s.doc.features.filter((f) => f.type === 'meshref' && !f.suppressed) as Extract<Feature, { type: 'meshref' }>[];
+  const [kind, setKind] = useState<'auto' | 'plane' | 'cyl' | 'sphere'>('auto');
+  const [tol, setTol] = useState(8);
+  const sel = s.meshSel;
+  useEffect(() => { if (refs.length) s.set({ tool: 'meshPick' }); return () => { const t = useStore.getState(); if (t.tool === 'meshPick') t.set({ tool: null }); useStore.setState({ meshSel: null }); }; }, [refs.length]);
+  useEffect(() => { (window as unknown as { __meshFitOpt: unknown }).__meshFitOpt = { kind, tol }; }, [kind, tol]);
+  const importMesh = () => {
+    const i = document.createElement('input'); i.type = 'file'; i.accept = '.stl,.obj';
+    i.onchange = async () => {
+      const fl = i.files?.[0]; if (!fl) return;
+      try {
+        const P = parseMesh(await fl.arrayBuffer(), fl.name);
+        if (P.length / 9 > 300000) { s.notify('Malla demasiado grande (más de 300 000 triángulos): simplifícala antes', 'error'); return; }
+        s.commit((d) => { d.features.push({ id: uid('f'), name: fl.name.replace(/\.[^.]+$/, ''), type: 'meshref', fileName: fl.name, data: toB64(P) }); });
+        s.notify(`Malla importada: ${(P.length / 9).toLocaleString('es-ES')} triángulos`);
+      } catch (e) { s.notify((e as Error).message, 'error'); }
+    };
+    i.click();
+  };
+  const create = () => {
+    if (!sel?.fit) return;
+    const fit = sel.fit;
+    s.commit((d) => { d.features.push({ id: uid('f'), name: `${fitLabel(fit)}`, type: 'meshface', fit }); });
+    useStore.setState({ meshSel: null });
+  };
+  return (
+    <Modal title="Ajustar cara de malla" onClose={onClose}>
+      <Row label="Mallas"><span>{refs.length ? refs.map((r) => r.name).join(', ') : 'ninguna'}</span><span className="grow" /><button className="btn" onClick={importMesh}>Importar STL / OBJ…</button></Row>
+      <Row label="Ajustar a"><Seg value={kind} onChange={setKind} options={[['auto', 'Automático'], ['plane', 'Plano'], ['cyl', 'Cilindro'], ['sphere', 'Esfera']]} /></Row>
+      <Row label="Tolerancia de zona"><input className="num" type="number" min={1} max={45} value={tol} onChange={(e) => setTol(Math.max(1, Math.min(45, parseFloat(e.target.value) || 8)))} /> °</Row>
+      <div className="pick-info">{!refs.length ? 'Importa una malla (escaneo, STL de otro programa…)' : sel?.err ? sel.err : sel?.fit ? `${fitLabel(sel.fit)} · ${sel.tris.length} triángulos · error medio ${sel.fit.rms.toFixed(3)} mm` : 'Clic sobre la malla: se elige la zona lisa alrededor (hasta las aristas vivas)'}</div>
+      <p className="phelp">La cara ajustada queda como superficie: con Coser, Parche, Esculpir o Engrosar se reconstruye la pieza a partir del escaneo.</p>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" disabled={!sel?.fit} onClick={create}>Crear cara</button><button className="btn" onClick={onClose}>Cerrar</button></div>
+    </Modal>
+  );
+}
+
+function SimplifyDialog({ onClose }: { onClose: () => void }) {
+  const [mode, setMode] = useState<'bbox' | 'cyl' | 'holes'>('bbox');
+  const [axis, setAxis] = useState<'X' | 'Y' | 'Z'>('Z');
+  const [hm, setHm] = useState('10 mm');
+  return (
+    <Modal title="Simplificar" onClose={onClose}>
+      <Row label="Resultado"><Seg value={mode} onChange={setMode} options={[['bbox', 'Caja envolvente'], ['cyl', 'Cilindro envolvente'], ['holes', 'Sin taladros pequeños']]} /></Row>
+      {mode === 'cyl' && <Row label="Eje"><Seg value={axis} onChange={setAxis} options={[['X', 'X'], ['Y', 'Y'], ['Z', 'Z']]} /></Row>}
+      {mode === 'holes' && <Row label="Diámetro máx."><Expr value={hm} onCommit={setHm} /></Row>}
+      <p className="phelp">Crea una pieza nueva (derivada) más ligera para ensamblajes grandes, implantaciones o intercambio: la envolvente de la pieza o la pieza sin los taladros de diámetro menor o igual al indicado.</p>
+      <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={() => { partActions.makeSimplified(mode, axis, hm); onClose(); }}>Crear pieza</button><button className="btn" onClick={onClose}>Cancelar</button></div>
+    </Modal>
+  );
+}
+
 function UcsDialog({ onClose }: { onClose: () => void }) {
   const ev = useEval();
   const [o, setO] = useState(['0 mm', '0 mm', '0 mm']);
@@ -3088,7 +3248,7 @@ export function Modals() {
     case 'framecalc': return <FrameCalcDialog onClose={close} />;
     case 'jointcalc': return <JointCalcDialog onClose={close} />;
     case 'gen': return <GenDialog onClose={close} />;
-    case 'fem': return <FemPanel onClose={close} />;
+    case 'fem': return <FemPanel onClose={close} shape={!!(d as { shape?: boolean }).shape} />;
     case 'tbtpl': return <TbTplDialog onClose={close} />;
     case 'sheettpl': return <SheetTplDialog onClose={close} />;
     case 'epoint': return <EPointPanel onClose={close} />;
@@ -3104,6 +3264,8 @@ export function Modals() {
     case 'bom': return <BomDialog onClose={close} />;
     case 'sheetstyle': return <SheetStyleDialog onClose={close} />;
     case 'ucs': return <UcsDialog onClose={close} />;
+    case 'simplify': return <SimplifyDialog onClose={close} />;
+    case 'meshfit': return <MeshFitDialog onClose={close} />;
     case 'flat': return <FlatDialog onClose={close} />;
     case 'newdoc': return <NewDocDialog onClose={close} />;
     case 'drwview': return <DrwViewDialog onClose={close} />;

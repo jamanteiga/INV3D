@@ -159,13 +159,48 @@ export interface SmUnfoldF extends FBase { type: 'sm_unfold' }
 export interface SmRefoldF extends FBase { type: 'sm_refold' }
 /** Marcado (grabado láser, rotulado): geometría del boceto que va al desarrollo sin cortar */
 export interface SmMarkF extends FBase { type: 'sm_mark'; sketch: string }
+/** Ranura: colisos a lo largo de las líneas de un boceto (o centrados en sus puntos) */
+export interface SlotF extends FBase { type: 'slot'; sketch: string; width: string; length: string; depth: string; extent: 'distance' | 'through'; flip: boolean }
+/** Edición directa: empujar/tirar de caras planas una distancia */
+export interface DirectF extends FBase { type: 'direct'; faces: V3[]; distance: string }
+/** Eliminar cara: con reparación (taladros y caras se rellenan) o dejando el cuerpo como superficie */
+export interface DelFaceF extends FBase { type: 'delface'; faces: V3[]; heal: boolean }
+/** Acabado (aspecto): color y tipo de acabado en caras */
+export interface FinishF extends FBase { type: 'finish'; faces: V3[]; kind: string; color: string }
+/** Calcomanía: imagen sobre una cara plana */
+export interface DecalF extends FBase { type: 'decal'; plane: PlaneRef | null; center: V3 | null; image: string; width: string; rot: string }
+/** Desenrollar: cara cilíndrica, cónica o plana desarrollada como superficie plana */
+export interface UnwrapF extends FBase { type: 'unwrap'; faces: V3[] }
+/** Superficie reglada desde aristas: normal a la cara, tangente o según un vector */
+export interface RuledF extends FBase { type: 'ruled'; edges: EdgeSel; mode: 'normal' | 'tangent' | 'vector'; distance: string; dir: [string, string, string]; flip: boolean }
+/** Recortar superficie con el contorno de un boceto */
+export interface SurfTrimF extends FBase { type: 'surftrim'; surface: string; sketch: string; keep: 'inside' | 'outside' }
+/** Alargar superficie plana por su contorno */
+export interface SurfExtendF extends FBase { type: 'surfextend'; surface: string; distance: string }
+/** Esculpir: añadir o quitar material limitado por superficies */
+export interface SculptF extends FBase { type: 'sculpt'; surfaces: string[]; mode: 'add' | 'remove'; flip: boolean }
+/** Sustituir cara: las caras elegidas pasan a la superficie */
+export interface ReplaceFaceF extends FBase { type: 'replaceface'; faces: V3[]; surface: string }
+/** Reparar cuerpos: cose caras abiertas y unifica caras coplanarias */
+export interface RepairF extends FBase { type: 'repair'; tol: string }
+/** Forma libre: caja deformable por puntos de control (FFD de Bernstein) */
+export interface FfBoxF extends FBase { type: 'ffbox'; origin: [string, string, string]; size: [string, string, string]; n: [number, number, number]; pts: Record<string, [number, number, number]>; sel: string; op: BoolOp }
+/** Forma libre: cara (superficie) deformable por alturas de puntos de control */
+export interface FfFaceF extends FBase { type: 'ffface'; plane: PlaneRef; size: [string, string]; n: [number, number]; pts: Record<string, number>; sel: string }
+/** Simplificar: envolvente (caja o cilindro) o sin taladros pequeños, de una pieza */
+export interface SimplifyF extends FBase { type: 'simplify'; source: string; sourceName: string; doc: PartDoc | null; mode: 'bbox' | 'cyl' | 'holes'; axis: 'X' | 'Y' | 'Z'; holeMax: string }
+/** Malla de referencia (STL/OBJ) para ajustar caras; triángulos en base64 (Float32) */
+export interface MeshRefF extends FBase { type: 'meshref'; fileName: string; data: string }
+/** Cara ajustada a una zona de una malla de referencia */
+export interface MeshFaceF extends FBase { type: 'meshface'; fit: import('./meshfit').MeshFit }
 /** Patrón controlado por boceto: copia las operaciones en cada punto del boceto (el primero es la base) */
 export interface SkPatternF extends FBase { type: 'skpattern'; features: string[]; sketch: string }
 export type Feature = SketchF | ExtrudeF | RevolveF | FilletF | ChamferF | ImportF | HoleF | PatternF | MirrorF | ShellF
   | WorkPlaneF | LoftF | SweepF | SmFaceF | SmFlangeF | RibF | CoilF | SplitF | DraftF | ThickenF | ThreadF | WorkAxisF | WorkPointF
   | CombineF | MoveBodyF | DeriveF | PathPatternF | SmContourF | SmPunchF
   | Sketch3dF | SurfExtrudeF | SurfRevolveF | SurfLoftF | SurfPatchF | StitchF | SmLoftF
-  | SmRollF | SmBendF | SmFoldF | SmSeamF | SmRipF | SmUnfoldF | SmRefoldF | SmMarkF | SkPatternF;
+  | SmRollF | SmBendF | SmFoldF | SmSeamF | SmRipF | SmUnfoldF | SmRefoldF | SmMarkF | SkPatternF
+  | SlotF | DirectF | DelFaceF | FinishF | DecalF | UnwrapF | RuledF | SurfTrimF | SurfExtendF | SculptF | ReplaceFaceF | RepairF | FfBoxF | FfFaceF | SimplifyF | MeshRefF | MeshFaceF;
 export type FeatureType = Feature['type'];
 
 export interface IProps {
@@ -199,7 +234,7 @@ export interface PartDoc {
 
 // ---------- Parámetros de modelo c1, c2… (un parámetro por cada valor de cada operación y cada cota de boceto) ----------
 /** Campos de operación que nunca son valores (referencias, textos, modos) */
-const NOT_VALUE = new Set(['dirMode', 'std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec', 'line', 'pick', 'flip', 'body']);
+const NOT_VALUE = new Set(['dirMode', 'std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec', 'line', 'pick', 'flip', 'body', 'image', 'color', 'sel', 'pts', 'n', 'heal', 'surface', 'surfaces', 'center', 'extent', 'data', 'fit']);
 /** Nombre legible de cada campo (para la tabla de parámetros) */
 export const FIELD_NAMES: Record<string, string> = {
   distance: 'Distancia', distance2: 'Distancia 2', angle: 'Ángulo', radius: 'Radio', depth: 'Profundidad', dia: 'Diámetro', thickness: 'Espesor', offset: 'Desfase',
@@ -514,6 +549,7 @@ export const FEATURE_NAMES: Record<FeatureType, string> = {
   combine: 'Combinar', movebody: 'Mover cuerpo', derive: 'Pieza derivada', pathpattern: 'Patrón por trayectoria', sm_contour: 'Pestaña de contorno', sm_punch: 'Punzonado',
   sketch3d: 'Boceto 3D', surf_extrude: 'Superficie extruida', surf_revolve: 'Superficie de revolución', surf_loft: 'Superficie solevada', surf_patch: 'Parche', stitch: 'Coser', sm_loft: 'Pestaña solevada',
   sm_roll: 'Rodillo de contorno', sm_bend: 'Pliegue', sm_fold: 'Plegado', sm_seam: 'Costura de esquina', sm_rip: 'Rasgadura', sm_unfold: 'Desplegar', sm_refold: 'Volver a plegar', sm_mark: 'Marca', skpattern: 'Patrón de boceto',
+  slot: 'Ranura', direct: 'Directa', delface: 'Eliminar cara', finish: 'Acabado', decal: 'Calcomanía', unwrap: 'Desenrollado', ruled: 'Superficie reglada', surftrim: 'Recorte', surfextend: 'Alargamiento', sculpt: 'Esculpido', replaceface: 'Sustitución de cara', repair: 'Reparación', ffbox: 'Forma libre', ffface: 'Cara libre', simplify: 'Simplificación', meshref: 'Malla', meshface: 'Cara ajustada',
 };
 
 export const OP_NAMES: Record<BoolOp, string> = { join: 'Unir', cut: 'Cortar', intersect: 'Intersección', new: 'Nuevo sólido' };
@@ -548,7 +584,7 @@ export function consumedSketches(doc: PartDoc): Set<string> {
     if (f.type === 'pathpattern') s.add(f.path);
     if (f.type === 'sm_punch' || f.type === 'sm_fold' || f.type === 'sm_rip' || f.type === 'sm_mark') s.add(f.sketch);
     if (f.type === 'sm_roll') s.add(f.profile);
-    if (f.type === 'skpattern') s.add(f.sketch);
+    if (f.type === 'skpattern' || f.type === 'slot') s.add(f.sketch);
     if (f.type === 'sweep') { s.add(f.profile); s.add(f.path); }
     if (f.type === 'loft') f.sections.forEach((x) => s.add(x));
     if (f.type === 'hole') s.add(f.sketch);
@@ -563,7 +599,7 @@ export function consumedSketches(doc: PartDoc): Set<string> {
 }
 
 /** Operaciones que generan o quitan material (las que se pueden repetir en patrones y simetrías). */
-export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil', 'derive', 'sm_punch', 'stitch', 'sm_rip'];
+export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil', 'derive', 'sm_punch', 'stitch', 'sm_rip', 'slot', 'ffbox', 'simplify'];
 
 export function newSheetDoc(): PartDoc {
   const d = newDoc();

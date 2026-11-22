@@ -22,6 +22,9 @@ export interface FemState {
   part: string; pick: 'fixed' | number; fixed: number[]; loads: FemLoad[]; h: number;
   res?: { vm: Float32Array; disp: Float32Array; vmMax: number; dispMax: number; nVox: number; nDof: number; iters: number; ms: number; mesh: MeshData; disp3: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } };
   show: 'vm' | 'disp'; running?: boolean;
+  /** Generador de formas: fracción de masa, iteraciones y forma resultante */
+  frac?: number; iters?: number;
+  shapeRes?: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array; kept: number; ms: number; nVox: number };
 }
 export type ClipPlaneName = 'XYc' | 'XZc' | 'YZc' | 'XY' | 'XZ' | 'YZ' | '*';
 export type ClipDir = '-x' | '+x' | '-y' | '+y' | '-z' | '+z';
@@ -72,6 +75,7 @@ export interface HudState {
 const HUD0: HudState = { style: 'shaded', clipOff: 0, clipFlip: false, origin: true, sketches: true, triad: true, cube: true, scene: 'grad' };
 function loadHud(): HudState { try { return { ...HUD0, ...JSON.parse(localStorage.getItem('inv3d.hud') || '{}'), clipOff: 0, clipFlip: false }; } catch { return HUD0; } }
 export type Tool = null
+  | 'meshPick'
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
@@ -82,13 +86,15 @@ export type FeatDialogKind = 'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'hol
   | 'workplane' | 'loft' | 'sweep' | 'sm_face' | 'sm_flange' | 'rib' | 'coil' | 'split' | 'draft' | 'thicken' | 'thread' | 'workaxis' | 'workpoint'
   | 'combine' | 'movebody' | 'derive' | 'pathpattern' | 'sm_contour' | 'sm_punch'
   | 'surf_extrude' | 'surf_revolve' | 'surf_loft' | 'surf_patch' | 'stitch' | 'sm_loft'
-  | 'sm_roll' | 'sm_bend' | 'sm_fold' | 'sm_seam' | 'sm_rip' | 'sm_unfold' | 'sm_refold' | 'sm_mark' | 'skpattern';
+  | 'sm_roll' | 'sm_bend' | 'sm_fold' | 'sm_seam' | 'sm_rip' | 'sm_unfold' | 'sm_refold' | 'sm_mark' | 'skpattern'
+  | 'slot' | 'direct' | 'delface' | 'finish' | 'decal' | 'unwrap' | 'ruled' | 'surftrim' | 'surfextend' | 'sculpt' | 'replaceface' | 'repair' | 'ffbox' | 'ffface';
 export type AsmDialogKind = 'joint' | 'frame' | 'weld' | 'bolt' | 'skel' | 'endtreat' | 'asmwp';
 export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'fem' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' | 'ucs' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' | 'ucs' | 'simplify' | 'meshfit' }
+  | { kind: 'fem'; shape?: boolean }
   | { kind: 'contentf'; fam: string }
   | { kind: 'fastener'; fx: Record<string, unknown> }
   | { kind: 'projto'; mode: 'face' | 'surf' }
@@ -174,6 +180,8 @@ export interface State {
   aiOpen: boolean;
   /** Chapa: el visor muestra el patrón plano */
   flatView: boolean;
+  /** Ajustar a malla: zona elegida de una malla de referencia y su ajuste */
+  meshSel: { ref: string; tris: number[]; fit?: import('./meshfit').MeshFit; err?: string } | null;
   /** Cara plana seleccionada en el modelo: plano listo para «Iniciar boceto 2D» */
   selFacePlane: PlaneRef | null;
   /** Operación que espera un boceto (corte, punzonado…): al terminar el boceto se reabre con él */
@@ -334,7 +342,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, asmRotate: false, aiOpen: false, flatView: false, selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, asmRotate: false, aiOpen: false, flatView: false, meshSel: null, selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
@@ -664,6 +672,25 @@ export const useStore = create<State>((set, get) => ({
         }
         case 'pathpattern': draft = { id, name, type: 'pathpattern', features: body ? [body] : [], path: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line' || e.type === 'arc' || e.type === 'spline')), count: '5', align: false }; break;
         case 'sm_contour': draft = { id, name, type: 'sm_contour', profile: lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line' && !e.construction)), width: '100 mm', dir: 'normal', side: 'in' }; break;
+        case 'slot': draft = { id, name, type: 'slot', sketch: lastSketch(doc, (k) => k.entities.some((e) => (e.type === 'line' || e.type === 'point') && !e.construction)), width: '10 mm', length: '20 mm', depth: '5 mm', extent: 'through', flip: false }; break;
+        case 'direct': draft = { id, name, type: 'direct', faces: [], distance: '5 mm' }; break;
+        case 'delface': draft = { id, name, type: 'delface', faces: [], heal: true }; break;
+        case 'finish': draft = { id, name, type: 'finish', faces: [], kind: 'Pintura', color: '#c0392b' }; break;
+        case 'decal': draft = { id, name, type: 'decal', plane: null, center: null, image: '', width: '50 mm', rot: '0 deg' }; break;
+        case 'unwrap': draft = { id, name, type: 'unwrap', faces: [] }; break;
+        case 'ruled': draft = { id, name, type: 'ruled', edges: { mode: 'picked', points: [] }, mode: 'normal', distance: '10 mm', dir: ['0', '0', '1'], flip: false }; break;
+        case 'surftrim': { const sf = surfaceIds(doc); draft = { id, name, type: 'surftrim', surface: sf[sf.length - 1] ?? '', sketch: lastSketch(doc, (k) => k.entities.length > 0), keep: 'outside' }; break; }
+        case 'surfextend': { const sf = surfaceIds(doc); draft = { id, name, type: 'surfextend', surface: sf[sf.length - 1] ?? '', distance: '10 mm' }; break; }
+        case 'sculpt': draft = { id, name, type: 'sculpt', surfaces: surfaceIds(doc), mode: 'add', flip: false }; break;
+        case 'replaceface': { const sf = surfaceIds(doc); draft = { id, name, type: 'replaceface', faces: [], surface: sf[sf.length - 1] ?? '' }; break; }
+        case 'repair': draft = { id, name, type: 'repair', tol: '0.01 mm' }; break;
+        case 'ffbox': {
+          const b = get().result?.props?.bbox;
+          const o = b ? b[0] : [0, 0, 0], sz = b ? [b[1][0] - b[0][0], b[1][1] - b[0][1], b[1][2] - b[0][2]] : [50, 50, 50];
+          const r = (x: number) => String(Math.round(x * 1000) / 1000);
+          draft = { id, name, type: 'ffbox', origin: [r(o[0]), r(o[1]), r(o[2])], size: [r(sz[0] || 50) + ' mm', r(sz[1] || 50) + ' mm', r(sz[2] || 50) + ' mm'], n: [3, 3, 3], pts: {}, sel: '1,1,2', op: body ? 'join' : 'new' }; break;
+        }
+        case 'ffface': draft = { id, name, type: 'ffface', plane: { kind: 'std', name: 'XY', offset: '0' }, size: ['100 mm', '100 mm'], n: [4, 4], pts: {}, sel: '1,1' }; break;
         case 'sm_roll': {
           const pid = lastSketch(doc, (k) => k.entities.some((e) => e.type === 'line' && !e.construction && !e.center));
           const sk = doc.features.find((f) => f.id === pid) as SketchF | undefined;
@@ -753,9 +780,14 @@ export const useStore = create<State>((set, get) => ({
   set: (p) => set(p),
 }));
 
+/** Operaciones que dejan una superficie (para elegirlas en recortar, alargar, esculpir…) */
+export function surfaceIds(doc: PartDoc): string[] {
+  return doc.features.filter((f) => !f.suppressed && (['surf_extrude', 'surf_revolve', 'surf_loft', 'surf_patch', 'stitch', 'unwrap', 'ruled', 'ffface', 'meshface'].includes(f.type) || (f.type === 'delface' && !f.heal))).map((f) => f.id);
+}
 function toolFor(f: Feature): Tool {
   if ((f.type === 'fillet' || f.type === 'chamfer') && f.edges.mode === 'picked') return 'pickEdges';
-  if (f.type === 'shell' || f.type === 'draft' || f.type === 'thicken' || f.type === 'thread' || f.type === 'combine' || f.type === 'movebody') return 'pickFaces';
+  if (f.type === 'shell' || f.type === 'draft' || f.type === 'thicken' || f.type === 'thread' || f.type === 'combine' || f.type === 'movebody' || f.type === 'direct' || f.type === 'delface' || f.type === 'finish' || f.type === 'unwrap' || f.type === 'replaceface' || f.type === 'decal') return 'pickFaces';
+  if (f.type === 'ruled') return 'pickEdges';
   if (f.type === 'sm_flange' || f.type === 'sm_bend') return 'pickFlangeEdge';
   // taladro sin boceto con puntos: se coloca en una cara
   if (f.type === 'hole' && !f.sketch && !f.face) return 'holeFace';

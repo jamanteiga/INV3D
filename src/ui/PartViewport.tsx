@@ -12,14 +12,14 @@ import { asmActions, partActions } from './actions';
 import { makeEval, fmt } from '../core/expr';
 import {
   docParams, nextCName, nextName, planeFrame, toWorld, type PlaneRef, entityOutline, consumedSketches, uid, v3, MATERIALS, PLANE_STD, resolveWorkPlanes,
-  type Frame, type V3, type V2, type SkEntity, type SketchF, type StdPlane, type EdgeSel, type WorkPlanes, type GRef, type SkConstraint, type DimKind, type Sketch3dF, type E3, type S3Entity,
-} from '../core/doc';
+  type Frame, type V3, type V2, type SkEntity, type SketchF, type StdPlane, type EdgeSel, type WorkPlanes, type GRef, type SkConstraint, type DimKind, type Sketch3dF, type E3, type S3Entity, eopIndex } from '../core/doc';
 import {
   sketchPoints, pointOf, segKeys, segOf, entG, refPoint, refLine, refCurve, refKind, makeConstraint, makeDim, dimValue,
   trim, extend, filletCorner, solve, applySolution, isLiteral, num, circleFrom3, CONSTRAINT_GLYPH, CONSTRAINT_NAMES, nextDimName, distToSeg, curveOf,
 } from '../core/sketch';
 import { cad, type MeshData } from '../core/cadClient';
 import { flattenPath } from '../core/svgpath';
+import { fromB64, growRegion, fitRegion } from '../core/meshfit';
 import { View3D, css, tv, r3, vArr, planarFaceAt, faceVertices, dpr } from './view3d';
 
 type Ev = (s: string) => number;
@@ -236,6 +236,25 @@ export default function PartViewport() {
       labelDrag: null as null | { id: string; base: State['doc']; moved: boolean },
     };
     const safeEval = (s: State): Ev => { const e = makeEval(docParams(s.doc)); return (x: string) => { try { return e(x); } catch { return NaN; } }; };
+    /** Puntos de control de una forma libre (caja o cara) en coordenadas del modelo */
+    const cagePoints = (s: State, f: { type: string; n: number[]; pts: Record<string, unknown>; sel: string; origin?: string[]; size: string[]; plane?: PlaneRef }) => {
+      const ev = safeEval(s), pts = new Map<string, V3>(), moved = new Set(Object.keys(f.pts));
+      if (f.type === 'ffbox') {
+        const o = f.origin!.map(ev), sz = f.size.map(ev), [nx, ny, nz] = f.n;
+        if (![...o, ...sz].every(isFinite)) return null;
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) { const dd = (f.pts[`${i},${j},${k}`] as number[]) ?? [0, 0, 0]; pts.set(`${i},${j},${k}`, [o[0] + (sz[0] * i) / (nx - 1) + dd[0], o[1] + (sz[1] * j) / (ny - 1) + dd[1], o[2] + (sz[2] * k) / (nz - 1) + dd[2]]); }
+        const nbr = (k: string) => { const [i, j, l] = k.split(',').map(Number); return [`${i + 1},${j},${l}`, `${i},${j + 1},${l}`, `${i},${j},${l + 1}`]; };
+        return { pts, nbr, sel: f.sel, moved };
+      }
+      const fr = planeFrame(f.plane!, ev, resolveWorkPlanes(s.doc, ev)), sz = f.size.map(ev), [nu, nv] = f.n;
+      if (!sz.every(isFinite)) return null;
+      for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
+        const h = (f.pts[`${i},${j}`] as number) ?? 0, a = (i / (nu - 1) - 0.5) * sz[0], b = (j / (nv - 1) - 0.5) * sz[1];
+        pts.set(`${i},${j}`, [fr.origin[0] + fr.xDir[0] * a + fr.yDir[0] * b + fr.normal[0] * h, fr.origin[1] + fr.xDir[1] * a + fr.yDir[1] * b + fr.normal[1] * h, fr.origin[2] + fr.xDir[2] * a + fr.yDir[2] * b + fr.normal[2] * h]);
+      }
+      const nbr = (k: string) => { const [i, j] = k.split(',').map(Number); return [`${i + 1},${j}`, `${i},${j + 1}`]; };
+      return { pts, nbr, sel: f.sel, moved };
+    };
 
     V.onFrame = () => {
       const s = useStore.getState();
@@ -270,9 +289,21 @@ export default function PartViewport() {
     };
 
     // ---------- Pieza ----------
+    const meshCache = new Map<string, Float32Array>();
+    let meshRefObjs: { id: string; mesh: THREE.Mesh; P: Float32Array }[] = [];
     const buildPart = (s: State) => {
       V.clearGroup(partGroup);
       state.partMesh = null;
+      // mallas de referencia (STL/OBJ) en verde translúcido
+      meshRefObjs = [];
+      for (const f of s.doc.features.slice(0, eopIndex(s.doc))) {
+        if (f.type !== 'meshref' || f.suppressed) continue;
+        let P = meshCache.get(f.id + f.data.length); if (!P) { P = fromB64(f.data); meshCache.set(f.id + f.data.length, P); }
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.computeVertexNormals();
+        const mm = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x5fae6a, metalness: 0, roughness: 0.8, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
+        partGroup.add(mm); meshRefObjs.push({ id: f.id, mesh: mm, P });
+        g.computeBoundingBox(); if (!s.result?.mesh?.triangles.length) { V.bbox.copy(g.boundingBox!); V.hasModel = true; }
+      }
       const res = (s.dialog && 'draft' in s.dialog && s.preview) ? s.preview : s.result;
       const m = res?.mesh ?? null;
       state.mesh = m;
@@ -282,7 +313,7 @@ export default function PartViewport() {
         partGroup.add(grp);
         if (!m?.triangles.length) { mesh.geometry.computeBoundingBox(); V.bbox.copy(mesh.geometry.boundingBox!); }
       }
-      V.hasModel = !!m?.triangles.length || !!sm?.triangles.length;
+      V.hasModel = !!m?.triangles.length || !!sm?.triangles.length || meshRefObjs.length > 0;
       if (!m || !m.triangles.length) { buildOverlay(s); return; }
       const color = MATERIALS.find((x) => x.name === s.doc.iProperties.material)?.color ?? '#c3c8cf';
       const isPreview = res === s.preview && !!s.preview;
@@ -291,6 +322,34 @@ export default function PartViewport() {
       mesh.geometry.computeBoundingBox();
       V.bbox.copy(mesh.geometry.boundingBox!);
       state.partMesh = mesh;
+      // acabados (color por cara) y calcomanías
+      if (s.mode !== 'sketch') {
+        const ev = safeEval(s);
+        for (const f of s.doc.features.slice(0, eopIndex(s.doc))) {
+          if (f.suppressed) continue;
+          if (f.type === 'finish') for (const p of f.faces as V3[]) { const gi = faceGroupContaining(m, p); if (gi >= 0) { const o = faceOverlay(m, gi, f.color, 0.92); o.traverse((x: any) => { x.raycast = () => {}; }); grp.add(o); } }
+          if (f.type === 'decal' && f.plane && f.plane.kind === 'custom' && f.center && f.image) {
+            const w = ev(f.width), rot = (ev(f.rot) * Math.PI) / 180; if (!(w > 0)) continue;
+            const n = new THREE.Vector3(...f.plane.normal).normalize(), x0 = new THREE.Vector3(...f.plane.xDir).normalize();
+            const x = x0.clone().applyAxisAngle(n, isFinite(rot) ? rot : 0), y = n.clone().cross(x);
+            const tex = new THREE.TextureLoader().load(f.image, (t) => { const im = t.image as HTMLImageElement; if (im?.width) { pl.scale.set(1, im.height / im.width, 1); V.request(); } });
+            tex.colorSpace = THREE.SRGBColorSpace;
+            const pl = new THREE.Mesh(new THREE.PlaneGeometry(w, w), new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+            pl.matrixAutoUpdate = false;
+            const M = new THREE.Matrix4().makeBasis(x, y, n).setPosition(new THREE.Vector3(...f.center).addScaledVector(n, 0.02));
+            pl.matrix.copy(M); pl.raycast = () => {}; grp.add(pl);
+          }
+        }
+      }
+      // generador de formas: la forma resultante en naranja sobre la pieza transparente
+      const sr = s.fem?.part === s.active ? s.fem.shapeRes : undefined;
+      if (sr && s.mode !== 'sketch') {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(sr.vertices, 3)); g.setAttribute('normal', new THREE.BufferAttribute(sr.normals, 3)); g.setIndex(new THREE.BufferAttribute(sr.triangles, 1));
+        const sm2 = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xf08c00, metalness: 0.05, roughness: 0.7, side: THREE.DoubleSide }));
+        sm2.raycast = () => {}; grp.add(sm2);
+        const om = mesh.material as THREE.MeshStandardMaterial; om.transparent = true; om.opacity = 0.18; om.depthWrite = false;
+      }
       const fr = s.fem?.part === s.active ? s.fem.res : undefined;
       if (fr && fr.mesh === m && s.mode !== 'sketch') {
         // resultados: se oculta el sólido y se dibuja la malla subdividida coloreada (las aristas siguen visibles)
@@ -421,6 +480,38 @@ export default function PartViewport() {
       }
       if (m && d && d.type === 'sm_flange' && d.edge) overlayGroup.add(V.segs([...d.edge.p0, ...d.edge.p1], V.lineMat(css('--accent'), 4, false, false)));
       if (m && d && d.type === 'sm_bend') for (const e of [d.edgeA, d.edgeB]) if (e) overlayGroup.add(V.segs([...e.p0, ...e.p1], V.lineMat(css('--accent'), 4, false, false)));
+      if (s.meshSel) {
+        const o = meshRefObjs.find((x) => x.id === s.meshSel!.ref);
+        if (o) {
+          const pos = new Float32Array(s.meshSel.tris.length * 9);
+          s.meshSel.tris.forEach((t, i) => pos.set(o.P.subarray(t * 9, t * 9 + 9), i * 9));
+          const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+          const hm = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: css('--accent'), transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthTest: false }));
+          hm.renderOrder = 7; hm.raycast = () => {}; overlayGroup.add(hm);
+        }
+      }
+      if (m && d && d.type === 'ruled') {
+        const selPts: number[] = [];
+        m.edgeGroups.forEach((_, gi) => { if (d.edges.points.some((p: V3) => groupMatches(gi, p))) selPts.push(...groupPts(gi)); });
+        if (selPts.length) overlayGroup.add(V.segs(selPts, V.lineMat(css('--accent'), 4, false, false)));
+      }
+      if (d && (d.type === 'ffbox' || d.type === 'ffface')) {
+        const cage = cagePoints(s, d as never);
+        if (cage) {
+          const segs: number[] = [];
+          for (const [k, p] of cage.pts) for (const nk of cage.nbr(k)) { const q = cage.pts.get(nk); if (q) segs.push(...p, ...q); }
+          if (segs.length) overlayGroup.add(V.segs(segs, V.lineMat('#7a5bd6', 1.2, false, false)));
+          const sz = Math.max(1.2, V.worldPerPx() * 7);
+          for (const [k, p] of cage.pts) {
+            const on = k === cage.sel, moved = cage.moved.has(k);
+            const sp = new THREE.Mesh(new THREE.SphereGeometry(sz * (on ? 0.75 : 0.5), 12, 8), new THREE.MeshBasicMaterial({ color: on ? 0xe03a3a : moved ? 0xf08c00 : 0xf6b04a, depthTest: false }));
+            sp.position.set(...p); sp.renderOrder = 8; overlayGroup.add(sp);
+          }
+        }
+      }
+      if (m && d && (d.type === 'direct' || d.type === 'delface' || d.type === 'finish' || d.type === 'unwrap' || d.type === 'replaceface')) {
+        for (const p of (d.faces ?? []) as V3[]) { const gi = faceGroupContaining(m, p); if (gi >= 0) overlayGroup.add(faceOverlay(m, gi, d.type === 'finish' ? (d as { color: string }).color : css('--accent'), 0.5)); }
+      }
       if (m && d && (d.type === 'shell' || d.type === 'draft' || d.type === 'split' || d.type === 'thicken' || d.type === 'thread' || d.type === 'combine' || d.type === 'movebody')) {
         for (const p of (d.faces ?? []) as V3[]) { const gi = faceGroupContaining(m, p); if (gi >= 0) overlayGroup.add(faceOverlay(m, gi, css('--accent'), 0.45)); }
         if (hoverFace >= 0 && hoverFace < m.faceGroups.length) overlayGroup.add(faceOverlay(m, hoverFace, css('--hover'), 0.35));
@@ -1375,6 +1466,20 @@ export default function PartViewport() {
         } else s.startSketch(plane);
         return;
       }
+      if (d && (d.type === 'ffbox' || d.type === 'ffface') && !s.tool) {
+        const cage = cagePoints(s, d as never); if (!cage) return;
+        const r = V.renderer.domElement.getBoundingClientRect();
+        let best: string | null = null, bd = 14;
+        for (const [k, p] of cage.pts) { const q = V.project(p as never) as { x: number; y: number }; const dd = Math.hypot(r.left + q.x - ev.clientX, r.top + q.y - ev.clientY); if (dd < bd) { bd = dd; best = k; } }
+        if (best) { s.updateDraft({ sel: best } as never); return; }
+      }
+      if (s.tool === 'pickEdges' && d && d.type === 'ruled') {
+        const hit = V.nearestEdge(ev, pickMesh()!, null, occluders()); if (!hit) return;
+        const p = edgeRefPoint(hit.group), pts = d.edges.points;
+        const existing = pts.findIndex((q: V3) => groupMatches(hit.group, q));
+        s.updateDraft({ edges: { mode: 'picked', points: existing >= 0 ? pts.filter((_: V3, i: number) => i !== existing) : [...pts, p] } } as never);
+        return;
+      }
       if (s.tool === 'pickEdges' && d && (d.type === 'fillet' || d.type === 'chamfer')) {
         const hit = V.nearestEdge(ev, pickMesh()!, null, occluders());
         // clic en una cara plana (lejos de aristas): todas las aristas de esa cara
@@ -1539,6 +1644,25 @@ export default function PartViewport() {
         const fixed = f.pick === 'fixed' ? tog(f.fixed) : f.fixed.filter((x) => x !== g);
         const loads = f.loads.map((l, i) => ({ ...l, faces: f.pick === i ? tog(l.faces) : l.faces.filter((x) => x !== g) }));
         s.set({ fem: { ...f, fixed, loads, res: undefined } });
+        return;
+      }
+      if (s.tool === 'meshPick') {
+        if (!meshRefObjs.length) return;
+        const r = V.renderer.domElement.getBoundingClientRect();
+        const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1), V.camera);
+        const hits = rc.intersectObjects(meshRefObjs.map((o) => o.mesh), false);
+        if (!hits.length || hits[0].faceIndex == null) return;
+        const o = meshRefObjs.find((x) => x.mesh === hits[0].object)!;
+        const opt = ((window as unknown as { __meshFitOpt?: { kind: 'auto' | 'plane' | 'cyl' | 'sphere'; tol: number } }).__meshFitOpt) ?? { kind: 'auto', tol: 8 };
+        const tris = growRegion(o.P, hits[0].faceIndex, opt.tol);
+        try { useStore.setState({ meshSel: { ref: o.id, tris, fit: fitRegion(o.P, tris, opt.kind) } }); }
+        catch (e) { useStore.setState({ meshSel: { ref: o.id, tris, err: (e as Error).message } }); }
+        return;
+      }
+      if (s.tool === 'pickFaces' && d && d.type === 'decal') {
+        const fh = faceHit(ev); if (!fh) return;
+        if (!fh.planar) { s.notify('La calcomanía va sobre una cara plana', 'info'); return; }
+        s.updateDraft({ plane: planeOfFace(fh), center: vArr(fh.point) } as never);
         return;
       }
       if (s.tool === 'pickFaces' && d && 'faces' in d) {
@@ -1904,7 +2028,7 @@ export default function PartViewport() {
 
     const cancelTool = () => { state.chain = []; state.chainIds = []; state.clicks = []; state.picks = []; buildPreview(useStore.getState()); };
     const applyMouse = (s: State) => {
-      const picking = ['pickEdges', 'pickPlane', 'pickFaces', 'femFace', 'epPick', 'pickFlangeEdge', 'pickWorkBase', 'measure', 'projFace', 'projSurf'].includes(s.tool ?? '');
+      const picking = ['meshPick', 'pickEdges', 'pickPlane', 'pickFaces', 'femFace', 'epPick', 'pickFlangeEdge', 'pickWorkBase', 'measure', 'projFace', 'projSurf'].includes(s.tool ?? '');
       V.setMouse(s.mode === 'sketch' || picking, s.mode === 'sketch');
       cvs.style.cursor = s.tool && !picking ? 'crosshair' : s.tool ? 'pointer' : 'default';
     };
@@ -1916,7 +2040,7 @@ export default function PartViewport() {
       if (s.kind !== 'part') return;
       if (s.flatView && (s.active !== p.active || s.mode === 'sketch' || (s.tool && s.tool !== p.tool) || s.pendingFeature || (s.dialog && 'draft' in s.dialog && s.dialog !== p.dialog) || !s.doc.sheet)) { useStore.setState({ flatView: false }); return; }
       if (s.flatView !== p.flatView || (s.flatView && s.result !== p.result)) { buildFlat(s); if (!s.flatView && p.flatView) setView('home'); }
-      if (s.pickBase !== p.pickBase) buildOverlay(s);
+      if (s.pickBase !== p.pickBase || s.meshSel !== p.meshSel) buildOverlay(s);
       if (s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material || s.fem !== p.fem || s.hud !== p.hud) {
         buildPart(s);
         if (firstMesh && s.result?.mesh) { firstMesh = false; setView('home'); }

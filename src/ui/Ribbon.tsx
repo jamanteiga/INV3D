@@ -1,6 +1,6 @@
 import { openRecent } from './session';
 import { useEffect, useState, type ReactNode } from 'react';
-import { useStore } from '../core/store';
+import { useStore, surfaceIds } from '../core/store';
 import { Icon } from './icons';
 import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { toggleClipTool } from './ClipBar';
@@ -340,7 +340,7 @@ export default function Ribbon() {
             <Col><Small icon="skel" label="Trazado" disabled={k !== 'assembly'} onClick={() => A.openSkel()} title="Ejes de la red con líneas 3D" /></Col>
           </Group>
         </>)}
-        {k === 'part' && cur === 'model' && (<>
+        {k === 'part' && cur === 'model' && (() => { const F = (k2: Parameters<typeof s.openFeatureDialog>[0], patch?: Record<string, unknown>) => () => { s.openFeatureDialog(k2); if (patch) s.updateDraft(patch as never); }; return (<>
           <Group label="Boceto">
             <Big icon="sketch" label="Iniciar boceto 2D" kbd="S" active={tool === 'pickPlane'} onClick={P.startSketch} />
             <Big icon="sketch3d" label="Boceto 3D" onClick={() => s.open({ kind: 'sketch3d' })} title="Líneas, splines y hélices en el espacio (trayectorias y contornos)" />
@@ -357,14 +357,17 @@ export default function Ribbon() {
             <Col>
               <Small icon="coil" label="Bobina" onClick={() => s.openFeatureDialog('coil')} title="Muelle o rosca modelada: perfil girado en hélice" />
               <Small icon="emboss" label="Relieve" onClick={P.emboss} title="Grabar o dar relieve a un texto o perfil" />
-              <Small icon="import" label="Importar" onClick={() => importStep().catch((e) => s.notify(e.message, 'error'))} title="Importar STEP en la pieza" />
+              <Small icon="derive" label="Derivar" onClick={() => s.openFeatureDialog('derive')} title="Pieza derivada: copia de otra pieza con escala y simetría" />
             </Col>
             <Col>
-              <Small icon="derive" label="Derivar" onClick={() => s.openFeatureDialog('derive')} title="Pieza derivada: copia de otra pieza con escala y simetría" />
+              <Small icon="decal" label="Calcomanía" disabled={!hasSolid} onClick={F('decal')} title="Imagen (logotipo, etiqueta, placa) sobre una cara plana" />
+              <Small icon="import" label="Importar" onClick={() => importStep().catch((e) => s.notify(e.message, 'error'))} title="Importar STEP en la pieza" />
+              <Small icon="unwrap" label="Desenrollar" disabled={!hasSolid} onClick={F('unwrap')} title="Desarrolla caras cilíndricas, cónicas o planas como superficie plana" />
             </Col>
           </Group>
           <Group label="Modificar">
             <Big icon="hole" label="Agujero" kbd="H" disabled={!hasSolid} onClick={() => s.openFeatureDialog('hole')} />
+            <Big icon="slot" label="Ranura" disabled={!hasSolid} onClick={F('slot')} title="Ranuras (colisos) por líneas o puntos de boceto, pasantes o con profundidad" />
             <Big icon="fillet" label="Empalme" kbd="F" disabled={!hasSolid} onClick={() => s.openFeatureDialog('fillet')} />
             <Col>
               <Small icon="chamfer" label="Chaflán" disabled={!hasSolid} onClick={() => s.openFeatureDialog('chamfer')} />
@@ -373,23 +376,54 @@ export default function Ribbon() {
             </Col>
             <Col>
               <Small icon="thread" label="Rosca" disabled={!hasSolid} onClick={() => s.openFeatureDialog('thread')} title="Rosca cosmética en cara cilíndrica" />
-              <Small icon="split" label="Dividir" disabled={!hasSolid} onClick={() => s.openFeatureDialog('split')} title="Divide el sólido por un plano y conserva un lado" />
-              <Small icon="thicken" label="Engrosar" disabled={!hasSolid} onClick={() => s.openFeatureDialog('thicken')} />
+              <Small icon="combine" label="Combinar" disabled={!hasSolid} onClick={() => s.openFeatureDialog('combine')} title="Unir, cortar o intersecar cuerpos" />
+              <Small icon="thicken" label="Engrosar/Desfase" disabled={!hasSolid} onClick={() => s.openFeatureDialog('thicken')} />
             </Col>
             <Col>
-              <Small icon="combine" label="Combinar" disabled={!hasSolid} onClick={() => s.openFeatureDialog('combine')} title="Unir, cortar o intersecar cuerpos" />
+              <Small icon="split" label="Dividir" disabled={!hasSolid} onClick={() => s.openFeatureDialog('split')} title="Divide el sólido por un plano y conserva un lado" />
+              <Small icon="direct" label="Directa" disabled={!hasSolid} onClick={F('direct')} title="Edición directa: empujar o tirar de caras planas" />
+              <Small icon="delface" label="Eliminar cara" disabled={!hasSolid} onClick={F('delface')} title="Quita caras (taladros, redondeos…) y cierra el hueco" />
+            </Col>
+            <Col>
+              <Small icon="smmark" label="Marcar" disabled={!hasSolid} onClick={F('sm_mark')} title="Marca (texto o geometría de boceto) para grabado láser o rotulado" />
+              <Small icon="finishf" label="Acabado" disabled={!hasSolid} onClick={F('finish')} title="Acabado y color de caras (pintura, galvanizado, anodizado…)" />
               <Small icon="move" label="Mover cuerpo" disabled={!hasSolid} onClick={() => s.openFeatureDialog('movebody')} />
-              <Small icon="copy2d" label="Copiar cuerpo" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('movebody'); s.updateDraft({ copy: true, name: 'Copiar cuerpo' }); }} />
+            </Col>
+            <Col>
+              {([['join', 'Unión'], ['cut', 'Diferencia'], ['intersect', 'Intersección']] as const).map(([op, l]) => (
+                <Small key={op} icon="combine" label={l} disabled={!hasSolid} title="Booleana entre cuerpos de la pieza (cuerpo base y cuerpos herramienta)" onClick={() => { s.openFeatureDialog('combine'); s.updateDraft({ op, name: l }); }} />
+              ))}
             </Col>
           </Group>
-          <Group label="Booleanas">
-            {([['join', 'Unión', 'Une cuerpos de la pieza: elige el cuerpo base y luego los cuerpos herramienta'], ['cut', 'Diferencia', 'Resta al cuerpo base los cuerpos herramienta'], ['intersect', 'Intersección', 'Deja solo el volumen común']] as const).map(([op, l, t]) => (
-              <Small key={op} icon="combine" label={l} disabled={!hasSolid} title={`${t}. Para tener varios cuerpos, crea las operaciones con «Nuevo cuerpo».`} onClick={() => { s.openFeatureDialog('combine'); s.updateDraft({ op, name: l }); }} />
-            ))}
+          <Group label="Explorar">
+            <Big icon="shapegen" label="Generador de formas" disabled={!hasSolid} onClick={() => s.open({ kind: 'fem', shape: true })} title="Optimización topológica: forma más ligera que soporta las cargas (restricciones y cargas como en el análisis de tensiones)" />
           </Group>
-          <Group label="Proyectar">
-            <Small icon="projectgeom" label="Sobre cara/plano" active={tool === 'projFace'} onClick={() => s.open({ kind: 'projto', mode: 'face' })} title="Proyecta un boceto sobre una cara plana o un plano (crea un boceto nuevo)" />
-            <Small icon="projectgeom" label="Sobre superficie" active={tool === 'projSurf'} disabled={!hasSolid} onClick={() => s.open({ kind: 'projto', mode: 'surf' })} title="Proyecta un boceto sobre una cara curva o plana como curvas 3D (boceto 3D)" />
+          <Group label="Operaciones de trabajo">
+            <Big icon="workplane" label="Plano" onClick={() => s.openFeatureDialog('workplane')} title="Plano de trabajo desfasado o girado" />
+            <Big icon="epoint" label="ePoint" onClick={() => s.open({ kind: 'epoint' })} title="Puntos de conexión de la pieza: coincidencia, inserción y compuesto. Al colocar la pieza en un ensamblaje se conectan solos con los del mismo nombre" />
+            <Col>
+              <Small icon="workaxis" label="Eje" onClick={() => s.openFeatureDialog('workaxis')} />
+              <Small icon="workpoint" label="Punto" onClick={() => s.openFeatureDialog('workpoint')} />
+              <Small icon="ucs" label="SCU" onClick={() => s.open({ kind: 'ucs' })} title="Sistema de coordenadas de usuario: origen, planos y ejes" />
+            </Col>
+          </Group>
+          <Group label="Patrón">
+            <Col>
+              <Small icon="prect" label="Rectangular" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pattern')} />
+              <Small icon="pcirc" label="Circular" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('pattern'); s.updateDraft({ ptype: 'circ' }); }} />
+              <Small icon="skpattern" label="Por boceto" disabled={!hasSolid} onClick={F('skpattern')} title="Patrón controlado por boceto: copia operaciones en los puntos de un boceto" />
+            </Col>
+            <Col>
+              <Small icon="mirror" label="Simetría" disabled={!hasSolid} onClick={() => s.openFeatureDialog('mirror')} />
+              <Small icon="pathpattern" label="Por trayectoria" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pathpattern')} />
+            </Col>
+          </Group>
+          <Group label="Forma libre">
+            <Big icon="ffbox" label="Caja" onClick={F('ffbox', { op: 'new', origin: ['0', '0', '0'], size: ['50 mm', '50 mm', '50 mm'] })} title="Caja de forma libre deformable por puntos de control" />
+            <Col>
+              <Small icon="ffface" label="Cara" onClick={F('ffface')} title="Cara (superficie) de forma libre con alturas por puntos de control" />
+              <Small icon="ffbox" label="Convertir" disabled={!hasSolid} onClick={F('ffbox', { op: 'new' })} title="Forma libre con la envolvente del sólido actual, para modelarla a mano" />
+            </Col>
           </Group>
           <Group label="Superficie">
             <Col>
@@ -398,29 +432,31 @@ export default function Ribbon() {
               <Small icon="surfloft" label="Solevación" onClick={() => s.openFeatureDialog('surf_loft')} title="Superficie solevada o reglada entre contornos" />
             </Col>
             <Col>
-              <Small icon="patch" label="Parche" onClick={() => s.openFeatureDialog('surf_patch')} title="Superficie limitada por un contorno cerrado 2D o 3D" />
               <Small icon="stitch" label="Coser" onClick={() => s.openFeatureDialog('stitch')} title="Une superficies; si cierran un volumen crea un sólido" />
-              <Small icon="thicken" label="Engrosar sup." onClick={() => { s.openFeatureDialog('thicken'); const sf = s.doc.features.filter((f) => f.type.startsWith('surf_') || f.type === 'stitch').pop(); if (sf) s.updateDraft({ surface: sf.id }); }} title="Da espesor a una superficie" />
-            </Col>
-          </Group>
-          <Group label="Operaciones de trabajo">
-            <Big icon="workplane" label="Plano" onClick={() => s.openFeatureDialog('workplane')} title="Plano de trabajo desfasado o girado" />
-            <Big icon="epoint" label="ePoint" onClick={() => s.open({ kind: 'epoint' })} title="Puntos de conexión de la pieza: coincidencia, inserción y compuesto. Al colocar la pieza en un ensamblaje se conectan solos con los del mismo nombre" />
-            <Col>
-              <Small icon="workaxis" label="Eje" onClick={() => s.openFeatureDialog('workaxis')} />
-              <Small icon="workpoint" label="Punto" onClick={() => s.openFeatureDialog('workpoint')} />
-            </Col>
-          </Group>
-          <Group label="Patrón">
-            <Col>
-              <Small icon="prect" label="Rectangular" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pattern')} />
-              <Small icon="pcirc" label="Circular" disabled={!hasSolid} onClick={() => { s.openFeatureDialog('pattern'); s.updateDraft({ ptype: 'circ' }); }} />
-              <Small icon="mirror" label="Simetría" disabled={!hasSolid} onClick={() => s.openFeatureDialog('mirror')} />
+              <Small icon="patch" label="Parche" onClick={() => s.openFeatureDialog('surf_patch')} title="Superficie limitada por un contorno cerrado 2D o 3D" />
+              <Small icon="sculpt" label="Esculpir" onClick={F('sculpt')} title="Añade o quita material limitado por superficies" />
             </Col>
             <Col>
-              <Small icon="pathpattern" label="Por trayectoria" disabled={!hasSolid} onClick={() => s.openFeatureDialog('pathpattern')} />
+              <Small icon="ruled" label="Superficie reglada" disabled={!hasSolid} onClick={F('ruled')} title="Superficie desde aristas: normal, tangente o según un vector" />
+              <Small icon="surftrim" label="Recortar" onClick={F('surftrim')} title="Recorta una superficie con el contorno de un boceto" />
+              <Small icon="surfextend" label="Alargar" onClick={F('surfextend')} title="Alarga el contorno de una superficie plana" />
+            </Col>
+            <Col>
+              <Small icon="replaceface" label="Sustituir cara" disabled={!hasSolid} onClick={F('replaceface')} title="Sustituye caras del sólido por una superficie" />
+              <Small icon="repair" label="Reparar cuerpos" disabled={!hasSolid} onClick={F('repair')} title="Cose y cierra cuerpos importados con huecos" />
+              <Small icon="meshfit" label="Ajustar a malla" onClick={() => s.open({ kind: 'meshfit' })} title="Importa una malla (STL/OBJ) y ajusta planos, cilindros o esferas a zonas de la malla" />
+            </Col>
+            <Col>
+              <Small icon="thicken" label="Engrosar sup." onClick={() => { s.openFeatureDialog('thicken'); const sf = surfaceIds(s.doc).pop(); if (sf) s.updateDraft({ surface: sf }); }} title="Da espesor a una superficie" />
             </Col>
           </Group>
+          <Group label="Proyectar">
+            <Small icon="projectgeom" label="Sobre cara/plano" active={tool === 'projFace'} onClick={() => s.open({ kind: 'projto', mode: 'face' })} title="Proyecta un boceto sobre una cara plana o un plano (crea un boceto nuevo)" />
+            <Small icon="projectgeom" label="Sobre superficie" active={tool === 'projSurf'} disabled={!hasSolid} onClick={() => s.open({ kind: 'projto', mode: 'surf' })} title="Proyecta un boceto sobre una cara curva o plana como curvas 3D (boceto 3D)" />
+          </Group>
+          <Group label="Simplificación"><Big icon="simplify" label="Simplificar" disabled={!hasSolid} onClick={() => s.open({ kind: 'simplify' })} title="Pieza nueva simplificada: envolvente o sin taladros pequeños" /></Group>
+          <Group label="Simulación"><Big icon="fem" label="Análisis de tensiones" disabled={!hasSolid} onClick={() => s.open({ kind: 'fem' })} title="Cálculo estático lineal por elementos finitos" /></Group>
+          <Group label="Convertir"><Big icon="convsheet" label="Convertir a chapa" disabled={!hasSolid} onClick={partActions.convertToSheet} title="Convierte la pieza en chapa: la primera extrusión de placa pasa a Cara de chapa con su espesor" /></Group>
           <Group label="Parámetros">
             <Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} />
             <Col>
@@ -428,7 +464,7 @@ export default function Ribbon() {
               <Small icon="ifeature" label="eOperaciones" onClick={() => s.open({ kind: 'ifeature' })} title="Extraer o insertar operaciones reutilizables" />
             </Col>
           </Group>
-        </>)}
+        </>); })()}
         {k === 'part' && cur === 'inspect' && (<>
           <Group label="Medir">
             <Big icon="measure" label="Medir" active={tool === 'measure'} onClick={T('measure')} title="Distancia entre puntos, longitud de aristas, radios" />
