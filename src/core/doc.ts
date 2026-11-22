@@ -188,7 +188,7 @@ export interface PartDoc {
   features: Feature[];
   /** Pieza de chapa: espesor, radio de plegado interior y factor K */
   /** Chapa: espesor, radio, factor K y holgura del desahogo de esquina (por defecto 0,5 mm; «0» sin holgura; «-1» sin desahogo) */
-  sheet?: { t: string; r: string; k: string; gap?: string; /** Cara A (lado de referencia del desarrollo): normal de la cara elegida */ aSide?: V3 };
+  sheet?: { t: string; r: string; k: string; gap?: string; /** Cara A (lado de referencia del desarrollo): normal de la cara elegida */ aSide?: V3; /** patrón plano creado (nodo en el árbol) */ flat?: boolean };
   /** ePoints: puntos de conexión para ensamblar (coincidencia, inserción, compuesto) */
   epoints?: import('./epoints').EPoint[];
   /** Parámetros de modelo de las operaciones: { idOperación: { campo: 'c7' } } (c1, c2… automáticos) */

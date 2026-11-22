@@ -39,6 +39,16 @@ function P_style(st: 'construction' | 'center') {
 }
 
 export const partActions = {
+  /** Chapa › Desarrollo: crea (si no existe) el patrón plano y lo muestra en el visor; si ya se ve, vuelve al modelo plegado */
+  flatPattern: () => {
+    const s = S();
+    if (!s.doc.sheet) return;
+    if (s.flatView) { useStore.setState({ flatView: false }); return; }
+    if (s.mode === 'sketch') s.finishSketch();
+    if (S().dialog) S().closeDialog();
+    if (!S().doc.sheet?.flat) S().commit((d) => { if (d.sheet) d.sheet.flat = true; });
+    useStore.setState({ flatView: true });
+  },
   /** Chapa › Definir cara A: la cara plana seleccionada es la cara A del desarrollo */
   defineASide: () => {
     const s = S();

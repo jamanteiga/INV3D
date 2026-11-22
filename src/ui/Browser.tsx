@@ -7,7 +7,7 @@ import { Icon } from './icons';
 import { planeLabel, ENTITY_NAMES, uid, type Feature, type StdPlane, type PartDoc, type V3 } from '../core/doc';
 import { profileLabel } from '../core/catalog';
 import { scaleLabel } from '../core/drawing';
-import { asmActions } from './actions';
+import { asmActions, partActions } from './actions';
 import { JOINT_NAMES, ORIGIN_REFS, ASM_REF, xfPoint, type FaceRef } from '../core/asm';
 
 const ICON: Record<Feature['type'], string> = {
@@ -163,6 +163,18 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
       })}
     </Folder>
     {s.doc.sheet && <div className="tree-row" style={{ paddingLeft: 10 }} onDoubleClick={() => s.open({ kind: 'sheetstyle' })}><Icon name="style" size={16} /><span className="tree-name">Chapa: t = {s.doc.sheet.t}</span></div>}
+    {s.doc.sheet?.flat && <>
+      <div className={`tree-row ${!s.flatView ? 'sel' : ''}`} style={{ paddingLeft: 10, fontWeight: !s.flatView ? 600 : undefined }} title="Clic: ver el modelo plegado" onClick={() => useStore.setState({ flatView: false })}><Icon name="smrefold" size={16} /><span className="tree-name">Modelo plegado</span></div>
+      <div className={`tree-row ${s.flatView ? 'sel' : ''}`} style={{ paddingLeft: 10, fontWeight: s.flatView ? 600 : undefined }} title="Clic: ver el patrón plano · clic derecho: opciones" onClick={() => { if (!useStore.getState().flatView) partActions.flatPattern(); }}
+        onContextMenu={(ev) => { ev.preventDefault(); setMenu({ x: ev.clientX, y: ev.clientY, items: [
+          { label: s.flatView ? 'Ir a pieza plegada' : 'Ver patrón plano', run: () => partActions.flatPattern() },
+          { label: 'Cotas y exportar DXF…', run: () => s.open({ kind: 'flat' }) },
+          { label: 'Definir cara A (cara seleccionada)', run: () => partActions.defineASide() },
+          { label: '-', run: () => {} },
+          { label: 'Eliminar patrón plano', danger: true, run: () => { useStore.setState({ flatView: false }); s.commit((d) => { if (d.sheet) delete d.sheet.flat; }); } },
+        ] }); }}>
+        <Icon name="flat" size={16} /><span className="tree-name">Patrón plano</span></div>
+    </>}
     {s.doc.features.filter((x) => !nestOwner.has(x.id)).map((x) => row(x))}
     <div className="tree-row eop" style={{ paddingLeft: 10 }}><span className="eop-mark" />Fin de pieza</div>
   </>);

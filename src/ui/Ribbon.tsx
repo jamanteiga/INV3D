@@ -201,9 +201,13 @@ export default function Ribbon() {
             </Col>
           </Group>
           <Group label="Patrón plano">
-            <Big icon="flat" label="Desarrollo" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Crear patrón plano: desarrollo con líneas de pliegue, cortes y marcas, y DXF para corte" />
+            {s.flatView ? <Big icon="smrefold" label="Ir a pieza plegada" onClick={partActions.flatPattern} title="Vuelve al modelo plegado" />
+              : <Big icon="flat" label="Desarrollo" disabled={!hasSolid} onClick={partActions.flatPattern} title="Crear patrón plano: el visor muestra el desarrollo (nodo «Patrón plano» en el árbol)" />}
             <Col>
+              <Small icon="dxf" label="Cotas y DXF" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Desarrollo en 2D con rótulos de pliegue y exportación DXF" />
               <Small icon="aside" label="Definir cara A" disabled={!hasSolid} onClick={partActions.defineASide} title="Clic en una cara plana y luego aquí: el desarrollo se ve desde esa cara" />
+            </Col>
+            <Col>
               <Small icon="newpart" label="Crear pieza" disabled={!hasSolid} onClick={partActions.makePart} title="Pieza derivada de esta chapa" />
               <Small icon="makecomp" label="Crear componentes" disabled={!hasSolid} onClick={partActions.makeComponents} title="Una pieza por cuerpo y un ensamblaje con todas" />
             </Col>

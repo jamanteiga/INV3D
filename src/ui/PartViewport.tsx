@@ -18,7 +18,8 @@ import {
   sketchPoints, pointOf, segKeys, segOf, entG, refPoint, refLine, refCurve, refKind, makeConstraint, makeDim, dimValue,
   trim, extend, filletCorner, solve, applySolution, isLiteral, num, circleFrom3, CONSTRAINT_GLYPH, CONSTRAINT_NAMES, nextDimName, distToSeg, curveOf,
 } from '../core/sketch';
-import type { MeshData } from '../core/cadClient';
+import { cad, type MeshData } from '../core/cadClient';
+import { flattenPath } from '../core/svgpath';
 import { View3D, css, tv, r3, vArr, planarFaceAt, faceVertices, dpr } from './view3d';
 
 type Ev = (s: string) => number;
@@ -155,6 +156,39 @@ export default function PartViewport() {
     (window as unknown as { __v3d: View3D }).__v3d = V; // ayuda de depuración / pruebas
     const { scene, camera } = V;
     const partGroup = new THREE.Group(); scene.add(partGroup);
+    // ---------- Patrón plano (chapa): desarrollo en 3D con líneas de pliegue ----------
+    const flatGroup = new THREE.Group(); scene.add(flatGroup);
+    let flatSeq = 0, flatFitted = false;
+    const buildFlat = async (s: State) => {
+      const on = !!(s.flatView && s.doc.sheet && s.mode !== 'sketch');
+      const seq = ++flatSeq;
+      if (!on) { V.clearGroup(flatGroup); partGroup.visible = true; flatFitted = false; V.request(); return; }
+      let r; try { r = await cad.flat(s.doc); } catch (e) { if (seq === flatSeq) { useStore.getState().notify(`Patrón plano: ${(e as Error).message}`, 'error'); useStore.setState({ flatView: false }); } return; }
+      if (seq !== flatSeq) return;
+      V.clearGroup(flatGroup); partGroup.visible = false;
+      const rings = r.paths.flatMap((d) => flattenPath(d)).map((pl) => pl.map(([x, y]) => new THREE.Vector2(x, -y))).filter((q) => q.length > 2);
+      const inside = (p: THREE.Vector2, q: THREE.Vector2[]) => { let c = false; for (let i = 0, j = q.length - 1; i < q.length; j = i++) { const a = q[i], b = q[j]; if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c; } return c; };
+      const depth = rings.map((q, i) => rings.filter((o, j) => j !== i && inside(q[0], o)).length);
+      const shapes: THREE.Shape[] = [];
+      rings.forEach((q, i) => {
+        if (depth[i] % 2) return;
+        const sh = new THREE.Shape(q);
+        rings.forEach((h, j) => { if (depth[j] === depth[i] + 1 && inside(h[0], q)) sh.holes.push(new THREE.Path(h)); });
+        shapes.push(sh);
+      });
+      const t = r.t, color = MATERIALS.find((x) => x.name === s.doc.iProperties.material)?.color ?? '#c3c8cf';
+      const geo = new THREE.ExtrudeGeometry(shapes, { depth: t, bevelEnabled: false, curveSegments: 1 });
+      flatGroup.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, metalness: 0.15, roughness: 0.65, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })));
+      const eg = new THREE.EdgesGeometry(geo, 25), ep = eg.attributes.position.array as Float32Array;
+      flatGroup.add(V.segs(Array.from(ep), V.lineMat(css('--edge'), 1.2)));
+      const z = t + 0.02;
+      if (r.bends.length) flatGroup.add(V.segs(r.bends.flatMap((b) => [b.a[0], b.a[1], z, b.b[0], b.b[1], z]), V.lineMat('#d23a3a', 1.6, true, false)));
+      const mk = (r.marks ?? []).flatMap((pl) => pl.slice(1).flatMap((q, i) => [pl[i][0], pl[i][1], z, q[0], q[1], z]));
+      if (mk.length) flatGroup.add(V.segs(mk, V.lineMat('#1e6fd9', 1.2, false, false)));
+      geo.computeBoundingBox(); V.bbox.copy(geo.boundingBox!);
+      if (!flatFitted) { flatFitted = true; V.fitTo(geo.boundingBox!.clone(), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0)); }
+      V.request();
+    };
     // Edición en contexto: resto del ensamblaje en transparente (coordenadas de la pieza)
     const ctxGroup = new THREE.Group(); scene.add(ctxGroup);
     let ctxMesh: MeshData | null = null, ctxObj: THREE.Mesh | null = null;
@@ -1859,10 +1893,11 @@ export default function PartViewport() {
     };
     const cvs = V.renderer.domElement;
     // en boceto: Mayús + botón central (o derecho) arrastrando gira la pieza (OrbitControls: pan + Mayús = giro); Re Pág vuelve a mirar al boceto
-    cvs.addEventListener('pointerdown', onDown);
-    cvs.addEventListener('pointerup', onUp);
-    cvs.addEventListener('pointermove', onMove);
-    cvs.addEventListener('dblclick', onDbl);
+    const nf = <E extends Event>(fn: (e: E) => void) => (e: E) => { if (!useStore.getState().flatView) fn(e); };
+    cvs.addEventListener('pointerdown', nf(onDown));
+    cvs.addEventListener('pointerup', nf(onUp));
+    cvs.addEventListener('pointermove', nf(onMove));
+    cvs.addEventListener('dblclick', nf(onDbl));
     window.addEventListener('keydown', onKey, true);
     cvs.addEventListener('contextmenu', (e) => e.preventDefault());
     cvs.addEventListener('pointerleave', () => { state.hover = null; useStore.setState({ cursor: null }); buildPreview(useStore.getState()); });
@@ -1879,6 +1914,8 @@ export default function PartViewport() {
     let firstMesh = !s0.result?.mesh;
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'part') return;
+      if (s.flatView && (s.active !== p.active || s.mode === 'sketch' || (s.dialog && 'draft' in s.dialog && s.dialog !== p.dialog) || !s.doc.sheet)) { useStore.setState({ flatView: false }); return; }
+      if (s.flatView !== p.flatView || (s.flatView && s.result !== p.result)) { buildFlat(s); if (!s.flatView && p.flatView) setView('home'); }
       if (s.pickBase !== p.pickBase) buildOverlay(s);
       if (s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material || s.fem !== p.fem || s.hud !== p.hud) {
         buildPart(s);
@@ -1939,6 +1976,7 @@ export default function PartViewport() {
       <div className="viewcube" ref={cubeHost} />
       <HeadsUp kind="part" />
       <ClipBar />
+      <FlatBar />
       {ctxEdit && ctxEdit.part === active && (
         <div className="ctx-bar">
           <span>Edición en contexto · <b>{ctxEdit.asmName}</b></span>
@@ -2090,6 +2128,20 @@ function FaceMenu() {
     <div className="ctx face-ctx" style={{ position: 'fixed', left, top, zIndex: 50 }} onContextMenu={(e) => e.preventDefault()}>
       <div className="ctx-title">{c.plane ? 'Cara plana' : c.cyl ? `Cara cilíndrica · Ø${+(c.cyl.r * 2).toFixed(2)}` : 'Cara'}</div>
       {items.map((it, i) => (it === '-' ? <hr key={i} /> : <button key={i} onClick={it[1]}>{it[0]}</button>))}
+    </div>
+  );
+}
+
+/** Barra del patrón plano (como Inventor): volver al modelo plegado, ver en 2D/DXF */
+function FlatBar() {
+  const on = useStore((s) => s.flatView && !!s.doc.sheet);
+  if (!on) return null;
+  const s = useStore.getState();
+  return (
+    <div className="ctx-bar">
+      <span><b>Patrón plano</b> · líneas de pliegue en rojo, marcas en azul</span>
+      <button className="btn" style={{ whiteSpace: 'nowrap' }} onClick={() => s.open({ kind: 'flat' })}>Cotas y DXF…</button>
+      <button className="btn primary" style={{ whiteSpace: 'nowrap' }} onClick={() => useStore.setState({ flatView: false })}>Ir a pieza plegada</button>
     </div>
   );
 }

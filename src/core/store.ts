@@ -173,6 +173,8 @@ export interface State {
   asmRotate: boolean;
   /** Panel del asistente IA abierto */
   aiOpen: boolean;
+  /** Chapa: el visor muestra el patrón plano */
+  flatView: boolean;
   /** Cara plana seleccionada en el modelo: plano listo para «Iniciar boceto 2D» */
   selFacePlane: PlaneRef | null;
   /** Operación que espera un boceto (corte, punzonado…): al terminar el boceto se reabre con él */
@@ -333,7 +335,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, asmRotate: false, aiOpen: false, selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, asmRotate: false, aiOpen: false, flatView: false, selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',
