@@ -200,32 +200,40 @@ export default function Ribbon() {
               <Small icon="derive" label="Derivar" onClick={F('derive')} title="Pieza derivada: copia de otra pieza con escala y simetría" />
             </Col>
           </Group>
+          <Group label="Patrón plano">
+            <Big icon="flat" label="Desarrollo" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Crear patrón plano: desarrollo con líneas de pliegue, cortes y marcas, y DXF para corte" />
+            <Col>
+              <Small icon="aside" label="Definir cara A" disabled={!hasSolid} onClick={partActions.defineASide} title="Clic en una cara plana y luego aquí: el desarrollo se ve desde esa cara" />
+              <Small icon="newpart" label="Crear pieza" disabled={!hasSolid} onClick={partActions.makePart} title="Pieza derivada de esta chapa" />
+              <Small icon="makecomp" label="Crear componentes" disabled={!hasSolid} onClick={partActions.makeComponents} title="Una pieza por cuerpo y un ensamblaje con todas" />
+            </Col>
+          </Group>
           <Group label="Modificar">
             <Big icon="extrude" label="Corte" disabled={!hasSolid} title="Corte a través de la chapa" onClick={F('extrude', { op: 'cut', dir: 'symmetric', extent: 'through' })} />
-            <Big icon="smseam" label="Costura de esquina" disabled={!hasSolid} onClick={F('sm_seam')} title="Cierra la esquina entre dos pestañas contiguas (solape con holgura)" />
             <Big icon="punch" label="Punzonado" disabled={!hasSolid} onClick={F('sm_punch')} title="Herramienta de punzonado: redondo, cuadrado, rectangular o coliso en puntos de boceto" />
             <Col>
+              <Small icon="smseam" label="Costura de esquina" disabled={!hasSolid} onClick={F('sm_seam')} title="Cierra la esquina entre dos pestañas contiguas (solape con holgura)" />
               <Small icon="smrip" label="Rasgadura" disabled={!hasSolid} onClick={F('sm_rip')} title="Abre la chapa a lo largo de líneas de boceto con una holgura" />
+              <Small icon="slot" label="Ranura" disabled={!hasSolid} onClick={F('sm_punch', { shape: 'slot', w: '30 mm', h: '10 mm', name: nextName(s.doc, 'sm_punch').replace('Punzonado', 'Ranura') })} title="Ranura (coliso) en puntos de boceto" />
+            </Col>
+            <Col>
               <Small icon="smunfold" label="Desplegar" disabled={!hasSolid || unf} onClick={F('sm_unfold')} title="Desarrolla el modelo para cortar sobre el plano (cortes que cruzan pliegues, etc.)" />
               <Small icon="smrefold" label="Volver a plegar" disabled={!unf} onClick={F('sm_refold')} title="Vuelve a plegar llevando los cortes hechos sobre el desarrollo" />
+              <Small icon="smmark" label="Marcar" disabled={!hasSolid} onClick={F('sm_mark')} title="Marca (texto o geometría) que va al desarrollo sin cortar: grabado láser, rotulado" />
             </Col>
             <Col>
               <Small icon="hole" label="Agujero" disabled={!hasSolid} onClick={F('hole')} />
-              <Small icon="slot" label="Ranura" disabled={!hasSolid} onClick={F('sm_punch', { shape: 'slot', w: '30 mm', h: '10 mm', name: nextName(s.doc, 'sm_punch').replace('Punzonado', 'Ranura') })} title="Ranura (coliso) en puntos de boceto" />
-              <Small icon="fillet" label="Redondeo de esquina" disabled={!hasSolid} onClick={F('fillet', { radius: '5 mm' })} />
-            </Col>
-            <Col>
-              <Small icon="chamfer" label="Chaflán de esquina" disabled={!hasSolid} onClick={F('chamfer')} />
-              <Small icon="smmark" label="Marcar" disabled={!hasSolid} onClick={F('sm_mark')} title="Marca (texto o geometría) que va al desarrollo sin cortar: grabado láser, rotulado" />
+              <Small icon="fillet" label="Redondeo esquina" disabled={!hasSolid} onClick={F('fillet', { radius: '5 mm' })} title="Redondeo de esquina (también en el desarrollo)" />
+              <Small icon="chamfer" label="Chaflán esquina" disabled={!hasSolid} onClick={F('chamfer')} title="Chaflán de esquina (también en el desarrollo)" />
             </Col>
           </Group>
-          <Group label="Operaciones de trabajo">
-            <Big icon="workplane" label="Plano" onClick={F('workplane')} title="Plano de trabajo desfasado o girado" />
+          <Group label="Trabajo">
             <Col>
+              <Small icon="workplane" label="Plano" onClick={F('workplane')} title="Plano de trabajo desfasado o girado" />
               <Small icon="workaxis" label="Eje" onClick={F('workaxis')} />
               <Small icon="workpoint" label="Punto" onClick={F('workpoint')} />
-              <Small icon="ucs" label="SCU" onClick={() => s.open({ kind: 'ucs' })} title="Sistema de coordenadas de usuario: origen, planos y ejes" />
             </Col>
+            <Col><Small icon="ucs" label="SCU" onClick={() => s.open({ kind: 'ucs' })} title="Sistema de coordenadas de usuario: origen, planos y ejes" /></Col>
           </Group>
           <Group label="Patrón">
             <Col>
@@ -233,15 +241,9 @@ export default function Ribbon() {
               <Small icon="pcirc" label="Circular" disabled={!hasSolid} onClick={F('pattern', { ptype: 'circ' })} />
               <Small icon="mirror" label="Simetría" disabled={!hasSolid} onClick={F('mirror')} />
             </Col>
-            <Col><Small icon="skpattern" label="Controlado por boceto" disabled={!hasSolid} onClick={F('skpattern')} title="Copia operaciones en los puntos de un boceto" /></Col>
+            <Col><Small icon="skpattern" label="Por boceto" disabled={!hasSolid} onClick={F('skpattern')} title="Patrón controlado por boceto: copia operaciones en los puntos de un boceto" /></Col>
           </Group>
           <Group label="Configuración"><Big icon="style" label="Valores de chapa" onClick={() => s.open({ kind: 'sheetstyle' })} title="Valores por defecto de chapa: espesor, radio de plegado, factor K y desahogo" /></Group>
-          <Group label="Patrón plano">
-            <Big icon="aside" label="Definir cara A" disabled={!hasSolid} onClick={partActions.defineASide} title="Clic en una cara plana y luego aquí: el desarrollo se ve desde esa cara" />
-            <Big icon="flat" label="Crear patrón plano" disabled={!hasSolid} onClick={() => s.open({ kind: 'flat' })} title="Desarrollo con líneas de pliegue, marcas y DXF para corte" />
-            <Big icon="newpart" label="Crear pieza" disabled={!hasSolid} onClick={partActions.makePart} title="Pieza derivada de esta chapa" />
-            <Big icon="makecomp" label="Crear componentes" disabled={!hasSolid} onClick={partActions.makeComponents} title="Una pieza por cuerpo y un ensamblaje con todas" />
-          </Group>
         </>); })()}
         {cur === 'hvac' && (() => { const H = (hk: string) => () => s.open({ kind: 'hvac', hk }); return (<>
           <Group label="Conductos (EN 1505/1506 · SMACNA)">

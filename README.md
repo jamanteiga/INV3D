@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.29.1
+## Versión 0.29.2
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.29.2**
+- Chapa: el botón **Desarrollo** vuelve a llamarse así y el grupo *Patrón plano* (Desarrollo, Definir cara A, Crear pieza, Crear componentes) pasa justo detrás de *Crear*, siempre visible. Cinta compactada.
 
 **Novedades 0.29.1**
 - Chapa: los **redondeos y chaflanes de esquina** (aristas en el espesor, en la cara base o en el tramo plano de cualquier pestaña) aparecen en el desarrollo, en el DXF y en la vista de desarrollo del plano.
