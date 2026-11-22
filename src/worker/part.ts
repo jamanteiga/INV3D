@@ -1471,6 +1471,63 @@ export function flatPattern(doc: PartDoc) {
   let flat = flat0;
   const notes = [...core.notes];
   if (skipped.length) notes.push(`No se llevan al desarrollo (no están en un tramo plano): ${[...new Set(skipped)].join(', ')}`);
+  // Redondeos y chaflanes de esquina (aristas en el espesor): se recortan en la esquina del desarrollo
+  {
+    const tolP = t + 0.05;
+    const toFlatPt = (P: V3): V2 | null => {
+      if (!core.base) return null;
+      const bf = core.base.fr, off = v3.dot(v3.sub(P, bf.origin), bf.normal);
+      if (off > -0.05 && off < tolP) { const d = v3.sub(P, bf.origin); return [v3.dot(d, bf.xDir), v3.dot(d, bf.yDir)]; }
+      for (const pn of [...core.panels].reverse()) {
+        const sA = v3.dot(v3.sub(P, pn.iE), pn.d), off2 = v3.dot(v3.sub(P, pn.iE), pn.nF);
+        if (sA > -0.05 && sA < pn.L + tolP && Math.abs(off2) <= tolP) { const a = v3.dot(v3.sub(P, pn.p0), pn.ax); return [pn.pf[0] + pn.eF[0] * a + pn.uF[0] * (pn.BA + sA), pn.pf[1] + pn.eF[1] * a + pn.uF[1] * (pn.BA + sA)]; }
+      }
+      return null;
+    };
+    const rings = () => {
+      const sv = flat.toSVGPaths() as unknown; const paths = (Array.isArray((sv as unknown[])[0]) ? (sv as string[][]).flat() : sv) as string[];
+      return paths.flatMap((d) => flattenPath(d)).map((pl) => { const q = pl.map(([x, y]) => [x, -y] as V2).filter((p, i, a) => i === 0 || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 1e-6); if (q.length > 1 && Math.hypot(q[0][0] - q[q.length - 1][0], q[0][1] - q[q.length - 1][1]) < 1e-6) q.pop(); return q; }).filter((q) => q.length > 2);
+    };
+    const missed: string[] = [];
+    for (const f of doc.features) {
+      if (f.suppressed || (f.type !== 'fillet' && f.type !== 'chamfer')) continue;
+      const val = ev(f.type === 'fillet' ? f.radius : f.distance); if (!(val > 0)) continue;
+      const pts = f.edges.mode === 'picked' ? f.edges.points : [];
+      let done = 0;
+      for (const P of pts) {
+        const V0 = toFlatPt(P as V3); if (!V0) continue;
+        const R = rings();
+        let best: { ring: V2[]; i: number; d: number } | null = null;
+        for (const ring of R) ring.forEach((q, i) => { const d = Math.hypot(q[0] - V0[0], q[1] - V0[1]); if (d < 0.3 && (!best || d < best.d)) best = { ring, i, d }; });
+        if (!best) continue;
+        const { ring, i } = best as { ring: V2[]; i: number }, n = ring.length, V = ring[i];
+        const un = (a: V2, b: V2): [V2, number] => { const x = b[0] - a[0], y = b[1] - a[1], l = Math.hypot(x, y) || 1; return [[x / l, y / l], l]; };
+        const [e1, l1] = un(V, ring[(i - 1 + n) % n]), [e2, l2] = un(V, ring[(i + 1) % n]);
+        const cs = Math.max(-1, Math.min(1, e1[0] * e2[0] + e1[1] * e2[1])), al = Math.acos(cs);
+        if (al < 1e-3 || al > Math.PI - 1e-3) continue;
+        const bl = Math.hypot(e1[0] + e2[0], e1[1] + e2[1]); const bis: V2 = [(e1[0] + e2[0]) / bl, (e1[1] + e2[1]) / bl];
+        // solo esquinas convexas del material (punto de la bisectriz dentro de un número impar de contornos)
+        const M: V2 = [V[0] + bis[0] * 0.05, V[1] + bis[1] * 0.05];
+        if (R.filter((rg) => pointInPoly(M, rg)).length % 2 === 0) continue;
+        const d = f.type === 'fillet' ? val / Math.tan(al / 2) : val;
+        if (d >= Math.min(l1, l2) - 1e-6) { notes.push(`${f.name}: ${f.type === 'fillet' ? 'radio' : 'distancia'} mayor que el lado de la esquina en el desarrollo`); continue; }
+        const T1: V2 = [V[0] + e1[0] * d, V[1] + e1[1] * d], T2: V2 = [V[0] + e2[0] * d, V[1] + e2[1] * d];
+        const Vo: V2 = [V[0] - bis[0] * 0.01, V[1] - bis[1] * 0.01];
+        const reg: V2[] = [Vo, T1];
+        if (f.type === 'fillet') {
+          const h = val / Math.sin(al / 2), C: V2 = [V[0] + bis[0] * h, V[1] + bis[1] * h];
+          let a1 = Math.atan2(T1[1] - C[1], T1[0] - C[0]), a2 = Math.atan2(T2[1] - C[1], T2[0] - C[0]);
+          let da = a2 - a1; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+          const N = 24; for (let j = 1; j < N; j++) { const a = a1 + (da * j) / N; reg.push([C[0] + val * Math.cos(a), C[1] + val * Math.sin(a)]); }
+        }
+        reg.push(T2);
+        try { flat = flat.cut(polyDrawing(reg)); done++; } catch { /* */ }
+      }
+      if (pts.length && !done) missed.push(f.name);
+      if (!pts.length && f.edges.mode !== 'picked') missed.push(f.name);
+    }
+    if (missed.length) notes.push(`Redondeos/chaflanes que no son de esquina (no cambian el contorno del desarrollo): ${missed.join(', ')}`);
+  }
   // Marcas: geometría de boceto que va al desarrollo sin cortar
   const marks: V2[][] = [];
   for (const f of doc.features) {
