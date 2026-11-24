@@ -1,3 +1,5 @@
+import { makeEval } from '../core/expr';
+import { docParams } from '../core/doc';
 import { partEPoints, EP_KIND_NAMES, epRef, epJoint, type EPoint } from '../core/epoints';
 import { drwActions } from './actions';
 import { allPages } from '../core/drawing';
@@ -164,7 +166,7 @@ function PartTree({ setMenu }: { setMenu: (m: Menu) => void }) {
         );
       })}
     </Folder>
-    {s.doc.sheet && <div className="tree-row" style={{ paddingLeft: 10 }} onDoubleClick={() => s.open({ kind: 'sheetstyle' })}><Icon name="style" size={16} /><span className="tree-name">Chapa: t = {s.doc.sheet.t}</span></div>}
+    {s.doc.sheet && <div className="tree-row" style={{ paddingLeft: 10 }} onDoubleClick={() => s.open({ kind: 'sheetstyle' })}><Icon name="style" size={16} /><span className="tree-name">Chapa: t = {sheetT(s.doc)}</span></div>}
     {s.doc.sheet?.flat && <>
       <div className={`tree-row ${!s.flatView ? 'sel' : ''}`} style={{ paddingLeft: 10, fontWeight: !s.flatView ? 600 : undefined }} title="Clic: ver el modelo plegado" onClick={() => useStore.setState({ flatView: false })}><Icon name="smrefold" size={16} /><span className="tree-name">Modelo plegado</span></div>
       <div className={`tree-row ${s.flatView ? 'sel' : ''}`} style={{ paddingLeft: 10, fontWeight: s.flatView ? 600 : undefined }} title="Clic: ver el patrón plano · clic derecho: opciones" onClick={() => { if (!useStore.getState().flatView) partActions.flatPattern(); }}
@@ -484,3 +486,10 @@ function DrwTree({ setMenu }: { setMenu: (m: Menu) => void }) {
 }
 
 export type { PartDoc };
+
+/** Espesor de chapa para el árbol (evalúa expresiones como «t») */
+function sheetT(doc: import('../core/doc').PartDoc): string {
+  const t = doc.sheet?.t ?? '';
+  if (/^[\d.,]+\s*mm$/.test(t.trim())) return t;
+  try { const v = makeEval(docParams(doc))(t); return Number.isFinite(v) ? `${String(Math.round(v * 1000) / 1000).replace('.', ',')} mm` : t; } catch { return t; }
+}

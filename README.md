@@ -29,6 +29,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
 
+**Novedades 0.34.2**
+- Corregido: los conductos rectangulares que se recuperaban de la sesión anterior (documentos abiertos al cerrar la aplicación) no se actualizaban y seguían con el hueco en la cuarta esquina. Ahora se actualizan también al restaurar la sesión: cierre a tope, arista contra arista.
+- Árbol de chapa: muestra el espesor evaluado (t = 0,8 mm) aunque esté ligado al parámetro t.
+
 **Novedades 0.34.1**
 - **Medir** pasa a ser una pestaña propia junto a Mecánica y HVAC (pieza y ensamblaje).
 - **Conducto rectangular** paramétrico: la sección, la longitud y el espesor siguen a los parámetros **W, H, L y t** (Herramientas › Parámetros). Los ePoints de las dos bocas se recolocan solos (posición, radio y nombre «Conducto W×H») al cambiar las medidas. Los conductos de versiones anteriores se actualizan al abrirlos: cierre a tope (aristas interiores en contacto) y ePoints ligados.

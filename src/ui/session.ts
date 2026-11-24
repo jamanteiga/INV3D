@@ -7,6 +7,8 @@ import {
   type AppSettings, type UserLibs, type RecentItem, type Config,
 } from '../core/persist';
 import { openFile, recentCtl } from '../core/files';
+import { migrateHvacDoc } from '../core/hvac';
+import type { PartDoc } from '../core/doc';
 import { View3D } from './view3d';
 
 const S = () => useStore.getState();
@@ -42,7 +44,7 @@ export async function initSession() {
 }
 
 function restoreSession(sess: SessionData) {
-  const docs: DocEntry[] = sess.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, path: d.path, data: d.data, past: [], future: [], dirty: d.dirty, hidden: d.hidden }));
+  const docs: DocEntry[] = sess.docs.map((d) => ({ id: d.id, kind: d.kind, fileName: d.fileName, path: d.path, data: d.kind === 'part' ? migrateHvacDoc(d.data as PartDoc) : d.data, past: [], future: [], dirty: d.dirty, hidden: d.hidden }));
   // Sesiones anteriores a la 0.9.1: las piezas que usa un ensamblaje pasan a estar en memoria (sin pestaña), salvo la activa
   if (sess.docs.every((d) => d.hidden === undefined)) {
     const used = new Set(docs.filter((d) => d.kind === 'assembly').flatMap((d) => ((d.data as any)?.occurrences ?? []).map((o: any) => o.part)));
