@@ -6,7 +6,7 @@ import EPointPanel from './EPointPanel';
 import { partEPoints, EP_KIND_NAMES, epJoint } from '../core/epoints';
 import ProjectDialog from './ProjectDialog';
 import ToolbarsDialog from './ToolbarsDialog';
-import { occEPoints, setJointEPoint } from './jointep';
+import { occEPoints, setJointEPoint, preAlign } from './jointep';
 import DrwViewPropsDialog from './DrwViewDialog';
 import { tbTemplate, TB_FIELDS, type SheetSize } from '../core/drawing';
 import { GenDialog } from './MachineDialog';
@@ -945,7 +945,7 @@ function JointDialog() {
       const ea = occEPoints(j.a.occ).find((e) => e.id === j.aEp), eb = occEPoints(j.b.occ).find((e) => e.id === j.bEp);
       if (!ea || !eb) { s.notify('ePoint no encontrado', 'error'); return false; }
       let joint!: Joint;
-      s.commitAsm((a) => { joint = epJoint(a, j.a.occ, ea, j.b.occ, eb, (p0) => uid(p0)); if (j.offset && j.offset !== '0' && j.offset !== '0 mm') joint.offset = j.offset; a.joints.push(joint); });
+      s.commitAsm((a) => { const ga = !!a.occurrences.find((o) => o.id === j.a.occ)?.grounded; if (ga) preAlign(a, j.b.occ, eb, j.a.occ, ea); else preAlign(a, j.a.occ, ea, j.b.occ, eb); joint = epJoint(a, j.a.occ, ea, j.b.occ, eb, (p0) => uid(p0)); if (j.offset && j.offset !== '0' && j.offset !== '0 mm') joint.offset = j.offset; a.joints.push(joint); });
       const ev0 = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
       const err = solveAssembly(normalizeAsm(useStore.getState().asm, docGetter(useStore.getState()), ev0), ev0).errors[joint.id];
       if (err) s.notify(`${joint.name}: ${err}`, 'error'); else s.notify(`${joint.name} (${JOINT_NAMES[joint.type]}) aplicada`);

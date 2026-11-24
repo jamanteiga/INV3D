@@ -23,3 +23,19 @@ export function setJointEPoint(occ: string, epId: string, slot?: 'a' | 'b') {
   next.type = ka === 'insert' && kb === 'insert' ? 'insert' : 'mate';
   useStore.setState({ dialog: { ...dlg, draft: next, step: sl === 'a' ? 1 : 0 } as never });
 }
+
+import { q as qq, xfPoint, type AsmDoc, type Xform } from '../core/asm';
+import { quatZTo } from '../core/fasteners';
+import { v3, type V3 } from '../core/doc';
+/** Antes de resolver: coloca el componente que se mueve con su ePoint sobre el otro y en sentido opuesto
+ *  (así el solver no tiene que dar media vuelta, que es donde puede quedarse atascado) */
+export function preAlign(a: AsmDoc, movOcc: string, eMov: EPoint, fixOcc: string, eFix: EPoint) {
+  const s = useStore.getState();
+  const om = a.occurrences.find((o) => o.id === movOcc), of = a.occurrences.find((o) => o.id === fixOcc);
+  if (!om || !of || om.grounded || a.joints.some((j) => [j.a, j.b, j.c].some((f) => f?.occ === movOcc))) return;
+  const Xf: Xform = s.asmResult?.xf[fixOcc] ?? of.xf;
+  const pT = xfPoint(Xf, eFix.point), nT = v3.norm(qq.rotate(Xf.quat, eFix.dir));
+  const conj = (x: [number, number, number, number]): [number, number, number, number] => [-x[0], -x[1], -x[2], x[3]];
+  const quat = qq.mul(quatZTo(v3.mul(nT, -1) as V3), conj(quatZTo(v3.norm(eMov.dir))));
+  om.xf = { pos: v3.sub(pT, qq.rotate(quat, eMov.point)) as V3, quat };
+}

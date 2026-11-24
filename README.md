@@ -29,6 +29,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
 
+**Novedades 0.38.4**
+- **Clic derecho sobre un ePoint** (ensamblaje): una sola opción, *Restringir ePoint origen → ePoint destino…*. Ese ePoint queda como origen y el destino se elige **con clic en pantalla** sobre el ePoint de otro componente (o en la lista). En el menú de una cara, la lista de «Restringir por ePoint · …» se sustituye por esa misma opción.
+- Restricción ePoint–ePoint más fiable: antes de resolver, el componente libre se coloca con su ePoint sobre el otro y en sentido opuesto; un ePoint de inserción con uno de coincidencia actúa como punto y normal (antes podía quedar «no satisfecha»).
+
 **Novedades 0.38.3**
 - Giro libre (G) y Rotar: los **ePoints** de la pieza acompañan al giro mientras se arrastra y quedan en su sitio al soltar (también en piezas restringidas, donde el giro es temporal).
 

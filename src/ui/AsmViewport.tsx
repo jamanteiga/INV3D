@@ -85,7 +85,7 @@ export default function AsmViewport() {
   const host = useRef<HTMLDivElement>(null);
   const cubeHost = useRef<HTMLDivElement>(null);
   const [hint, setHint] = useState('');
-  const [ctx, setCtx] = useState<{ x: number; y: number; ref: FaceRef; pW: V3; label: string } | null>(null);
+  const [ctx, setCtx] = useState<{ x: number; y: number; ref: FaceRef; pW: V3; label: string; ep?: { occ: string; id: string } } | null>(null);
 
   useEffect(() => {
     const V = new View3D(host.current!, cubeHost.current!);
@@ -434,8 +434,10 @@ export default function AsmViewport() {
       return { owner: id, ownerKind: kind as 'occ' | 'member', pointW: vArr(hit.point), normalW: vArr(nW), pointL, normalL, vertsW, kind: 'plane', centerL, xdirL };
     };
     /** Geometría para restringir bajo el cursor: cara/eje de componente o plano/eje de referencia (el más cercano). */
-    const pickRef = (ev: MouseEvent): { ref: FaceRef; pW: V3; label: string } | null => {
+    const pickRef = (ev: MouseEvent): { ref: FaceRef; pW: V3; label: string; ep?: { occ: string; id: string } } | null => {
       const h = hitAt(ev), r = refAt(ev);
+      // los ePoints se dibujan por encima de todo: tienen prioridad
+      if (r?.object.userData.ep) { const e = r.object.userData.ep; return { ref: r.object.userData.ref, pW: e.pW, label: r.object.userData.label, ep: { occ: e.occ, id: e.id } }; }
       const useRef = r && (!h || r.object.userData.ref.kind === 'axis' || r.distance < h.distance - 1e-6);
       if (useRef) return { ref: r!.object.userData.ref, pW: vArr(r!.point), label: r!.object.userData.label };
       if (!h) return null;
@@ -646,7 +648,7 @@ export default function AsmViewport() {
       if (small && ev.button === 2 && !useStore.getState().tool) {
         downAt = null;
         const pk = pickRef(ev);
-        if (pk) { const st = useStore.getState(); useStore.setState({ selItem: pk.ref.occ === ASM_REF ? null : topOf(st, pk.ref.occ) }); setCtx({ x: ev.clientX, y: ev.clientY, ref: pk.ref, pW: pk.pW, label: pk.label }); }
+        if (pk) { const st = useStore.getState(); useStore.setState({ selItem: pk.ref.occ === ASM_REF ? null : topOf(st, pk.ref.occ) }); setCtx({ x: ev.clientX, y: ev.clientY, ref: pk.ref, pW: pk.pW, label: pk.label, ep: pk.ep }); }
         else setCtx(null);
         return;
       }
@@ -702,6 +704,11 @@ export default function AsmViewport() {
         if (!d.member || (d.member && d.target)) s.updateDraft({ member: id, target: '' });
         else if (id !== d.member) s.updateDraft({ target: id });
         useStore.setState({ selItem: id });
+        return;
+      }
+      if (s.tool === 'asmFace' && dlg?.kind === 'joint' && d?.epMode) {
+        const r = refAt(ev); const ep = r?.object.userData.ep as { occ: string; id: string } | undefined;
+        if (ep) setJointEPoint(ep.occ, ep.id); else s.notify('Haz clic en un ePoint (o elígelo en la lista del diálogo)', 'error');
         return;
       }
       if (s.tool === 'asmFace' && (dlg?.kind === 'joint' || dlg?.kind === 'asmwp')) {
@@ -787,11 +794,6 @@ export default function AsmViewport() {
           T = { occ: f.owner, ref: { occ: f.owner, point: f.pointL, normal: f.normalL, kind: f.kind, radius: f.radius, convex: f.convex, center: f.centerL, xdir: f.xdirL }, label: `${nm} · cara ${f.kind === 'axis' ? 'cilíndrica' : 'plana'}`, pW: f.pointW, nW: f.normalW };
         }
         useStore.setState({ createTarget: T, tool: null, dialog: { kind: 'createcomp' } });
-        return;
-      }
-      if (s.tool === 'asmFace' && dlg?.kind === 'joint' && d?.epMode) {
-        const r = refAt(ev); const ep = r?.object.userData.ep as { occ: string; id: string } | undefined;
-        if (ep) setJointEPoint(ep.occ, ep.id); else s.notify('Haz clic en un ePoint (o elígelo en la lista del diálogo)', 'error');
         return;
       }
       if (s.tool === 'asmFace' || s.tool === 'weldFace' || s.tool === 'boltFace') {
@@ -969,7 +971,7 @@ export default function AsmViewport() {
 }
 
 /** Menú contextual del visor de ensamblaje: restringir la geometría pulsada. */
-function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef; pW: V3; label: string }; close: () => void }) {
+function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef; pW: V3; label: string; ep?: { occ: string; id: string } }; close: () => void }) {
   const s = useStore.getState();
   useEffect(() => {
     const off = (e: Event) => { if (!(e.target as HTMLElement).closest?.('.ctx')) close(); };
@@ -999,20 +1001,25 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
     ['Simetría…', () => start('sym')],
   ];
   const orig = ORIGIN_REFS.filter((o) => (o.ref.kind === 'axis') === isAxis);
+  /** Restricción ePoint–ePoint: abre Restringir en modo ePoint (con el ePoint pulsado como origen) y se eligen en pantalla */
+  const epEp = (ep?: { occ: string; id: string }) => {
+    close();
+    asmActions.openJoint();
+    const st = useStore.getState(); const dlg = st.dialog as any; if (dlg?.kind !== 'joint') return;
+    useStore.setState({ dialog: { ...dlg, draft: { ...dlg.draft, epMode: true, type: 'mate', a: undefined, b: undefined, aL: undefined, bL: undefined, aW: undefined, bW: undefined }, step: 0 }, hud: { ...st.hud, epoints: true } });
+    if (ep) setJointEPoint(ep.occ, ep.id, 'a');
+  };
+  if (ctx.ep) return (
+    <div className="ctx" style={{ left: ctx.x, top: ctx.y, position: 'fixed' }} onContextMenu={(e) => e.preventDefault()}>
+      <div className="ctx-title">{ctx.label}</div>
+      <button title="Este ePoint es el origen; después haz clic en el ePoint destino de otro componente" onClick={() => epEp(ctx.ep)}>Restringir ePoint origen → ePoint destino…</button>
+    </div>
+  );
   return (
     <div className="ctx" style={{ left: ctx.x, top: ctx.y, position: 'fixed' }} onContextMenu={(e) => e.preventDefault()}>
       <div className="ctx-title">{ctx.label}</div>
       {items.map(([l, f]) => <button key={l} onClick={f}>Restringir · {l}</button>)}
-      {occ && (() => {
-        const pd = s.docData(occ.part) as PartDoc | null;
-        const eps = pd?.format === 'inv3d.part' ? activeEPoints(pd).filter((x) => x.kind !== 'composite') : [];
-        if (!eps.length) return <button disabled title="Crea ePoints en la pieza (Modelo 3D › ePoint) o con el menú contextual de una cara">Restringir por ePoint (la pieza no tiene)</button>;
-        return eps.map((x) => (
-          <button key={x.id} title="Elige después el ePoint del otro componente: se crea la unión adecuada (coincidencia o inserción)"
-            onClick={() => { close(); useStore.setState({ epConnect: { occ: occ.id, ep: x.id, label: `${occ.name} · ePoint ${x.name}` }, selItem: occ.id, hud: { ...useStore.getState().hud, epoints: true } }); }}>
-            Restringir por ePoint · {x.name}</button>
-        ));
-      })()}
+      <button title="Elige el ePoint origen y el ePoint destino (de otro componente), en las listas o con clic en pantalla" onClick={() => epEp()}>Restringir ePoint origen → ePoint destino…</button>
       <hr />
       {orig.map((o) => <button key={o.key} onClick={() => start(isAxis ? 'mate' : 'flush', {}, { ref: o.ref, label: `Ensamblaje · ${o.label}` })}>{isAxis ? 'Coaxial con' : 'Al ras con'} {o.label} del ensamblaje</button>)}
       {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}

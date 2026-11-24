@@ -67,6 +67,8 @@ export const epRef = (e: EPoint, occ: string): FaceRef => ref(e, occ);
 const ref = (e: EPoint, occ: string): FaceRef => (e.kind === 'insert'
   ? { occ, point: e.point, normal: e.dir, kind: 'axis', radius: e.radius ?? 5, center: e.point }
   : { occ, point: e.point, normal: e.dir, kind: 'plane', center: e.point });
+/** Referencia de un ePoint dentro de una unión: si los dos no son de inserción, ambos actúan como plano (punto y normal) */
+const jref = (e: EPoint, occ: string, insert: boolean): FaceRef => (insert ? ref(e, occ) : { occ, point: e.point, normal: e.dir, kind: 'plane', center: e.point });
 
 /** Conecta automáticamente los ePoints del mismo nombre y tipo entre componentes.
  *  `only`: ocurrencias recién colocadas (si se omite, todas). Devuelve las uniones nuevas. */
@@ -119,7 +121,7 @@ export function epJoint(asm: AsmDoc, occA: string, a: EPoint, occB: string, b: E
   const fixed = (id: string) => !!asm.occurrences.find((o) => o.id === id)?.grounded;
   if (fixed(A) && !fixed(B)) [A, ea, B, eb] = [B, b, A, a];
   const insert = ea.kind === 'insert' && eb.kind === 'insert';
-  return { id: uid('j'), name: `ePoint ${ea.name}–${eb.name}`, type: insert ? 'insert' : 'mate', a: ref(ea, A), b: ref(eb, B), offset: ea.offset || eb.offset || '0', angle: '0', ep: { a: ea.id, b: eb.id, name: ea.name } };
+  return { id: uid('j'), name: `ePoint ${ea.name}–${eb.name}`, type: insert ? 'insert' : 'mate', a: jref(ea, A, insert), b: jref(eb, B, insert), offset: ea.offset || eb.offset || '0', angle: '0', ep: { a: ea.id, b: eb.id, name: ea.name } };
 }
 
 /** Las uniones entre ePoints toman la posición actual de sus ePoints (si la pieza cambia, la unión la sigue) */
@@ -130,7 +132,7 @@ export function refreshEpRefs(asm: AsmDoc, partDoc: (partId: string) => PartDoc 
     if (!j.ep || j.a.occ.includes('/') || j.b.occ.includes('/')) return j;
     const get = (occ: string, id: string) => { const o = asm.occurrences.find((x) => x.id === occ); return o ? partEPoints(partDoc(o.part)).find((e) => e.id === id) : undefined; };
     const ea = get(j.a.occ, j.ep.a), eb = get(j.b.occ, j.ep.b); if (!ea || !eb) return j;
-    const a = ref(ea, j.a.occ), b = ref(eb, j.b.occ);
+    const ins = j.type === 'insert'; const a = jref(ea, j.a.occ, ins), b = jref(eb, j.b.occ, ins);
     const same = (x: FaceRef, y: FaceRef) => JSON.stringify([x.point, x.normal, x.radius]) === JSON.stringify([y.point, y.normal, y.radius]);
     if (same(a, j.a) && same(b, j.b)) return j;
     changed = true; return { ...j, a: { ...j.a, ...a }, b: { ...j.b, ...b } };
