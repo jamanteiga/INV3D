@@ -141,16 +141,16 @@ function makeRectDuctSheet(s: HvacSpec, t: number): PartDoc {
   const sk = b.sketch('Sección (boceto)', XY(), rectDuctSection());
   b.f.push({ id: 'cf1', name: 'Conducto (chapa plegada)', type: 'sm_contour', profile: sk, width: 'L', dir: 'normal', side: 'in' });
   endJoints(b, s, t, L);
-  const d = doc(s, `Conducto ${sizeLabel(s)} L=${L} e=${t}`, `Conducto rectangular de chapa plegada ${sizeLabel(s)} · L ${L} mm · chapa ${String(t).replace('.', ',')} mm · 3 pliegues R${String(r).replace('.', ',')} y cierre a tope en la cuarta esquina${endsLabel(s)}`,
+  const d = doc(s, `Conducto ${sizeLabel(s)} L=${L} e=${t}`, `Conducto rectangular de chapa plegada ${sizeLabel(s)} · L ${L} mm · chapa ${String(t).replace('.', ',')} mm · 3 pliegues R${String(r).replace('.', ',')} y cierre arista contra arista en la cuarta esquina${endsLabel(s)}`,
     [['W', W, 'Anchura interior'], ['H', H, 'Altura interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']]);
   d.sheet = { t: 't', r: `${r} mm`, k: '0.273' };
   d.features = b.f; return d;
 }
 /** Sección del conducto rectangular ligada a los parámetros W, H y t.
- *  Cierre a tope en la 4ª esquina: la pared izquierda apoya sobre la cara interior del fondo y el fondo llega hasta la
- *  cara exterior de esa pared, de modo que las aristas interiores se tocan (holgura de 0,01 mm para que el sólido sea válido). */
+ *  Cierre en la 4ª esquina arista contra arista: las dos paredes terminan en la esquina interior, sin solaparse
+ *  (holgura de 0,01 mm para que el sólido sea válido). */
 function rectDuctSection(): SkEntity[] {
-  const P: [string, string][] = [['-W/2', '-H/2 + 0.01'], ['-W/2', 'H/2'], ['W/2', 'H/2'], ['W/2', '-H/2'], ['-W/2 - t', '-H/2']];
+  const P: [string, string][] = [['-W/2', '-H/2 + 0.01'], ['-W/2', 'H/2'], ['W/2', 'H/2'], ['W/2', '-H/2'], ['-W/2', '-H/2']];
   return P.slice(0, -1).map((p, i) => ({ id: `l${i + 1}`, type: 'line', a: [p[0], p[1]], b: [P[i + 1][0], P[i + 1][1]] }) as SkEntity);
 }
 /** ePoints de las bocas del conducto rectangular, que siguen a W, H y L */
@@ -169,11 +169,12 @@ export function migrateHvacDoc(d: PartDoc): PartDoc {
   const sk = d.features.find((f) => f.id === cf.profile && f.type === 'sketch') as (Feature & { entities: SkEntity[] }) | undefined;
   const names = new Set(d.parameters.map((p) => p.name));
   if (!sk || !['W', 'H', 'L', 't'].every((n) => names.has(n))) return d;
-  const already = sk.entities.length === 4 && (sk.entities[0] as { a?: string[] }).a?.[0] === '-W/2';
+  const last = sk.entities[sk.entities.length - 1] as { b?: string[] };
+  const already = sk.entities.length === 4 && last.b?.[0] === '-W/2' && last.b?.[1] === '-H/2';
   if (!already) {
     sk.entities = rectDuctSection(); cf.width = 'L';
     if (d.sheet) d.sheet.t = 't';
-    d.iProperties.description = d.iProperties.description.replace('cierre engatillado', 'cierre a tope');
+    d.iProperties.description = d.iProperties.description.replace(/cierre (engatillado|a tope)/, 'cierre arista contra arista');
   }
   const eps = d.epoints ?? [];
   const e1 = eps.find((e) => e.id === 'ep1'), e2 = eps.find((e) => e.id === 'ep2');
