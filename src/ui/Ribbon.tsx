@@ -566,7 +566,11 @@ export default function Ribbon() {
           <Group label="Componente">
             <SplitBig onPick={(t) => s.open({ kind: t as 'place' | 'content' })} items={[
               { key: 'place', icon: 'place', label: 'Colocar', title: 'Colocar pieza (P)' }, { key: 'content', icon: 'content', label: 'Centro de contenido', title: 'Tornillería, pasadores, rodamientos y chavetas normalizados' }]} />
-            <Big icon="newpart" label="Crear" title="Crear componente: elige un ePoint o una cara de un componente y después la pieza del centro de contenido HVAC o Mecánica (queda restringida), o modela una pieza nueva en contexto" active={tool === 'asmCreatePick'} onClick={A.createComponent} />
+            <SplitBig activeKey={tool === 'asmCreatePick' ? (s.createCat ?? 'auto') : null} onPick={(k) => A.createComponent(k === 'auto' ? null : (k as 'hvac' | 'mech'))} items={[
+              { key: 'auto', icon: 'newpart', label: 'Crear', title: 'Crear componente: HVAC o Mecánica según la pieza elegida, o modelar una pieza nueva en contexto' },
+              { key: 'hvac', icon: 'hduct', label: 'Crear HVAC', title: 'Crear componente HVAC: elige un ePoint o una cara y después conducto, codo, transición, compuerta, terminal, espirotubo…' },
+              { key: 'mech', icon: 'pipe', label: 'Crear Mecánica', title: 'Crear componente de Mecánica: elige un ePoint o una cara y después tubo, brida, codo, te, reducción ASME/EN o tornillería' },
+            ]} />
             <Big icon="part" label="Editar" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem && s.docs.find((d) => d.id === o.part)?.kind === 'part')} onClick={() => A.editInPlace(s.selItem!)} title="Editar la pieza seleccionada en contexto (doble clic sobre el componente)" />
             <Col>
               <Small icon="pattern_comp" label="Patrón" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={() => s.open({ kind: 'cpattern' })} title="Patrón rectangular o circular del componente seleccionado" />

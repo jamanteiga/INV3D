@@ -793,3 +793,9 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .free-ring i { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; }
 .free-ring .h-t { left: calc(50% - 7px); top: -7px; } .free-ring .h-b { left: calc(50% - 7px); bottom: -7px; }
 .free-ring .h-l { top: calc(50% - 7px); left: -7px; } .free-ring .h-r { top: calc(50% - 7px); right: -7px; }
+.cc-tabs { display: flex; gap: 6px; margin: 8px 0 4px; }
+.cc-tabs button { flex: 1; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; text-align: left; padding: 8px 10px; border: 2px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--fg); cursor: pointer; font-weight: 600; }
+.cc-tabs button svg { grid-row: span 2; }
+.cc-tabs button span { font-weight: 400; font-size: 11px; color: var(--fg-2); }
+.cc-tabs button.on.hvac { border-color: #1f8fb3; background: rgba(31,143,179,.10); }
+.cc-tabs button.on.mech { border-color: #c2711b; background: rgba(194,113,27,.10); }

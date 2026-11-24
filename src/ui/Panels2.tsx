@@ -1,6 +1,7 @@
 // Diálogos de Anotar, Inspeccionar, Herramientas, Administrar y Entornos (pieza).
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../core/store';
+import { Icon } from './icons';
 import { Modal, Row, Seg, Expr } from './Panels';
 import { uid, newDoc, MATERIALS, docParams, planeFrame, resolveWorkPlanes, entityOutline, type V3, type PartDoc, type Feature, type SketchF } from '../core/doc';
 import { makeEval } from '../core/expr';
@@ -725,39 +726,65 @@ export function SaveNewPartDialog({ part, occ, onClose }: { part: string; occ: s
 }
 
 /** Crear componente: centro de contenido HVAC / Mecánica (o pieza modelada) para la geometría elegida */
+/** Familia de una pieza por su origen: HVAC (conductos, espirotubo) o Mecánica (tubería, tornillería, centro de contenido) */
+function catOfPart(d: PartDoc | null): 'hvac' | 'mech' | null {
+  const des = d?.iProperties?.designer ?? '';
+  if (/HVAC|Espirotubo/.test(des)) return 'hvac';
+  if (/Tubería|Centro de contenido/.test(des)) return 'mech';
+  return null;
+}
+const CAT_LS = 'inv3d.createCat';
+
+/** Crear componente: centro de contenido HVAC o Mecánica (o pieza modelada) para la geometría elegida */
 export function CreateCompDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const T = s.createTarget;
-  const go = (d: Parameters<ReturnType<typeof useStore.getState>['open']>[0]) => s.open(d);
+  const auto = (() => { if (!T) return null; const o = s.asm.occurrences.find((x) => x.id === T.occ); return o ? catOfPart(s.docData(o.part) as PartDoc | null) : null; })();
+  const last = (() => { try { return localStorage.getItem(CAT_LS) as 'hvac' | 'mech' | null; } catch { return null; } })();
+  const [cat, setCat0] = useState<'hvac' | 'mech'>(s.createCat ?? auto ?? last ?? 'hvac');
+  const setCat = (c: 'hvac' | 'mech') => { setCat0(c); try { localStorage.setItem(CAT_LS, c); } catch { /* */ } };
+  const go = (d: Parameters<ReturnType<typeof useStore.getState>['open']>[0]) => { try { localStorage.setItem(CAT_LS, cat); } catch { /* */ } s.open(d); };
   const B = ({ l, d }: { l: string; d: Parameters<ReturnType<typeof useStore.getState>['open']>[0] }) => <button className="btn" onClick={() => go(d)}>{l}</button>;
   const H = (hk: string) => ({ kind: 'hvac', hk }) as never;
   const P = (pk: string, norm: string) => ({ kind: 'piping', pk, norm }) as never;
-  const cancel = () => { useStore.setState({ createTarget: null }); onClose(); };
+  const cancel = () => { useStore.setState({ createTarget: null, createCat: null }); onClose(); };
   return (
-    <Modal title="Crear componente" onClose={cancel} wide>
+    <Modal title={`Crear componente · ${cat === 'hvac' ? 'HVAC' : 'Mecánica'}`} onClose={cancel} wide>
       <div className="pick-info">{T ? <>Se restringirá a: <b>{T.label}</b> {T.ep ? '(ePoint)' : ''}</> : <>Sin geometría de referencia: se colocará con el ratón.</>}
-        {' '}<button className="btn sm" onClick={() => { onClose(); useStore.setState({ createTarget: null }); void import('./actions').then((m) => m.asmActions.createComponent()); }}>Cambiar</button></div>
-      <div className="plabel">HVAC</div>
-      <div className="cc-grid">
-        {([['Conducto', 'duct'], ['Codo', 'elbow'], ['Transición', 'transition'], ['Derivación', 'branch'], ['Manguito', 'coupling'], ['Tapa', 'cap'], ['Plenum', 'plenum'], ['Compuerta', 'damper'], ['Cortafuegos', 'firedamper'], ['Silenciador', 'silencer'], ['Flexible', 'flex'], ['Rejilla', 'grille'], ['Difusor', 'diffuser'], ['Brida / marco', 'flange'], ['Soporte', 'support'], ['UTA', 'ahu'], ['Fancoil', 'fancoil']] as const).map(([l, k]) => <B key={k} l={l} d={H(k)} />)}
+        {' '}<button className="btn sm" onClick={() => { onClose(); useStore.setState({ createTarget: null }); void import('./actions').then((m) => m.asmActions.createComponent(cat)); }}>Cambiar</button></div>
+      <div className="cc-tabs">
+        <button className={cat === 'hvac' ? 'on hvac' : 'hvac'} onClick={() => setCat('hvac')}><Icon name="hduct" size={18} />HVAC<span>conductos, accesorios, terminales, espirotubo</span></button>
+        <button className={cat === 'mech' ? 'on mech' : 'mech'} onClick={() => setCat('mech')}><Icon name="pipe" size={18} />Mecánica<span>tubería ASME / EN, bridas, tornillería</span></button>
       </div>
-      <div className="plabel">HVAC · Espirotubo</div>
-      <div className="cc-grid">
-        {([['Espirotubo', 'tube'], ['Codo 15-90°', 'elbow'], ['Te / injerto', 'tee'], ['Reducción', 'reducer']] as const).map(([l, k]) => <B key={k} l={l} d={{ kind: 'spiro', sk: k } as never} />)}
-      </div>
-      {(['ASME', 'EN'] as const).map((n) => (<div key={n}>
-        <div className="plabel">Mecánica · Tubería {n}</div>
+      {auto && auto !== cat && <p className="phelp">La pieza de referencia es de {auto === 'hvac' ? 'HVAC' : 'Mecánica'}.</p>}
+      {cat === 'hvac' ? (<>
+        <div className="plabel">Conductos y accesorios</div>
         <div className="cc-grid">
-          {([['Tubo', 'pipe'], ['Brida', 'flange'], ['Codo', 'elbow'], ['Te', 'tee'], ['Te reducida', 'rtee'], ['Cruz', 'cross'], ['Reducción', 'reducer'], ['Casquete', 'cap'], ['Manguito', 'coupling'], ['Portabridas', 'stub']] as const).map(([l, k]) => <B key={k} l={l} d={P(k, n)} />)}
-        </div></div>))}
-      <div className="plabel">Mecánica · Tornillería</div>
-      <div className="cc-grid">
-        <B l="Tornillo EN" d={{ kind: 'contentf', fam: 'iso4014' } as never} />
-        <B l="Espárrago EN" d={{ kind: 'contentf', fam: 'enstud' } as never} />
-        <B l="Tuerca / arandela EN" d={{ kind: 'contentf', fam: 'iso4032' } as never} />
-      </div>
+          {([['Conducto', 'duct'], ['Codo', 'elbow'], ['Transición', 'transition'], ['Derivación', 'branch'], ['Manguito', 'coupling'], ['Tapa', 'cap'], ['Plenum', 'plenum'], ['Brida / marco', 'flange'], ['Soporte', 'support']] as const).map(([l, k]) => <B key={k} l={l} d={H(k)} />)}
+        </div>
+        <div className="plabel">Regulación, terminales y equipos</div>
+        <div className="cc-grid">
+          {([['Compuerta', 'damper'], ['Cortafuegos', 'firedamper'], ['Silenciador', 'silencer'], ['Flexible', 'flex'], ['Rejilla', 'grille'], ['Difusor', 'diffuser'], ['UTA', 'ahu'], ['Fancoil', 'fancoil']] as const).map(([l, k]) => <B key={k} l={l} d={H(k)} />)}
+        </div>
+        <div className="plabel">Espirotubo</div>
+        <div className="cc-grid">
+          {([['Espirotubo', 'tube'], ['Codo 15-90°', 'elbow'], ['Te / injerto', 'tee'], ['Reducción', 'reducer']] as const).map(([l, k]) => <B key={k} l={l} d={{ kind: 'spiro', sk: k } as never} />)}
+        </div>
+      </>) : (<>
+        {(['ASME', 'EN'] as const).map((n) => (<div key={n}>
+          <div className="plabel">Tubería {n === 'ASME' ? 'ASME (B16.5, B16.9, B16.11)' : 'EN (EN 1092-1, EN 10253)'}</div>
+          <div className="cc-grid">
+            {([['Tubo', 'pipe'], ['Brida', 'flange'], ['Codo', 'elbow'], ['Te', 'tee'], ['Te reducida', 'rtee'], ['Cruz', 'cross'], ['Reducción', 'reducer'], ['Casquete', 'cap'], ['Manguito', 'coupling'], ['Portabridas', 'stub']] as const).map(([l, k]) => <B key={k} l={l} d={P(k, n)} />)}
+          </div></div>))}
+        <div className="plabel">Tornillería</div>
+        <div className="cc-grid">
+          <B l="Tornillo EN" d={{ kind: 'contentf', fam: 'iso4014' } as never} />
+          <B l="Espárrago EN" d={{ kind: 'contentf', fam: 'enstud' } as never} />
+          <B l="Tuerca / arandela EN" d={{ kind: 'contentf', fam: 'iso4032' } as never} />
+        </div>
+      </>)}
       <div className="modal-btns">
-        <button className="btn" onClick={() => { useStore.setState({ createTarget: null }); onClose(); void import('./actions').then((m) => m.asmActions.createPart()); }}>Modelar pieza nueva en contexto</button>
+        <button className="btn" onClick={() => { useStore.setState({ createTarget: null, createCat: null }); onClose(); void import('./actions').then((m) => m.asmActions.createPart()); }}>Modelar pieza nueva en contexto</button>
         <span className="grow" /><button className="btn" onClick={cancel}>Cancelar</button>
       </div>
     </Modal>

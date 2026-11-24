@@ -333,13 +333,14 @@ export const asmActions = {
   /** Colocar: el primer componente queda fijo en el origen; después cada copia sigue al cursor y se suelta con un clic.
    *  Esc o clic derecho terminan. X/Y/Z giran 90° la copia pendiente. */
   /** Crear componente: 1) geometría de un componente (ePoint o cara), 2) centro de contenido HVAC / Mecánica o pieza modelada, 3) restricción automática */
-  createComponent: () => {
+  createComponent: (cat: 'hvac' | 'mech' | null = null) => {
     const s = S(); if (s.kind !== 'assembly') return;
+    useStore.setState({ createCat: cat });
     if (s.placing) s.setTool(null);
     useStore.setState({ createTarget: null });
     if (!s.asm.occurrences.some((o) => !o.suppressed)) { s.open({ kind: 'createcomp' }); return; }
     s.setTool('asmCreatePick');
-    s.notify('Crear componente: elige la geometría de un componente donde irá la pieza (ePoint o cara) · Esc: sin referencia');
+    s.notify(`Crear componente${cat === 'hvac' ? ' HVAC' : cat === 'mech' ? ' de Mecánica' : ''}: elige la geometría de un componente donde irá la pieza (ePoint o cara) · Esc: sin referencia`);
   },
   /** Coloca la pieza del centro de contenido restringida a la geometría elegida en «Crear componente» */
   placeAtTarget: (partId: string, extras: string[] = []): boolean => {
