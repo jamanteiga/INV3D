@@ -98,6 +98,8 @@ export default function AsmViewport() {
     const measureGroup = new THREE.Group(); scene.add(measureGroup);
     const refGroup = new THREE.Group(); scene.add(refGroup);
     let refHover: THREE.Object3D | null = null;
+    /** giros temporales (pieza restringida o fija) por componente de primer nivel */
+    const tempRot = new Map<string, THREE.Matrix4>();
     /** Planos y ejes de origen del ensamblaje (al restringir) y planos de trabajo: visibles y seleccionables */
     const buildRefs = (s: State) => {
       V.clearGroup(refGroup); refHover = null;
@@ -133,7 +135,9 @@ export default function AsmViewport() {
         const X = occX(o.id); if (!X) continue;
         for (const e of partEPoints(pd)) {
           if (e.inactive || e.hidden || e.kind === 'composite') continue;
-          const pW = xfPoint(X, e.point), dW = rotD(X, e.dir);
+          let pW = xfPoint(X, e.point), dW = rotD(X, e.dir);
+          const tr = tempRot.get(findOcc(s, o.id)?.sub ?? o.id);
+          if (tr) { pW = vArr(new THREE.Vector3(...pW).applyMatrix4(tr), 4); dW = vArr(new THREE.Vector3(...dW).transformDirection(tr), 6); }
           const col = s.epConnect?.occ === o.id && s.epConnect.ep === e.id ? '#e03131' : e.isDefault ? '#f08c00' : e.kind === 'insert' ? '#1673d0' : '#2f9a4c';
           const r = size * 0.011;
           const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.95 }));
@@ -293,7 +297,6 @@ export default function AsmViewport() {
     const explodeOf = (s: State, id: string): V3 => v3.mul(s.asm.explode[(findOcc(s, id)?.sub ?? id)] ?? [0, 0, 0], s.mode === 'present' ? s.explodeT : 0);
 
     /** Giros temporales de «Rotar» (matriz en mundo que se antepone a la posición resuelta) */
-    const tempRot = new Map<string, THREE.Matrix4>();
     const build = (s: State) => {
       V.clearGroup(modelGroup);
       pickables = [];
@@ -482,7 +485,7 @@ export default function AsmViewport() {
     let downAt: { x: number; y: number; button: number } | null = null;
     const cvs = V.renderer.domElement;
     // Rotar: giro libre de una sola pieza alrededor de su centro (trackball con el ratón)
-    let rot: { top: string; c: THREE.Vector3; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; R0: THREE.Matrix4; x: number; y: number; R: THREE.Matrix4; moved: boolean; roll?: { cx: number; cy: number } } | null = null;
+    let rot: { top: string; c: THREE.Vector3; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; R0: THREE.Matrix4; x: number; y: number; R: THREE.Matrix4; moved: boolean; roll?: { cx: number; cy: number }; marks?: { o: THREE.Object3D; p: THREE.Vector3; q: THREE.Quaternion }[] } | null = null;
     host.current!.addEventListener('pointerdown', (ev) => {
       const s = useStore.getState();
       if (!s.asmRotate || ev.button !== 0 || (s.tool && s.tool !== 'move') || s.mode === 'present') return;
@@ -525,6 +528,7 @@ export default function AsmViewport() {
     const stopFreeRot = () => {
       if (rot) { for (const { g, m } of rot.grps) { g.matrix.copy(m); g.matrixWorldNeedsUpdate = true; } rot = null; }
       if (free) { cancelAnimationFrame(free.raf); free.ring.remove(); free = null; }
+      buildRefs(useStore.getState());
       V.controls.enabled = true; cvs.style.cursor = useStore.getState().asmRotate ? 'grab' : 'default'; V.request();
     };
     let freeRotEnded = false;
@@ -560,11 +564,16 @@ export default function AsmViewport() {
       }
       rot.R = new THREE.Matrix4().makeTranslation(rot.c.x, rot.c.y, rot.c.z).multiply(new THREE.Matrix4().makeRotationFromQuaternion(q)).multiply(new THREE.Matrix4().makeTranslation(-rot.c.x, -rot.c.y, -rot.c.z));
       for (const { g, m } of rot.grps) { g.matrix.copy(m).premultiply(rot.R); g.matrixWorldNeedsUpdate = true; }
+      // los ePoints de la pieza acompañan al giro
+      if (!rot.marks) { const st = useStore.getState(); rot.marks = refGroup.children.filter((o) => o.userData.ep && topOf(st, o.userData.ep.occ) === rot!.top).map((o) => ({ o, p: o.position.clone(), q: o.quaternion.clone() })); }
+      const qR = new THREE.Quaternion().setFromRotationMatrix(rot.R);
+      for (const { o, p, q } of rot.marks) { o.position.copy(p).applyMatrix4(rot.R); o.quaternion.copy(qR).multiply(q); }
       V.request();
     });
     /** Fin del giro: persistente si la pieza está libre (sin restricciones ni fija), temporal si no */
     const endRot = (): boolean => {
       const r = rot; rot = null; if (!r) return false;
+      queueMicrotask(() => { buildRefs(useStore.getState()); V.request(); });
       V.controls.enabled = true; cvs.style.cursor = 'grab';
       if (!r.moved) return false;
       const s = useStore.getState();
@@ -921,7 +930,7 @@ export default function AsmViewport() {
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); if (p.tool === 'measure') measureReset(); drawMeasure(); }
       if (s.view !== p.view) V.setView(s.view.name);
       if (s.freeRot !== p.freeRot) { stopFreeRot(); if (s.freeRot) startFreeRot(s, s.freeRot); }
-      if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
+      if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; buildRefs(s); } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
     });
     V.setView('home');
     return () => { unsub(); unsubM(); tc.dispose(); V.dispose(); };

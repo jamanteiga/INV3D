@@ -29,6 +29,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
 
+**Novedades 0.38.3**
+- Giro libre (G) y Rotar: los **ePoints** de la pieza acompañan al giro mientras se arrastra y quedan en su sitio al soltar (también en piezas restringidas, donde el giro es temporal).
+
 **Novedades 0.38.2**
 - **Giro libre (G)** rehecho como Inventor: al pulsar G aparece un **círculo de giro** alrededor del componente seleccionado. **Arrastrar dentro** del círculo gira libremente; **arrastrar fuera** gira en el plano de la vista. Se puede arrastrar varias veces; el ratón sin pulsar ya no gira la pieza. **Esc** o **clic derecho** terminan; el botón central sigue orbitando la vista. Corregido el eje vertical del giro (antes giraba sobre el eje de la vista y parecía desplazarse).
 
