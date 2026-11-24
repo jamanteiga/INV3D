@@ -4,6 +4,7 @@ import ClipBar from './ClipBar';
 import MeasurePanel from './MeasurePanel';
 import { useMeasure, measureOverlay, measureCompute, measureAdd, measureReset, edgeEnt, faceEnt, vertexEnt, nearestVertex, type MEnt } from './measure';
 import { insertPoint, partEPoints, activeEPoints, epRef, epJoint, type EPoint } from '../core/epoints';
+import { setJointEPoint } from './jointep';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -705,6 +706,11 @@ export default function AsmViewport() {
           : `${holes.length} taladro(s) Ø${Math.round(2 * r * 10) / 10} · espesor a abarcar ${holes[0].grip} mm${size ? ` · ${size}` : ''}`);
         return;
       }
+      if (s.tool === 'asmFace' && dlg?.kind === 'joint' && d?.epMode) {
+        const r = refAt(ev); const ep = r?.object.userData.ep as { occ: string; id: string } | undefined;
+        if (ep) setJointEPoint(ep.occ, ep.id); else s.notify('Haz clic en un ePoint (o elígelo en la lista del diálogo)', 'error');
+        return;
+      }
       if (s.tool === 'asmFace' || s.tool === 'weldFace' || s.tool === 'boltFace') {
         const hit = hitAt(ev); if (!hit) return;
         const f = faceFromHit(hit);
@@ -852,7 +858,7 @@ export default function AsmViewport() {
   const hints: Record<string, string> = {
     frameLine: 'Selecciona líneas de esqueleto o de boceto · clic de nuevo para quitar',
     skelPoint: step === 0 ? 'Punto inicial: vértice, extremo de línea o punto de una cara' : 'Punto final',
-    asmFace: dialog?.kind === 'asmwp' ? 'Cara plana o plano de base para el plano de trabajo' : step === 0 ? 'Primera geometría: cara, eje o plano de origen' : step === 1 ? 'Segunda geometría (se moverá el componente libre)' : 'Plano de simetría',
+    asmFace: dialog?.kind === 'asmwp' ? 'Cara plana o plano de base para el plano de trabajo' : (dialog as { draft?: { epMode?: boolean } } | null)?.draft?.epMode ? (step === 0 ? 'Primer ePoint: clic en un ePoint de un componente' : 'Segundo ePoint: clic en un ePoint de otro componente') : step === 0 ? 'Primera geometría: cara, eje o plano de origen' : step === 1 ? 'Segunda geometría (se moverá el componente libre)' : 'Plano de simetría',
     weldFace: step === 0 ? 'Primera cara a soldar' : 'Segunda cara a soldar',
     boltFace: 'Cara de inicio: donde apoya la cabeza del tornillo',
     fastHole: 'Clic en la pared de un taladro, cerca del lado de la cabeza o de la primera tuerca',

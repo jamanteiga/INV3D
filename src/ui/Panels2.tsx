@@ -692,3 +692,34 @@ export function ShareDialog({ onClose }: { onClose: () => void }) {
     </Modal>
   );
 }
+
+/** Pieza creada en contexto: al volver al ensamblaje se pide nombre y guardarla; después se restringe donde interese */
+export function SaveNewPartDialog({ part, occ, onClose }: { part: string; occ: string; onClose: () => void }) {
+  const s = useStore();
+  const e = s.docs.find((d) => d.id === part);
+  const [name, setName] = useState((e?.fileName ?? 'Pieza.i3p').replace(/\.[^.]+$/, ''));
+  if (!e) return null;
+  const rename = () => {
+    const base = name.trim().replace(/[\\/:*?"<>|]/g, '_') || 'Pieza';
+    const fn = `${base}.i3p`;
+    const st = useStore.getState();
+    useStore.setState({ docs: st.docs.map((d) => (d.id === part ? { ...d, fileName: fn, data: { ...(d.data as PartDoc), iProperties: { ...(d.data as PartDoc).iProperties, partNumber: base } } } : d)) });
+    st.commitAsm((a) => { let k = 1; for (const o of a.occurrences.filter((x) => x.part === part)) { while (a.occurrences.some((x) => x !== o && x.name === `${base}:${k}`)) k++; o.name = `${base}:${k++}`; } });
+    return fn;
+  };
+  const save = async () => {
+    const fn = rename(); onClose();
+    const { saveDocById } = await import('../core/files');
+    const ok = await saveDocById(part, { as: true });
+    S().notify(ok ? `${fn} guardada · ahora restríngela: Ensamblar › Restringir (J) o clic derecho sobre una cara` : `${fn} sin guardar (queda en memoria; Archivo › Guardar al abrirla)`, ok ? 'info' : 'error');
+    useStore.setState({ selItem: occ });
+  };
+  const later = () => { rename(); onClose(); useStore.setState({ selItem: occ }); S().notify('Pieza en memoria sin guardar: se guarda con el ensamblaje o al abrirla (Archivo › Guardar)'); };
+  return (
+    <Modal title="Guardar pieza nueva" onClose={later}>
+      <p className="phelp">La pieza creada en el ensamblaje está libre (sin fijar) para restringirla donde interese.</p>
+      <Row label="Nombre"><input autoFocus value={name} onChange={(ev) => setName(ev.target.value)} onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Enter') void save(); }} /></Row>
+      <div className="modal-btns"><span className="grow" /><button className="btn" onClick={later}>Más tarde</button><button className="btn primary" onClick={() => void save()}>Guardar…</button></div>
+    </Modal>
+  );
+}

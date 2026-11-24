@@ -276,6 +276,7 @@ export const asmActions = {
     s.commitAsm((a) => { a.occurrences.push({ id: oid, name: `Pieza${n}:1`, part: pid, xf: { ...IDENTITY }, grounded: true }); });
     void asmId;
     asmActions.editInPlace(oid);
+    const c = S().ctxEdit; if (c) useStore.setState({ ctxEdit: { ...c, isNew: true } });
     S().setTool('pickPlane');
     S().notify('Pieza nueva en contexto: elige una cara de otro componente o un plano para el primer boceto · «Volver» para regresar al ensamblaje');
   },
@@ -301,9 +302,21 @@ export const asmActions = {
   returnToAsm: () => {
     const s = S(); const c = s.ctxEdit; if (!c) return;
     if (s.mode === 'sketch') s.finishSketch();
+    const solid = !!S().result?.props?.volume;
     useStore.setState({ ctxEdit: null });
     s.activate(c.asm);
     S().hideDocument(c.part);
+    if (!c.isNew) return;
+    if (!solid) {
+      // pieza nueva sin sólido: se descarta
+      S().commitAsm((a) => { a.occurrences = a.occurrences.filter((o) => o.id !== c.occ); });
+      S().closeDocument(c.part);
+      S().notify('Pieza nueva sin sólido: se ha descartado');
+      return;
+    }
+    // libre para poder restringirla donde interese; se pide guardarla
+    S().commitAsm((a) => { const o = a.occurrences.find((x) => x.id === c.occ); if (o) o.grounded = false; });
+    useStore.setState({ dialog: { kind: 'savenewpart', part: c.part, occ: c.occ } });
   },
   placePart: (partId: string) => {
     const s = S();

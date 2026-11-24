@@ -3,7 +3,8 @@ import * as PX from './Panels2';
 import TbTplDialog, { SheetTplDialog } from './TbDialog';
 import OccPropsDialog from './OccPropsDialog';
 import EPointPanel from './EPointPanel';
-import { partEPoints, EP_KIND_NAMES } from '../core/epoints';
+import { partEPoints, EP_KIND_NAMES, epJoint } from '../core/epoints';
+import { occEPoints, setJointEPoint } from './jointep';
 import DrwViewPropsDialog from './DrwViewDialog';
 import { tbTemplate, TB_FIELDS, type SheetSize } from '../core/drawing';
 import { GenDialog } from './MachineDialog';
@@ -936,6 +937,18 @@ function JointDialog() {
   };
   const applyJoint = () => {
     if (j.a.occ === j.b.occ) { s.notify('Elige geometría de dos componentes distintos', 'error'); return false; }
+    if (j.epMode) {
+      const fx = (id: string) => !!s.asm.occurrences.find((o) => o.id === id)?.grounded;
+      if (fx(j.a.occ) && fx(j.b.occ)) { s.notify('Los dos componentes están fijos: libera uno para que pueda moverse', 'error'); return false; }
+      const ea = occEPoints(j.a.occ).find((e) => e.id === j.aEp), eb = occEPoints(j.b.occ).find((e) => e.id === j.bEp);
+      if (!ea || !eb) { s.notify('ePoint no encontrado', 'error'); return false; }
+      let joint!: Joint;
+      s.commitAsm((a) => { joint = epJoint(a, j.a.occ, ea, j.b.occ, eb, (p0) => uid(p0)); if (j.offset && j.offset !== '0' && j.offset !== '0 mm') joint.offset = j.offset; a.joints.push(joint); });
+      const ev0 = (x: string) => { try { return makeEval([])(x); } catch { return NaN; } };
+      const err = solveAssembly(normalizeAsm(useStore.getState().asm, docGetter(useStore.getState()), ev0), ev0).errors[joint.id];
+      if (err) s.notify(`${joint.name}: ${err}`, 'error'); else s.notify(`${joint.name} (${JOINT_NAMES[joint.type]}) aplicada`);
+      return true;
+    }
     if (j.type === 'insert' && (j.a.kind !== 'axis' || j.b.kind !== 'axis')) { s.notify('Insertar necesita dos caras cilíndricas (eje del tornillo y del taladro)', 'error'); return false; }
     if (j.type === 'tangent' && j.a.kind !== 'axis' && j.b.kind !== 'axis') { s.notify('Tangente necesita al menos una cara cilíndrica', 'error'); return false; }
     if (j.type === 'flush' && (j.a.kind === 'axis' || j.b.kind === 'axis')) { s.notify('Al ras se aplica a caras planas', 'error'); return false; }
@@ -956,22 +969,35 @@ function JointDialog() {
       <Head icon="constraint3d" name={j.name} onName={(v) => s.updateDraft({ name: v })} />
       <div className="jt-grid">
         {([['mate', 'Coincidir', 'constraint3d'], ['flush', 'Al ras', 'joint'], ['angle', 'Ángulo', 'angle3d'], ['perp', 'Perpendicular', 'c_perpendicular'], ['tangent', 'Tangente', 'c_tangent'], ['insert', 'Insertar', 'insert3d'], ['sym', 'Simetría', 'mirror'], ['rigid', 'Rígida', 'ground']] as const).map(([t, l, ic]) => (
-          <button key={t} className={`jt ${j.type === t ? 'on' : ''}`} onClick={() => s.updateDraft({ type: t })}><Icon name={ic} size={20} />{l}</button>
+          <button key={t} className={`jt ${j.type === t && !j.epMode ? 'on' : ''}`} onClick={() => (j.epMode ? useStore.setState({ dialog: { ...d, draft: { ...j, epMode: false, type: t, a: undefined, b: undefined, aL: undefined, bL: undefined }, step: 0 } as never }) : s.updateDraft({ type: t }))}><Icon name={ic} size={20} />{l}</button>
         ))}
+      </div>
+      <div className="plabel">ePoints</div>
+      <div className="jt-grid">
+        <button className={`jt ${j.epMode ? 'on' : ''}`} title="Une un ePoint de un componente con un ePoint de otro (coincidir o insertar según su tipo)" onClick={() => useStore.setState({ dialog: { ...d, draft: { ...j, epMode: true, a: undefined, b: undefined, aL: undefined, bL: undefined, aW: undefined, bW: undefined, type: 'mate' }, step: 0 } as never })}><Icon name="epoint" size={20} />ePoint – ePoint</button>
       </div>
       <div className="plabel">Uniones (origen + eje)</div>
       <div className="jt-grid">
         {([['rot', 'Rotación', 'rotate2d'], ['slider', 'Corredera', 'move'], ['cyl', 'Cilíndrica', 'insert3d'], ['planar', 'Planar', 'smface'], ['ball', 'Bola', 'circle']] as const).map(([t, l, ic]) => (
-          <button key={t} className={`jt ${j.type === t ? 'on' : ''}`} onClick={() => s.updateDraft({ type: t })}><Icon name={ic} size={20} />{l}</button>
+          <button key={t} className={`jt ${j.type === t && !j.epMode ? 'on' : ''}`} onClick={() => (j.epMode ? useStore.setState({ dialog: { ...d, draft: { ...j, epMode: false, type: t, a: undefined, b: undefined, aL: undefined, bL: undefined }, step: 0 } as never }) : s.updateDraft({ type: t }))}><Icon name={ic} size={20} />{l}</button>
         ))}
       </div>
       {JOINT_DOF[j.type as keyof typeof JOINT_DOF] && <div className="pick-info">Movimiento libre: <b>{JOINT_DOF[j.type as keyof typeof JOINT_DOF]}</b></div>}
       <Steps current={d.step ?? 0} items={[
-        [`1: ${j.a ? lab(j.a, j.aL) : 'cara, eje o plano'}`, !!j.a],
-        [`2: ${j.b ? lab(j.b, j.bL) : 'cara, eje o plano'}`, !!j.b],
+        [`1: ${j.a ? lab(j.a, j.aL) : j.epMode ? 'ePoint de un componente' : 'cara, eje o plano'}`, !!j.a],
+        [`2: ${j.b ? lab(j.b, j.bL) : j.epMode ? 'ePoint de otro componente' : 'cara, eje o plano'}`, !!j.b],
         ...(j.type === 'sym' ? [[`Plano de simetría: ${j.c ? lab(j.c, j.cL) : 'elegir'}`, !!j.c] as [string, boolean]] : []),
       ]} />
-      <div className="ref-row"><RefSel slot={(d.step ?? 0) === 0 ? 'a' : (d.step ?? 0) === 1 ? 'b' : 'c'} planesOnly={(d.step ?? 0) === 2} /></div>
+      {j.epMode ? (<>
+        {(['a', 'b'] as const).map((sl, i) => (
+          <Row key={sl} label={`ePoint ${i + 1}`}>
+            <select value={j[sl] ? `${j[sl].occ}|${j[`${sl}Ep`]}` : ''} onChange={(e) => { const [o, id] = e.target.value.split('|'); if (o) setJointEPoint(o, id, sl); }}>
+              <option value="">elegir…</option>
+              {s.asm.occurrences.filter((o) => !o.suppressed && o.id !== j[sl === 'a' ? 'b' : 'a']?.occ).map((o) => { const eps = occEPoints(o.id); return eps.length ? (
+                <optgroup key={o.id} label={o.name + (o.grounded ? ' (fijo)' : '')}>{eps.map((e) => <option key={e.id} value={`${o.id}|${e.id}`}>{e.name} · {EP_KIND_NAMES[e.kind]}{e.isDefault ? ' (inserción)' : ''}</option>)}</optgroup>) : null; })}
+            </select>
+          </Row>))}
+      </>) : <div className="ref-row"><RefSel slot={(d.step ?? 0) === 0 ? 'a' : (d.step ?? 0) === 1 ? 'b' : 'c'} planesOnly={(d.step ?? 0) === 2} /></div>}
       {j.type !== 'angle' && j.type !== 'perp' && j.type !== 'sym' && j.type !== 'rot' && j.type !== 'ball' && j.type !== 'cyl' && <Row label="Desfase"><Expr value={j.offset} onCommit={(v) => s.updateDraft({ offset: v })} /></Row>}
       {(j.type === 'rot' || j.type === 'slider') && (<>
         <label className="check"><input type="checkbox" checked={!!j.lock} onChange={(e) => s.updateDraft({ lock: e.target.checked })} />Bloquear {j.type === 'rot' ? 'ángulo' : 'posición'}</label>
@@ -984,7 +1010,7 @@ function JointDialog() {
       </>)}
       {j.type === 'angle' && <Row label="Ángulo"><Expr value={j.angle} unit="deg" onCommit={(v) => s.updateDraft({ angle: v })} /></Row>}
       {j.type === 'insert' && <Row label="Solución"><Seg value={j.aligned ? 'al' : 'op'} onChange={(v) => s.updateDraft({ aligned: v === 'al' })} options={[['al', 'Alineada'], ['op', 'Opuesta']]} /></Row>}
-      <p className="phelp">{help[j.type]}</p>
+      <p className="phelp">{j.epMode ? 'ePoint – ePoint: elige un ePoint de cada pieza (en las listas o clic en los ePoints del visor). Dos de inserción se insertan (ejes alineados y bocas coincidentes); en otro caso coinciden punto y dirección. Se mueve el componente libre.' : help[j.type]}</p>
       {ok && <p className="phelp">Vista previa en el visor. <b>Aplicar</b> crea la restricción y deja el comando abierto para la siguiente.</p>}
       <Btns okDisabled={!ok} onOk={() => { if (applyJoint()) s.closeDialog(); }} onPlus={ok ? () => { if (applyJoint()) { const n = useStore.getState().asm.joints.length + 1; useStore.setState({ dialog: { ...d, draft: { ...j, id: uid('j'), name: `Unión${n}`, a: undefined, b: undefined, c: undefined, aW: undefined, bW: undefined, aL: undefined, bL: undefined, cL: undefined }, step: 0 }, tool: 'asmFace' }); } } : undefined} onCancel={s.closeDialog} />
     </div>
@@ -3268,6 +3294,7 @@ export function Modals() {
     case 'simplify': return <SimplifyDialog onClose={close} />;
     case 'pmi': return <PX.PmiDialog key={(d as { editId?: string }).editId ?? (d as { pmiKind: string }).pmiKind} kind={(d as unknown as { pmiKind: never }).pmiKind} editId={(d as { editId?: string }).editId} onClose={close} />;
     case 'drf': return <PX.DrfDialog onClose={close} />;
+    case 'savenewpart': return <PX.SaveNewPartDialog part={(d as { part: string }).part} occ={(d as { occ: string }).occ} onClose={close} />;
     case 'promote': return <PX.PromoteDialog onClose={close} />;
     case 'toladvisor': return <PX.TolAdvisorDialog onClose={close} />;
     case 'tolstack': return <PX.TolStackDialog onClose={close} />;

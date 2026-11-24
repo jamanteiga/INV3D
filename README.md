@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.34
+## Versión 0.35
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.35**
+- **Crear pieza en el ensamblaje** (Ensamblar › Crear): la pieza se modela dentro del ensamblaje viendo el resto de componentes. Al pulsar *Volver al ensamblaje* pide **nombre y guardarla** (*Guardar…* o *Más tarde*) y queda **libre** (sin fijar) para restringirla donde interese. Si no tiene sólido se descarta.
+- **Restricción ePoint – ePoint** (Ensamblar › Restringir, grupo *ePoints*): un ePoint de cada pieza, elegido en las listas (agrupadas por componente) o con clic en los ePoints del visor. Dos de inserción se insertan (ejes alineados y bocas coincidentes); en otro caso coinciden punto y dirección. Vista previa, desfase y se mueve el componente libre.
 
 **Novedades 0.34.3**
 - **Conducto rectangular**: la cuarta esquina cierra **arista contra arista**. Las dos paredes terminan en la esquina interior y ninguna solapa a la otra; la esquina exterior queda abierta, como en la chapa real antes de sellar. Los conductos ya creados se actualizan al abrirlos o al restaurar la sesión.

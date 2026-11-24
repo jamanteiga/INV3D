@@ -100,6 +100,7 @@ export type Dialog =
   | { kind: 'fem'; shape?: boolean }
   | { kind: 'pmi'; pmiKind: import('./pmi').PmiKind; editId?: string }
   | { kind: 'tolstack' | 'toladvisor' | 'promote' | 'drf' | 'analysis' | 'region' | 'limits' | 'material' | 'appearance' | 'docset' | 'news' | 'links' | 'addins' | 'macros' | 'find' | 'purge' | 'insertobj' | 'exportobj' | 'structshape' | 'cloud' | 'rules' | 'publish' | 'studio' | 'mold' | 'bim' | 'print3d' | 'share' }
+  | { kind: 'savenewpart'; part: string; occ: string }
   | { kind: 'contentf'; fam: string }
   | { kind: 'fastener'; fx: Record<string, unknown> }
   | { kind: 'projto'; mode: 'face' | 'surf' }
@@ -173,7 +174,7 @@ export interface State {
   epEdges: number[];
   /** Detección de colisiones al mover componentes */
   collide: boolean;
-  ctxEdit: { asm: string; occ: string; part: string; asmName: string; mesh: MeshData | null } | null;
+  ctxEdit: { asm: string; occ: string; part: string; asmName: string; mesh: MeshData | null; isNew?: boolean } | null;
   placing: { part: string; occ: string; quat: [number, number, number, number]; extras?: string[] } | null;
   /** Ensamblaje: componentes con su origen (planos y ejes de la pieza) visible */
   asmOrigins: string[];
