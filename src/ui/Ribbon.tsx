@@ -6,6 +6,7 @@ import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { toggleClipTool } from './ClipBar';
 import { useMeasure, type MMode, type MDist } from './measure';
 import { rebuildAll } from '../core/store';
+import { TabCtx, useRibbonReg, ribbonCtl } from './toolbars';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS, nextName } from '../core/doc';
 import * as P2 from './Panels2';
@@ -16,16 +17,18 @@ import { demoStair } from './demo';
 type Tab = string;
 
 function Big({ icon, label, onClick, active, disabled, title, kbd }: { icon: string; label: string; onClick?: () => void; active?: boolean; disabled?: boolean; title?: string; kbd?: string }) {
+  const ctx = useRibbonReg(label, icon, onClick);
   return (
-    <button className={`rb-big ${active ? 'on' : ''}`} onClick={onClick} disabled={disabled} title={title ?? (kbd ? `${label} (${kbd})` : label)}>
+    <button className={`rb-big ${active ? 'on' : ''}`} onClick={onClick} onContextMenu={ctx} disabled={disabled} title={title ?? (kbd ? `${label} (${kbd})` : label)}>
       <Icon name={icon} size={32} />
       <span>{label}</span>
     </button>
   );
 }
 function Small({ icon, label, onClick, active, disabled, title }: { icon: string; label: string; onClick?: () => void; active?: boolean; disabled?: boolean; title?: string }) {
+  const ctx = useRibbonReg(label, icon, onClick);
   return (
-    <button className={`rb-small ${active ? 'on' : ''}`} onClick={onClick} disabled={disabled} title={title ?? label}>
+    <button className={`rb-small ${active ? 'on' : ''}`} onClick={onClick} onContextMenu={ctx} disabled={disabled} title={title ?? label}>
       <Icon name={icon} size={16} /><span>{label}</span>
     </button>
   );
@@ -35,8 +38,10 @@ function SplitBig({ items, activeKey, onPick }: { items: { key: string; icon: st
   const [open, setOpen] = useState<null | { x: number; y: number }>(null);
   const [last, setLast] = useState(items[0].key);
   const cur = items.find((i) => i.key === activeKey) ?? items.find((i) => i.key === last) ?? items[0];
+  const ctxs = items.map((i) => useRibbonReg(i.label, i.icon, () => onPick(i.key))); // eslint-disable-line react-hooks/rules-of-hooks
+  const ctxCur = ctxs[items.indexOf(cur)];
   return (
-    <div className="rb-split">
+    <div className="rb-split" onContextMenu={ctxCur}>
       <button className={`rb-big ${items.some((i) => i.key === activeKey) ? 'on' : ''}`} onClick={() => { setLast(cur.key); onPick(cur.key); }} title={cur.title ?? cur.label}>
         <Icon name={cur.icon} size={32} /><span>{cur.label}</span>
       </button>
@@ -44,7 +49,7 @@ function SplitBig({ items, activeKey, onPick }: { items: { key: string; icon: st
       {open && (<>
         <div className="menu-shade clear" onClick={() => setOpen(null)} />
         <div className="rb-menu" style={{ position: 'fixed', left: open.x, top: open.y }}>{items.map((i) => (
-          <button key={i.key} className={i.key === activeKey ? 'on' : ''} onClick={() => { setOpen(null); setLast(i.key); onPick(i.key); }}><Icon name={i.icon} size={20} />{i.label}</button>
+          <button key={i.key} className={i.key === activeKey ? 'on' : ''} onContextMenu={(e) => { e.stopPropagation(); setOpen(null); ctxs[items.indexOf(i)]?.(e); }} onClick={() => { setOpen(null); setLast(i.key); onPick(i.key); }}><Icon name={i.icon} size={20} />{i.label}</button>
         ))}</div>
       </>)}
     </div>
@@ -83,6 +88,7 @@ export default function Ribbon() {
   const [tab, setTab] = useState<Tab>(tabs[0][0]);
   useEffect(() => { setTab(tabsFor()[0][0]); }, [k, inSketch, isSheet, s.active]);
   const cur = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
+  ribbonCtl.setTab = (t: string) => setTab(t as Tab); ribbonCtl.tab = cur; ribbonCtl.tabs = tabs.map((t) => t[0] as string);
   const tool = s.tool;
   const T = (t: typeof tool) => () => s.setTool(tool === t ? null : t);
   const P = partActions, A = asmActions, D = drwActions;
@@ -117,6 +123,7 @@ export default function Ribbon() {
           <button key={id} className={`tab ${cur === id ? 'on' : ''} ${id === 'sketch' || id === 'present' ? 'ctxtab' : ''}`} onClick={() => setTab(id)}>{l}</button>
         ))}
       </nav>
+      <TabCtx.Provider value={{ kind: k, tab: cur, tabLabel: tabs.find((t) => t[0] === cur)?.[1] ?? cur }}>
       <div className="panel-row">
         {/* ---------- PIEZA ---------- */}
         {k === 'part' && cur === 'sketch' && inSketch && (<>
@@ -903,10 +910,12 @@ export default function Ribbon() {
             <Col>
               <Small icon="newfile" label="Nuevo documento" onClick={() => s.open({ kind: 'newdoc' })} />
               <Small icon="help" label="Atajos de teclado" onClick={() => s.open({ kind: 'shortcuts' })} />
+              <Small icon="toolbar" label="Barras flotantes" onClick={() => s.open({ kind: 'toolbars' })} title="Crear y personalizar barras de herramientas flotantes (también: clic derecho en cualquier botón de la cinta)" />
             </Col>
           </Group>
         </>)}
       </div>
+      </TabCtx.Provider>
       {s.menuOpen && <FileMenu />}
     </header>
   );

@@ -137,6 +137,14 @@ export async function saveDocById(id: string, o: { as?: boolean; silent?: boolea
       const { existsInFolder } = await import('./persist');
       if (path !== cur.path && await existsInFolder(path) && !(await s.ask(`${path} ya existe. ¿Sustituirlo?`, 'Sustituir'))) return false;
     }
+    const fdp = await import('./fdp');
+    const lib = fdp.isLibraryPath(path);
+    if (lib) { if (o.silent) return false; s.notify(`«${path}» está en la biblioteca ${lib} (solo lectura): usa Guardar como en el espacio de trabajo`, 'error'); return false; }
+    if ((o.as || !cur.path) && !o.silent) {
+      const dup = await fdp.duplicateName(path);
+      if (dup && !(await s.ask(`Ya hay un fichero con el nombre ${path.split('/').pop()} en ${dup}. El proyecto pide nombres únicos. ¿Guardar igualmente?`, 'Guardar'))) return false;
+    }
+    try { await fdp.keepOldVersion(path); } catch { /* sin versiones antiguas */ }
     try {
       const { writeInFolder } = await import('./persist');
       await writeInFolder(path, content, 'application/json');
@@ -306,7 +314,13 @@ export async function openFile(file?: File | null, handle?: any) {
       for (const [id, e] of Object.entries(embedded)) {
         if (s.docs.some((d) => d.id === id)) continue;
         if (e.kind === 'part' && useStore.getState().folder.state === 'granted') {
-          try { const f = await readFromFolder((e as any).path ?? e.fileName); const pd = validateDoc(JSON.parse(await f.text())); s.addDocument('part', { ...pd } as never, e.fileName, false, id); const ne = useStore.getState().docs.find((d) => d.id === id); if (ne && (e as any).path) ne.path = (e as any).path; continue; } catch { /* no está en la carpeta */ }
+          try {
+            // búsqueda como Inventor: ruta guardada, espacio de trabajo, grupos de trabajo, bibliotecas y centro de contenido
+            const hit = await (await import('./fdp')).resolveFile(e.fileName, (e as any).path);
+            const f = hit?.file ?? await readFromFolder((e as any).path ?? e.fileName);
+            const pd = validateDoc(JSON.parse(await f.text())); s.addDocument('part', { ...pd } as never, e.fileName, false, id);
+            const ne = useStore.getState().docs.find((d) => d.id === id); if (ne && (hit?.path ?? (e as any).path)) ne.path = hit?.path ?? (e as any).path; continue;
+          } catch { /* no está en la carpeta */ }
         }
         if (e.kind === 'part') s.addDocument('part', validateDoc(e.data), e.fileName, false, id);
         else if (e.kind === 'assembly') s.addDocument('assembly', validateAsm(e.data), e.fileName, false, id);

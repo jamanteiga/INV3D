@@ -132,6 +132,16 @@ export async function mkdirInFolder(path: string) {
   if (!dir) throw new Error('No hay carpeta de trabajo');
   let d = dir; for (const p of path.split(/[\\/]/).filter(Boolean)) d = await d.getDirectoryHandle(p, { create: true });
 }
+/** Nombres de los ficheros de una subcarpeta de la carpeta de trabajo */
+export async function listDirInFolder(path: string): Promise<string[]> {
+  if (!dir) return [];
+  try { let d = dir; for (const p of path.split(/[\\/]/).filter(Boolean)) d = await d.getDirectoryHandle(p); const out: string[] = []; for await (const e of d.values()) if (e.kind === 'file') out.push(e.name); return out; } catch { return []; }
+}
+/** Borra un fichero de la carpeta de trabajo */
+export async function removeInFolder(path: string) {
+  const { d, name } = await walk(path, false);
+  await (d as unknown as { removeEntry: (n: string) => Promise<void> }).removeEntry(name);
+}
 export async function readFromFolder(path: string): Promise<File> {
   const { d, name } = await walk(path, false);
   return (await d.getFileHandle(name)).getFile();

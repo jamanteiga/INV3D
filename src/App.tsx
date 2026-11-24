@@ -10,6 +10,7 @@ import PartViewport from './ui/PartViewport';
 import AsmViewport from './ui/AsmViewport';
 import DrawingView from './ui/DrawingView';
 import { PropertyPanel, Modals } from './ui/Panels';
+import { FloatBars } from './ui/toolbars';
 import { saveDoc, openFile } from './core/files';
 import { fmt } from './core/expr';
 import { Icon, IconDefs, KitDefs } from './ui/icons';
@@ -241,6 +242,7 @@ export default function App() {
         <AiPanel />
       </main>
       <StatusBar />
+      <FloatBars />
       <Modals />
       <ConfirmBox />
       <Toast />

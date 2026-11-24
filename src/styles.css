@@ -760,3 +760,31 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .measure-panel .mp-hist div { padding: 2px 0; border-bottom: 1px solid var(--line); }
 .cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 4px; margin: 2px 0 8px; }
 .cc-grid .btn { font-size: 12px; padding: 5px 6px; }
+.fav-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 6px; }
+.prj-list { max-height: 150px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; margin-bottom: 8px; }
+.prj-list tr.sel td { background: var(--accent-soft, rgba(22,115,208,.12)); }
+.prj-ed { display: flex; gap: 10px; min-height: 300px; }
+.prj-tree { display: flex; flex-direction: column; gap: 2px; width: 230px; flex: none; border-right: 1px solid var(--line); padding-right: 8px; }
+.prj-tree button { text-align: left; border: 0; background: none; padding: 5px 6px; border-radius: 4px; cursor: pointer; color: var(--fg); display: flex; gap: 6px; align-items: center; font-size: 12.5px; }
+.prj-tree button.on { background: var(--accent); color: #fff; }
+.prj-body { flex: 1; min-width: 0; overflow: auto; max-height: 52vh; }
+.prj-body .ptable input { width: 100%; }
+/* ---------- Barras flotantes ---------- */
+.fbar { position: fixed; z-index: 45; display: flex; align-items: center; gap: 1px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; box-shadow: var(--shadow); padding: 2px; user-select: none; }
+.fbar.vert { flex-direction: column; }
+.fbar-grip { cursor: move; display: flex; align-items: center; gap: 4px; padding: 2px 6px; color: var(--fg-2); font-size: 11px; touch-action: none; }
+.fbar-grip b { font-weight: 600; color: var(--fg); white-space: nowrap; }
+.fbar-b { border: 0; background: none; padding: 4px; border-radius: 4px; cursor: pointer; color: var(--fg); display: flex; flex-direction: column; align-items: center; font-size: 10px; max-width: 74px; }
+.fbar-b span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; }
+.fbar-b:hover:not(:disabled) { background: var(--panel-2); }
+.fbar-b:disabled { opacity: 0.35; cursor: default; }
+.fbar-b.small { font-size: 11px; color: var(--fg-2); padding: 2px 4px; }
+.tb-ed { display: flex; gap: 10px; min-height: 360px; }
+.tb-col { display: flex; flex-direction: column; gap: 6px; width: 220px; flex: none; }
+.tb-col.grow { flex: 1; width: auto; min-width: 0; }
+.tb-list { border: 1px solid var(--line); border-radius: 4px; overflow: auto; max-height: 46vh; min-height: 120px; }
+.tb-row { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-bottom: 1px solid var(--line); font-size: 12px; cursor: default; }
+.tb-row .grow { flex: 1; }
+.tb-row.sel { background: var(--accent); color: #fff; }
+.tb-row.sel .muted { color: #fff; }
+.prj-list td { white-space: nowrap; } .prj-list td svg { vertical-align: middle; }

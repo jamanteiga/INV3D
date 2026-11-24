@@ -36,6 +36,7 @@ export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
   top: (p) => <S {...p}><path d="M4 12l12-6 12 6-12 6z" fill={B} stroke={A} /><path d="M4 12v8l12 6 12-6v-8" /></S>,
   right: (p) => <S {...p}><path d="M16 6l12 6v10l-12 6z" fill={B} stroke={A} /><path d="M16 6L4 12v10l12 6" /></S>,
   iso: (p) => <S {...p}><path d="M16 4l11 6v12l-11 6-11-6V10z" /><path d="M5 10l11 6 11-6M16 16v12" /></S>,
+  toolbar: (p) => <S {...p}><rect x="4" y="9" width="24" height="10" rx="2" fill={B} /><path d="M8 12v4M13 12h4v4h-4zM21 12l3 2-3 2z" stroke={A} /><path d="M6 23h8" /></S>,
   fit: (p) => <S {...p}><path d="M5 11V5h6M21 5h6v6M27 21v6h-6M11 27H5v-6" /><rect x="11" y="11" width="10" height="10" fill={B} /></S>,
   edges: (p) => <S {...p}><path d="M16 4l11 6v12l-11 6-11-6V10z" fill={B} /><path d="M5 10l11 6 11-6M16 16v12" strokeWidth="2.2" /></S>,
   undo: (p) => <S {...p}><path d="M10 9L5 14l5 5" /><path d="M5 14h13a7 7 0 0 1 0 14h-4" /></S>,

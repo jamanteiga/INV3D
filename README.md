@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.37
+## Versión 0.38
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.38**
+- **Barras flotantes personalizadas**: clic derecho sobre cualquier botón de la cinta › *Añadir a…* una barra (o *Barra nueva…*). Las barras se arrastran por el asa ⋮⋮, se recuerdan y ejecutan el botón aunque esté en otra pestaña. **Vista › Ventanas › Barras flotantes** (o ⚙ en la barra): crear, renombrar, eliminar, mostrar/ocultar, vertical, iconos grandes con texto, ordenar botones y añadir desde *Cinta* (*Leer toda la cinta* lista todos los botones) o *Comandos* (los de los atajos de teclado).
+- **Proyectos .fdp como Inventor 2027** (Archivo › Proyectos (.fdp)…): lista de proyectos (doble clic activa) y editor con *Proyecto* (nombre, tipo usuario único/Vault, ubicación, fichero incluido), *Espacio de trabajo*, *Subcarpetas del espacio de trabajo* (con su uso), *Rutas de búsqueda de grupo de trabajo*, *Bibliotecas* (solo lectura), *Subcarpetas de uso frecuente*, *Opciones de carpeta* (datos de diseño, plantillas, centro de contenido) y *Opciones* (versiones antiguas a conservar, nombres únicos, guardar el centro de contenido, acceso directo, propietario, ID de versión). Funciona: búsqueda de piezas al abrir ensamblajes en el orden espacio de trabajo → grupos → bibliotecas → centro de contenido; las bibliotecas no se sobrescriben; al guardar se copia la versión anterior a `OldVersions/nombre.0001.ext`; aviso de nombre repetido; plantillas del proyecto en Archivo › Nuevo; las piezas del centro de contenido se guardan en su carpeta al colocarlas; accesos ★ y 🔒 en Abrir desde carpeta.
 
 **Novedades 0.37**
 - **ePoints asociativos**: los creados en el *Centro de cara* o en el extremo de una cara cilíndrica siguen a la geometría (p. ej. al cambiar la longitud del conducto, el ePoint de la boca se va con ella). Los ePoints ya existentes que estén en el centro de una cara se anclan solos. Las **uniones entre ePoints** toman siempre la posición actual de sus ePoints, así que el ensamblaje se recoloca.

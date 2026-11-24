@@ -4,7 +4,8 @@ import TbTplDialog, { SheetTplDialog } from './TbDialog';
 import OccPropsDialog from './OccPropsDialog';
 import EPointPanel from './EPointPanel';
 import { partEPoints, EP_KIND_NAMES, epJoint } from '../core/epoints';
-import { DEFAULT_SUBS, FDP_ROLES, newFdp, writeProject, activateProject, rememberProject, type FdpSub, type FdpRole } from '../core/fdp';
+import ProjectDialog from './ProjectDialog';
+import ToolbarsDialog from './ToolbarsDialog';
 import { occEPoints, setJointEPoint } from './jointep';
 import DrwViewPropsDialog from './DrwViewDialog';
 import { tbTemplate, TB_FIELDS, type SheetSize } from '../core/drawing';
@@ -1600,73 +1601,6 @@ function IPropsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ProjectDialog({ onClose, create }: { onClose: () => void; create?: boolean }) {
-  const s = useStore();
-  const p = s.project;
-  const fdp = p?.fdp;
-  const [mode, setMode] = useState<'view' | 'new' | 'edit'>(create || !p ? 'new' : 'view');
-  const [name, setName] = useState(create ? 'Proyecto' : fdp?.name ?? 'Proyecto');
-  const [ws, setWs] = useState(fdp?.workspace ?? (s.folder.state === 'granted' ? s.folder.name : ''));
-  const [subs, setSubs] = useState<FdpSub[]>(mode === 'edit' && fdp ? fdp.subdirs : DEFAULT_SUBS.map((x) => ({ ...x })));
-  const [nsub, setNsub] = useState('');
-  const folderOk = folderApi.supported();
-  const pickFolder = async () => { await folderApi.choose(); const f = useStore.getState().folder; if (f.state === 'granted') setWs(f.name); };
-  const addSub = () => { const v = nsub.trim().replace(/^[\\/]+|[\\/]+$/g, ''); if (!v || subs.some((x) => x.path === v)) return; setSubs([...subs, { path: v, role: '' }]); setNsub(''); };
-  const create_ = async () => {
-    const nm = name.trim().replace(/[\\/:*?"<>|]/g, '_'); if (!nm) { s.notify('Pon un nombre al proyecto', 'error'); return; }
-    const pr = mode === 'edit' && fdp ? { ...fdp, name: nm, workspace: ws.trim(), subdirs: subs } : newFdp(nm, ws.trim(), subs);
-    try { const msg = await writeProject(pr); activateProject(pr, `${nm}.fdp`); s.notify(`Proyecto ${nm}: ${msg}`); setMode('view'); }
-    catch (e) { s.notify(`No se pudo crear el proyecto: ${(e as Error).message}`, 'error'); }
-  };
-  const editing = mode !== 'view';
-  return (
-    <Modal title={mode === 'new' ? 'Nuevo proyecto (.fdp)' : mode === 'edit' ? 'Editar proyecto' : 'Proyectos'} onClose={onClose} wide>
-      {editing ? (<>
-        <Row label="Nombre"><input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></Row>
-        <Row label="Directorio de trabajo">
-          <div style={{ display: 'flex', gap: 4, width: '100%' }}>
-            <input style={{ flex: 1 }} value={ws} placeholder={folderOk ? 'Elige una carpeta…' : 'p. ej. D:\\Proyectos\\Obra 25'} onChange={(e) => setWs(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
-            {folderOk && <button className="btn sm" onClick={() => void pickFolder()}>Elegir carpeta…</button>}
-          </div>
-        </Row>
-        {!folderOk && <p className="phelp">Este navegador (o la vista incrustada) no da acceso a carpetas: el .fdp se descarga y los subdirectorios se crean a mano. En Chrome/Edge abriendo la web directamente se crean solos.</p>}
-        {folderOk && s.folder.state !== 'granted' && <p className="phelp">Elige la carpeta para crear en ella el .fdp y los subdirectorios.</p>}
-        <div className="plabel">Subdirectorios</div>
-        <table className="ptable"><tbody>
-          {subs.map((x, i) => (
-            <tr key={i}>
-              <td style={{ width: '55%' }}><input value={x.path} onChange={(e) => setSubs(subs.map((y, k) => (k === i ? { ...y, path: e.target.value } : y)))} onKeyDown={(e) => e.stopPropagation()} /></td>
-              <td><select value={x.role} onChange={(e) => setSubs(subs.map((y, k) => (k === i ? { ...y, role: e.target.value as FdpRole } : y)))}>{(Object.keys(FDP_ROLES) as FdpRole[]).map((r) => <option key={r} value={r}>{r ? `Guardar ${FDP_ROLES[r].toLowerCase()}` : 'Otro'}</option>)}</select></td>
-              <td><button className="btn sm" title="Quitar" onClick={() => setSubs(subs.filter((_, k) => k !== i))}>✕</button></td>
-            </tr>))}
-          <tr><td><input value={nsub} placeholder="Nuevo subdirectorio (p. ej. Piezas/Chapa)" onChange={(e) => setNsub(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') addSub(); }} /></td><td colSpan={2}><button className="btn sm" onClick={addSub}>＋ Añadir</button></td></tr>
-        </tbody></table>
-        <p className="phelp">Al guardar una pieza, un ensamblaje o un plano nuevo se propone su subdirectorio.</p>
-        <div className="modal-btns">
-          {p && <button className="btn" onClick={() => setMode('view')}>Volver</button>}
-          <span className="grow" />
-          <button className="btn" onClick={onClose}>Cancelar</button>
-          <button className="btn primary" onClick={() => void create_()}>{mode === 'edit' ? 'Guardar proyecto' : 'Crear proyecto'}</button>
-        </div>
-      </>) : (<>
-        {p ? (<>
-          <div className="proj-head"><Icon name="project" size={26} /><div><b>{p.name}</b><div className="muted">{p.fileName}{fdp ? '' : ' (Inventor, solo lectura)'}</div></div></div>
-          <table className="ptable kv"><tbody>{p.entries.map((e, i) => <tr key={i}><td>{e.label}</td><td className="mono">{e.value}</td></tr>)}</tbody></table>
-          {fdp && <p className="phelp">Carpeta conectada: <b>{s.folder.state === 'granted' ? s.folder.name : 'ninguna'}</b>{folderOk && <> · <button className="btn sm" onClick={() => void folderApi.choose()}>Elegir carpeta…</button></>}</p>}
-        </>) : <p className="phelp">No hay proyecto activo.</p>}
-        <div className="modal-btns">
-          <button className="btn" onClick={() => { setName('Proyecto'); setSubs(DEFAULT_SUBS.map((x) => ({ ...x }))); setMode('new'); }}>Nuevo proyecto…</button>
-          {fdp && <button className="btn" onClick={() => { setName(fdp.name); setWs(fdp.workspace); setSubs(fdp.subdirs.map((x) => ({ ...x }))); setMode('edit'); }}>Editar…</button>}
-          <button className="btn" onClick={() => openFile()}>Abrir .fdp…</button>
-          {p && <button className="btn" onClick={() => { useStore.setState({ project: null }); rememberProject(null); }}>Cerrar proyecto</button>}
-          <span className="grow" />
-          <button className="btn primary" onClick={onClose}>Cerrar</button>
-        </div>
-      </>)}
-    </Modal>
-  );
-}
-
 function FileInfoDialog({ title, info, onClose }: { title: string; info: import('../core/store').FileInfo; onClose: () => void }) {
   const [zoom, setZoom] = useState(1);
   return (
@@ -2300,9 +2234,20 @@ function FolderDialog({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<FolderEntry[] | null>(null);
   const [q, setQ] = useState('');
   useEffect(() => { if (s.folder.state === 'granted') listFolder().then(setFiles).catch(() => setFiles([])); }, [s.folder.state, s.folder.name]);
-  const shown = (files ?? []).filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase()));
+  const [fav, setFav] = useState('');
+  const P = s.project?.fdp;
+  const libOf = (path: string) => P?.libraries.find((l) => path === l.path || path.startsWith(l.path.replace(/\/+$/, '') + '/'))?.name;
+  const shown = (files ?? []).filter((f) => (!q || f.path.toLowerCase().includes(q.toLowerCase())) && (!fav || f.path.startsWith(fav.replace(/^\.\/?/, '').replace(/\/+$/, '') + '/')) && !f.path.includes('OldVersions/'));
   return (
     <Modal title={`Carpeta de trabajo${s.folder.name ? ` — ${s.folder.name}` : ''}`} onClose={onClose} wide>
+      {P && s.folder.state === 'granted' && (P.favorites.length > 0 || P.libraries.length > 0) && (
+        <div className="fav-row">
+          <span className="muted">Proyecto {P.name}:</span>
+          <button className={`btn sm ${!fav ? 'primary' : ''}`} onClick={() => setFav('')}>Todo</button>
+          {P.favorites.map((f) => <button key={'f' + f.path} className={`btn sm ${fav === f.path ? 'primary' : ''}`} title={f.path} onClick={() => setFav(f.path)}>★ {f.name}</button>)}
+          {P.libraries.map((f) => <button key={'l' + f.path} className={`btn sm ${fav === f.path ? 'primary' : ''}`} title={`${f.path} (solo lectura)`} onClick={() => setFav(f.path)}>🔒 {f.name}</button>)}
+          {P.workgroups.map((f) => <button key={'w' + f.path} className={`btn sm ${fav === f.path ? 'primary' : ''}`} title={f.path} onClick={() => setFav(f.path)}>{f.name}</button>)}
+        </div>)}
       {!folderApi.supported() ? <p className="phelp">Abre INV3D directamente en Chrome o Edge para usar una carpeta local.</p>
         : s.folder.state === 'none' ? (<><p className="phelp">Elige la carpeta donde guardas tus proyectos. INV3D la recordará cada vez que entres.</p><div className="modal-btns"><button className="btn primary" onClick={folderApi.choose}>Elegir carpeta…</button></div></>)
         : s.folder.state === 'prompt' ? (<><p className="phelp">El navegador pide confirmar el acceso a <b>{s.folder.name}</b> en cada sesión.</p><div className="modal-btns"><button className="btn primary" onClick={folderApi.reconnect}>Reconectar {s.folder.name}</button><button className="btn" onClick={folderApi.choose}>Otra carpeta…</button></div></>)
@@ -2311,8 +2256,8 @@ function FolderDialog({ onClose }: { onClose: () => void }) {
           <div className="folder-list">
             {files === null ? <p className="phelp">Leyendo…</p> : !shown.length ? <p className="phelp">No hay ficheros CAD.</p> : shown.map((f) => (
               <button key={f.path} className="folder-row" onDoubleClick={() => { openFromFolder(f.path); onClose(); }} onClick={(e) => { if (e.detail === 1) (e.currentTarget as HTMLElement).focus(); }} onKeyDown={(e) => { if (e.key === 'Enter') { openFromFolder(f.path); onClose(); } }}>
-                <Icon name={/\.i3a$|\.iam$/i.test(f.name) ? 'assembly' : /\.i3d$|\.idw$|\.dxf$|\.dwg$/i.test(f.name) ? 'drawing' : /\.ipj$/i.test(f.name) ? 'project' : 'part'} size={16} />
-                <span className="fr-path">{f.path}</span><span className="ro">{(f.size / 1024).toFixed(0)} kB · {new Date(f.modified).toLocaleDateString('es-ES')}</span>
+                <Icon name={/\.i3a$|\.iam$/i.test(f.name) ? 'assembly' : /\.i3d$|\.idw$|\.dxf$|\.dwg$/i.test(f.name) ? 'drawing' : /\.ipj$|\.fdp$/i.test(f.name) ? 'project' : 'part'} size={16} />
+                <span className="fr-path">{f.path}{libOf(f.path) ? ' 🔒' : ''}</span><span className="ro">{(f.size / 1024).toFixed(0)} kB · {new Date(f.modified).toLocaleDateString('es-ES')}</span>
               </button>
             ))}
           </div>
@@ -3223,8 +3168,28 @@ function NewDocDialog({ onClose }: { onClose: () => void }) {
   const T = ({ icon, name, desc, k, sheet }: { icon: string; name: string; desc: string; k: Parameters<typeof s.newDocument>[0]; sheet?: SheetSize }) => (
     <button className="tpl" onClick={() => go(k, sheet)}><Icon name={icon} size={34} /><b>{name}</b><span>{desc}</span></button>
   );
+  const [tpls, setTpls] = useState<string[]>([]);
+  useEffect(() => { void import('../core/fdp').then((m) => m.listTemplates()).then(setTpls); }, []);
+  const fromTpl = async (path: string) => {
+    onClose();
+    try {
+      const { readFromFolder } = await import('../core/persist');
+      const f = await readFromFolder(path);
+      const { recentCtl } = await import('../core/files');
+      recentCtl.skip = true; try { await openFile(f); } finally { recentCtl.skip = false; }
+      const a = useStore.getState(); const base = f.name.replace(/\.[^.]+$/, ''), ext = f.name.slice(base.length);
+      let k = 1; while (a.docs.some((d) => d.fileName === `${base}${k}${ext}`)) k++;
+      const fn = `${base}${k}${ext}`;
+      useStore.setState({ fileName: fn, dirty: true, docs: a.docs.map((d) => (d.id === a.active ? { ...d, fileName: fn, path: undefined, dirty: true } : d)) });
+      a.notify(`Nuevo desde la plantilla ${f.name}`);
+    } catch (e) { s.notify((e as Error).message, 'error'); }
+  };
   return (
     <Modal title="Crear archivo nuevo" onClose={onClose} wide>
+      {tpls.length > 0 && (<>
+        <div className="tpl-sec">Plantillas del proyecto {s.project?.name}</div>
+        <div className="tpl-row">{tpls.map((t) => { const n = t.split('/').pop()!; return <button key={t} className="tpl" onClick={() => void fromTpl(t)}><Icon name={/\.i3a$/i.test(n) ? 'assembly' : /\.i3d$/i.test(n) ? 'drawing' : 'part'} size={34} /><b>{n}</b><span>{t}</span></button>; })}</div>
+      </>)}
       <div className="tpl-sec">Pieza — crear objetos 2D y 3D</div>
       <div className="tpl-row"><T icon="part" name="Normal (mm).i3p" desc="Pieza sólida" k="part" /><T icon="sheetmetal" name="Chapa (mm).i3p" desc="Chapa con pestañas y desarrollo" k="sheet" /></div>
       <div className="tpl-sec">Ensamblaje — ensamblar componentes 2D y 3D</div>
@@ -3344,6 +3309,7 @@ export function Modals() {
     case 'simplify': return <SimplifyDialog onClose={close} />;
     case 'pmi': return <PX.PmiDialog key={(d as { editId?: string }).editId ?? (d as { pmiKind: string }).pmiKind} kind={(d as unknown as { pmiKind: never }).pmiKind} editId={(d as { editId?: string }).editId} onClose={close} />;
     case 'drf': return <PX.DrfDialog onClose={close} />;
+    case 'toolbars': return <ToolbarsDialog onClose={close} />;
     case 'createcomp': return <PX.CreateCompDialog onClose={close} />;
     case 'savenewpart': return <PX.SaveNewPartDialog part={(d as { part: string }).part} occ={(d as { occ: string }).occ} onClose={close} />;
     case 'promote': return <PX.PromoteDialog onClose={close} />;

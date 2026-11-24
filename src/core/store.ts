@@ -104,6 +104,7 @@ export type Dialog =
   | { kind: 'tolstack' | 'toladvisor' | 'promote' | 'drf' | 'analysis' | 'region' | 'limits' | 'material' | 'appearance' | 'docset' | 'news' | 'links' | 'addins' | 'macros' | 'find' | 'purge' | 'insertobj' | 'exportobj' | 'structshape' | 'cloud' | 'rules' | 'publish' | 'studio' | 'mold' | 'bim' | 'print3d' | 'share' }
   | { kind: 'savenewpart'; part: string; occ: string }
   | { kind: 'createcomp' }
+  | { kind: 'toolbars' }
   | { kind: 'contentf'; fam: string }
   | { kind: 'fastener'; fx: Record<string, unknown> }
   | { kind: 'projto'; mode: 'face' | 'surf' }

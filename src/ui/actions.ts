@@ -386,6 +386,7 @@ export const asmActions = {
     const s = S();
     if (s.kind !== 'assembly') return;
     const e = s.docs.find((d) => d.id === partId); if (!e) return;
+    void import('../core/fdp').then((m) => { for (const x of [partId, ...extras]) void m.saveContentPart(x); });
     if (s.createTarget && asmActions.placeAtTarget(partId, extras)) return;
     if (s.placing) s.setTool(null);
     const base = e.fileName.replace(/\.[^.]+$/, '');
