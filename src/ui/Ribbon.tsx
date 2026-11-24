@@ -5,6 +5,7 @@ import { Icon } from './icons';
 import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { toggleClipTool } from './ClipBar';
 import { useMeasure, type MMode, type MDist } from './measure';
+import { rebuildAll } from '../core/store';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS, nextName } from '../core/doc';
 import * as P2 from './Panels2';
@@ -603,6 +604,7 @@ export default function Ribbon() {
             <Big icon="skel" label="Línea 3D" onClick={() => A.openSkel()} title="Línea de esqueleto para la estructura" />
           </Group>
           <Group label="Gestión">
+            <Big icon="refresh" label="Actualizar" onClick={() => rebuildAll()} title="Actualizar todo (Mayús+F2): piezas, ePoints y restricciones" />
             <Big icon="bom" label="Lista de materiales" onClick={() => s.open({ kind: 'bom' })} />
           </Group>
         </>)}
@@ -756,7 +758,7 @@ export default function Ribbon() {
           <Group label="Actualizar">
             <Big icon="refresh" label="Actualizar" onClick={() => s.set({ doc: { ...s.doc } } as never)} title="Regenera la pieza" />
             <Col>
-              <Small icon="refresh" label="Reconstruir todo" onClick={() => { s.set({ doc: structuredClone(s.doc) } as never); s.notify('Reconstruyendo…'); }} />
+              <Small icon="refresh" label="Reconstruir todo" title="Actualizar todo (Mayús+F2)" onClick={() => rebuildAll()} />
               <Small icon="mass" label="Actualizar masa" onClick={() => s.open({ kind: 'iprops' })} />
             </Col>
           </Group>
@@ -940,13 +942,13 @@ function FileMenu() {
         {s.kind === 'drawing' && <button onClick={act(drwActions.exportDxf)}><Icon name="dxf" size={20} />Exportar DXF</button>}
         {s.kind === 'drawing' && <button onClick={act(drwActions.exportPdf)}><Icon name="pdf" size={20} />Exportar PDF</button>}
         <hr />
-        <button onClick={act(() => s.open({ kind: 'project' }))}><Icon name="project" size={20} />Proyectos (.ipj)…</button>
-        <button onClick={act(() => newIpj(s.docData(s.active) && 'iProperties' in (s.docData(s.active) as object) ? (s.docData(s.active) as any).iProperties.partNumber : 'Proyecto'))}><Icon name="project" size={20} />Crear proyecto .ipj</button>
+        <button onClick={act(() => s.open({ kind: 'project' }))}><Icon name="project" size={20} />Proyectos (.fdp)…</button>
+        <button onClick={act(() => s.open({ kind: 'project', create: true } as never))}><Icon name="project" size={20} />Crear proyecto .fdp</button>
         <button onClick={act(() => s.open({ kind: 'iprops' }))}><Icon name="iprops" size={20} />iProperties</button>
         <hr />
         <button onClick={act(() => s.open({ kind: 'options' }))}><Icon name="settings" size={20} />Opciones de la aplicación…</button>
         <button onClick={act(() => s.open({ kind: 'about' }))}><Icon name="help" size={20} />Acerca de INV3D</button>
-        <div className="fm-foot">Abre .i3p, .i3a, .i3d, .step/.stp, .ipj, .dwg, .dxf · lee metadatos y miniatura de .ipt, .iam, .idw, .ipn</div>
+        <div className="fm-foot">Abre .i3p, .i3a, .i3d, .fdp, .step/.stp, .ipj, .dwg, .dxf · lee metadatos y miniatura de .ipt, .iam, .idw, .ipn</div>
       </div>
     </>
   );

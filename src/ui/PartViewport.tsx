@@ -1651,7 +1651,7 @@ export default function PartViewport() {
             for (let i = g.start; i < g.start + g.count; i += 3) { vtx(m.triangles[i], A); vtx(m.triangles[i + 1], B); vtx(m.triangles[i + 2], C); const a2 = B.clone().sub(A).cross(C.clone().sub(A)).length() / 2; ar += a2; acc.addScaledVector(A.clone().add(B).add(C).divideScalar(3), a2); }
             if (ar > 0) P = acc.divideScalar(ar);
           }
-          useStore.setState({ epPick: { point: vArr(P, 4), dir: vArr(fh.normal, 6), axis: false, n: (s.epPick?.n ?? 0) + 1 }, tool: null });
+          useStore.setState({ epPick: { point: vArr(P, 4), dir: vArr(fh.normal, 6), axis: false, n: (s.epPick?.n ?? 0) + 1, anchor: s.epMode !== 'face' ? { mode: 'facec', n: vArr(fh.normal, 6) } : undefined }, tool: null });
         } else {
           // cara cilíndrica: eje a partir de las normales, centro por tres puntos y extremo más cercano al clic
           const vs: THREE.Vector3[] = [], ns: THREE.Vector3[] = [];
@@ -1670,7 +1670,7 @@ export default function PartViewport() {
           const ts = vs.map((v) => v.dot(axis!)), t0 = Math.min(...ts), t1 = Math.max(...ts), th = fh.point.dot(axis);
           const atEnd = Math.abs(th - t1) < Math.abs(th - t0) ? t1 : t0, dir = atEnd === t1 ? axis.clone() : axis.clone().negate();
           const P = center.clone().addScaledVector(axis, atEnd);
-          useStore.setState({ epPick: { point: vArr(P, 4), dir: vArr(dir, 6), radius: Math.round(r * 1000) / 1000, axis: true, n: (s.epPick?.n ?? 0) + 1 }, tool: null });
+          useStore.setState({ epPick: { point: vArr(P, 4), dir: vArr(dir, 6), radius: Math.round(r * 1000) / 1000, axis: true, n: (s.epPick?.n ?? 0) + 1, anchor: { mode: 'cyl', n: vArr(dir, 6) } }, tool: null });
         }
         return;
       }

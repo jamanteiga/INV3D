@@ -245,7 +245,7 @@ export default function App() {
       <ConfirmBox />
       <Toast />
       <Loader />
-      {drag && <div className="dropzone">Suelta .i3p, .i3a, .i3d, .step, .ipj, .ipt, .iam, .idw, .dwg o .dxf</div>}
+      {drag && <div className="dropzone">Suelta .i3p, .i3a, .i3d, .fdp, .step, .ipj, .ipt, .iam, .idw, .dwg o .dxf</div>}
     </div>
   );
 }

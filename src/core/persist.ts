@@ -127,6 +127,11 @@ export async function writeInFolder(path: string, data: BlobPart, mime = 'applic
   const fh = await d.getFileHandle(name, { create: true });
   const ws = await fh.createWritable(); await ws.write(new Blob([data], { type: mime })); await ws.close();
 }
+/** Crea una carpeta (y sus intermedias) dentro de la carpeta de trabajo */
+export async function mkdirInFolder(path: string) {
+  if (!dir) throw new Error('No hay carpeta de trabajo');
+  let d = dir; for (const p of path.split(/[\\/]/).filter(Boolean)) d = await d.getDirectoryHandle(p, { create: true });
+}
 export async function readFromFolder(path: string): Promise<File> {
   const { d, name } = await walk(path, false);
   return (await d.getFileHandle(name)).getFile();
@@ -134,7 +139,7 @@ export async function readFromFolder(path: string): Promise<File> {
 export async function existsInFolder(path: string) { try { await readFromFolder(path); return true; } catch { return false; } }
 
 export interface FolderEntry { path: string; name: string; size: number; modified: number }
-const LISTED = /\.(i3p|i3a|i3d|ipj|step|stp|dxf|dwg|ipt|iam|idw|ipn|json|stl|igs|iges|3mf)$/i;
+const LISTED = /\.(i3p|i3a|i3d|fdp|ipj|step|stp|dxf|dwg|ipt|iam|idw|ipn|json|stl|igs|iges|3mf)$/i;
 /** Lista los ficheros CAD de la carpeta (hasta 3 niveles). */
 export async function listFolder(maxDepth = 3): Promise<FolderEntry[]> {
   if (!dir) return [];

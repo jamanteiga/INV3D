@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.36
+## Versión 0.37
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -25,9 +25,14 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Exportar** | STEP, STL, **3MF** (impresión 3D), **OBJ**, **glTF (.glb)** e **IFC4** para BIM (un elemento por componente: viga, pilar o barra, chapa, conducto y accesorio, terminal, compuerta, tubo y accesorio de tubería, tornillería; con material y propiedades) |
 | **Configuración** | Se recuerda al entrar: ajustes (usuario, empresa, material, norma, hoja), materiales propios, proyecto, recientes y los documentos abiertos (autoguardado). **Carpeta de trabajo** local recordada (Chrome/Edge): Ctrl+S guarda en ella y la configuración se copia en `inv3d-config.json` para llevarla a otro PC. Archivo › Opciones de la aplicación |
 | **Presentación** | Explosionado automático o manual, animación y vídeo WebM |
-| **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
+| **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.37**
+- **ePoints asociativos**: los creados en el *Centro de cara* o en el extremo de una cara cilíndrica siguen a la geometría (p. ej. al cambiar la longitud del conducto, el ePoint de la boca se va con ella). Los ePoints ya existentes que estén en el centro de una cara se anclan solos. Las **uniones entre ePoints** toman siempre la posición actual de sus ePoints, así que el ensamblaje se recoloca.
+- **Actualizar todo (Mayús+F2)**: vuelve a calcular la pieza o el ensamblaje con todas sus piezas, ePoints y restricciones. También en Ensamblar › Gestión › Actualizar y Administrar › Reconstruir todo.
+- **Proyectos .fdp** (Archivo › Crear proyecto .fdp / Proyectos (.fdp)…): nombre, **directorio de trabajo** (Elegir carpeta… o ruta escrita) y **subdirectorios** editables (añadir, quitar, anidados como `Piezas/Chapa`) con su uso: piezas, ensamblajes, planos, centro de contenido o exportados. Crea las carpetas y el `.fdp` en el directorio de trabajo; al guardar un documento nuevo se propone su subdirectorio. El proyecto activo se recuerda. Los `.ipj` de Inventor se siguen pudiendo abrir (solo lectura).
 
 **Novedades 0.36**
 - **Crear componente** (Ensamblar › Crear): 1) clic en un **ePoint** o en una **cara** (plana o cilíndrica) de una pieza del ensamblaje (Esc: sin referencia); 2) se abre el **centro de contenido** con HVAC (conductos, codos, transiciones, derivaciones, compuertas, terminales, espirotubo…), Mecánica · Tubería ASME/EN y tornillería, o *Modelar pieza nueva en contexto*; 3) al pulsar **Colocar** la pieza queda **restringida** a esa geometría: ePoint–ePoint (insertar si los dos son de inserción) o su ePoint contra la cara (coincidir; insertar en caras cilíndricas). Se puede afinar después con Restringir (J).

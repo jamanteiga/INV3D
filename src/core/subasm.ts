@@ -1,3 +1,5 @@
+import { refreshEpRefs } from './epoints';
+import type { PartDoc } from './doc';
 // Subensamblajes: un componente del ensamblaje puede ser otro ensamblaje (.i3a).
 // Para resolver, el subensamblaje se trata como un único sólido rígido (su ocurrencia de nivel superior);
 // las referencias a caras de sus piezas («padre/hijo») se llevan a coordenadas del subensamblaje.
@@ -38,6 +40,7 @@ function localOf(id: string, asm: AsmDoc, get: GetDoc, ev: (s: string) => number
 
 /** Copia del ensamblaje con las referencias «padre/hijo» expresadas en el subensamblaje de nivel superior. */
 export function normalizeAsm(asm: AsmDoc, get: GetDoc, ev: (s: string) => number): AsmDoc {
+  asm = refreshEpRefs(asm, (id) => { const g = get(id); return g?.kind === 'part' ? (g.data as PartDoc) : null; });
   if (!asm.joints.some((j) => j.a.occ.includes('/') || j.b.occ.includes('/') || j.c?.occ.includes('/'))) return asm;
   const cache = new Map<string, Xform | null>();
   const fix = (r: FaceRef): FaceRef => {

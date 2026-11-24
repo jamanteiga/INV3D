@@ -17,7 +17,7 @@ export default function EPointPanel({ onClose }: { onClose: () => void }) {
   // cara elegida en el modelo → posición y dirección (cilíndrica: inserción con radio)
   useEffect(() => {
     if (!pick) return;
-    setD((x) => ({ ...x, point: pick.point, dir: pick.dir, radius: pick.radius, kind: x.isDefault ? x.kind : pick.axis ? 'insert' : x.kind === 'composite' ? 'mate' : x.kind }));
+    setD((x) => ({ ...x, point: pick.point, dir: pick.dir, radius: pick.radius, anchor: pick.anchor, kind: x.isDefault ? x.kind : pick.axis ? 'insert' : x.kind === 'composite' ? 'mate' : x.kind }));
   }, [pick?.n]);
   useEffect(() => () => { const t = useStore.getState(); if (t.tool === 'epPick' || t.tool === 'epEdge') t.set({ tool: null, epEdges: [] }); }, []);
   if (s.kind !== 'part') return null;
@@ -82,7 +82,7 @@ export default function EPointPanel({ onClose }: { onClose: () => void }) {
           </div>
           {(s.tool === 'epPick' || s.tool === 'epEdge') && <p className="muted" style={{ fontSize: 11.5, margin: 0 }}>{s.tool === 'epPick' ? (s.epMode === 'face' ? 'Clic en el punto de la cara…' : 'Clic en una cara: se toma su centro…') : `Elige ${s.epMode === 'circle' ? 'la arista circular' : s.epMode === 'oval2' ? 'las 2 aristas rectas' : 'las 3 aristas de los lados'} (${s.epEdges.length}/${s.epMode === 'circle' ? 1 : s.epMode === 'oval2' ? 2 : 3})…`}</p>}
           <div className="fem-row"><button className="btn sm" onClick={() => up({ dir: d.dir.map((x) => -x) as V3 })}>Invertir dirección</button></div>
-          <div className="fem-row">Punto X {num(d.point[0], (x) => up({ point: [x, d.point[1], d.point[2]] }))} Y {num(d.point[1], (x) => up({ point: [d.point[0], x, d.point[2]] }))} Z {num(d.point[2], (x) => up({ point: [d.point[0], d.point[1], x] }))}</div>
+          <div className="fem-row">Punto X {num(d.point[0], (x) => up({ point: [x, d.point[1], d.point[2]], anchor: undefined }))} Y {num(d.point[1], (x) => up({ point: [d.point[0], x, d.point[2]], anchor: undefined }))} Z {num(d.point[2], (x) => up({ point: [d.point[0], d.point[1], x], anchor: undefined }))}</div>
           <div className="fem-row">Dirección {num(d.dir[0], (x) => up({ dir: [x, d.dir[1], d.dir[2]] }))} {num(d.dir[1], (x) => up({ dir: [d.dir[0], x, d.dir[2]] }))} {num(d.dir[2], (x) => up({ dir: [d.dir[0], d.dir[1], x] }))}</div>
           {d.kind === 'insert' && !d.isDefault && <div className="fem-row">Radio {num(d.radius ?? 5, (x) => up({ radius: x }))} mm</div>}
           {!d.isDefault && <div className="fem-row">Desfase al conectar <input value={d.offset ?? '0'} onChange={(e) => up({ offset: e.target.value })} onKeyDown={(e) => e.stopPropagation()} style={{ width: 70 }} /> mm</div>}

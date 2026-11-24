@@ -6,6 +6,8 @@ import {
   syncCenterAxes, eopIndex, eopNormalize } from './doc';
 import { makeEval } from './expr';
 import { migrateHvacDoc } from './hvac';
+import { updateAnchors } from './epanchor';
+import { refreshEpRefs } from './epoints';
 import { solve, applySolution, checkNew } from './sketch';
 import { newAsm, solveAssembly, applyAssociative, type AsmDoc, type Xform } from './asm';
 import { normalizeAsm, expandAsm, hasSubs } from './subasm';
@@ -126,7 +128,7 @@ export interface FileInfo {
   thumbnail?: string;
   svg?: string;
 }
-export interface ProjectInfo { name: string; fileName: string; entries: { label: string; value: string }[]; xml: string }
+export interface ProjectInfo { name: string; fileName: string; entries: { label: string; value: string }[]; xml: string; fdp?: import('./fdp').FdpProject }
 
 export interface State {
   docs: DocEntry[];
@@ -167,7 +169,7 @@ export interface State {
   /** Análisis FEM lineal de la pieza activa: caras elegidas y resultado (σ von Mises y desplazamiento por vértice) */
   fem: FemState | null;
   /** Última cara elegida para un ePoint (punto, dirección y, si es cilíndrica, radio) */
-  epPick: { point: V3; dir: V3; radius?: number; axis: boolean; n: number } | null;
+  epPick: { point: V3; dir: V3; radius?: number; axis: boolean; n: number; anchor?: import('./epanchor').EpAnchor } | null;
   /** Creación de ePoints: punto de la cara, centro de cara, círculo, 3 aristas (conducto rectangular) u oval (2 aristas) */
   /** boceto origen para «Proyectar sobre cara/plano» y «Proyectar sobre superficie» */
   projSrc: string | null;
@@ -848,7 +850,12 @@ async function runRegen() {
   useStore.setState({ busy: true });
   try {
     const r = await cad.regen(liveDerive(s.doc));
-    if (my === regenSeq && useStore.getState().kind === 'part') useStore.setState({ result: r, busy: false });
+    if (my === regenSeq && useStore.getState().kind === 'part') {
+      useStore.setState({ result: r, busy: false });
+      // ePoints anclados a caras: se recolocan con la geometría nueva (sin historial)
+      const t = useStore.getState(); const eps = t.doc === s.doc ? updateAnchors(t.doc, r.mesh) : null;
+      if (eps) useStore.setState({ doc: { ...t.doc, epoints: eps }, dirty: true });
+    }
     else useStore.setState({ busy: false });
   } catch (e) {
     if (my === regenSeq) { useStore.setState({ busy: false }); useStore.getState().notify((e as Error).message, 'error'); }
@@ -869,13 +876,23 @@ async function runAsm() {
       const sol = solveAssembly(normalizeAsm(s.asm, get, ev), ev);
       view = expandAsm(s.asm, sol.xf, get, ev); send = view; errs = sol.errors; solXf = sol.xf;
     }
+    send = refreshEpRefs(send, (id) => { const g = get(id); return g?.kind === 'part' ? (g.data as PartDoc) : null; });
     const ids = [...new Set(send.occurrences.map((o) => o.part))];
     const r = await cad.asm(send, s.partsMap(ids), [...meshCache.keys()]);
     if (view) { r.view = view; r.errors = { ...r.errors, ...errs }; for (const [k, v] of Object.entries(solXf)) r.xf[k] ??= v; }
     for (const p of Object.values(r.parts)) {
       if (p.mesh) meshCache.set(p.key, p.mesh); else p.mesh = meshCache.get(p.key);
     }
-    if (my === asmSeq && useStore.getState().kind === 'assembly') useStore.setState({ asmResult: r, busy: false });
+    if (my === asmSeq && useStore.getState().kind === 'assembly') {
+      useStore.setState({ asmResult: r, busy: false });
+      // ePoints anclados de las piezas: si la pieza cambió, se recolocan y el ensamblaje se vuelve a resolver
+      const t = useStore.getState(); let n = 0;
+      for (const [pid, pr] of Object.entries(r.parts)) {
+        const pd = t.docData(pid) as PartDoc | null; if (!pd || pd.format !== 'inv3d.part') continue;
+        const eps = updateAnchors(pd, pr.mesh); if (eps) { useStore.getState().previewPartDoc(pid, { ...pd, epoints: eps }, true); n++; }
+      }
+      void n;
+    }
     else useStore.setState({ busy: false });
   } catch (e) {
     if (my === asmSeq) { useStore.setState({ busy: false }); useStore.getState().notify((e as Error).message, 'error'); }
@@ -928,6 +945,19 @@ useStore.subscribe((s, prev) => {
     if (dd && (dd !== pd || s.doc !== prev.doc)) { clearTimeout(previewTimer); previewTimer = setTimeout(runPreview, 120); }
   }
 });
+
+/** Actualizar todo (Mayús+F2): vuelve a calcular la pieza o el ensamblaje con todas sus piezas, ePoints y uniones */
+export function rebuildAll() {
+  const s = useStore.getState();
+  meshCache.clear();
+  if (s.kind === 'part') { void runRegen(); s.notify('Pieza actualizada'); return; }
+  if (s.kind === 'assembly') {
+    // las piezas en memoria recolocan sus ePoints anclados y el ensamblaje se resuelve de nuevo
+    void runAsm().then(() => { setTimeout(() => { void runAsm(); }, 50); useStore.getState().notify('Ensamblaje actualizado (piezas, ePoints y restricciones)'); });
+    return;
+  }
+  useStore.setState({ drw: structuredClone(s.drw) }); s.notify('Plano actualizado');
+}
 
 export function startCad() {
   cad.onProgress = (v) => useStore.setState({ ocProgress: v });

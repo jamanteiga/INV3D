@@ -1,6 +1,6 @@
 // Comandos con atajo de teclado personalizable (Herramientas › Atajos de teclado).
 // Cada comando tiene un contexto (dónde vale), sus atajos por defecto y la acción.
-import { useStore, type State } from '../core/store';
+import { useStore, rebuildAll, type State } from '../core/store';
 import { asmActions, partActions } from './actions';
 import { saveDoc, openFile } from '../core/files';
 import { toggleOsnap } from './osnap';
@@ -29,6 +29,7 @@ export const COMMANDS: Command[] = [
   { id: 'tools.options', label: 'Opciones de la aplicación', ctx: 'all', keys: [], run: (s) => s.open({ kind: 'options' } as never) },
   { id: 'view.look', label: 'Mirar al boceto / vista inicial', ctx: 'part', keys: ['PageUp'], run: (s) => s.set({ view: { name: s.mode === 'sketch' ? 'sketch' : 'home', n: s.view.n + 1 } }) },
   { id: 'tools.ai', label: 'Asistente IA (Gemini)', ctx: 'all', keys: ['F1'], run: (s) => s.set({ aiOpen: !s.aiOpen }) },
+  { id: 'tools.rebuild', label: 'Actualizar todo (pieza, ensamblaje y ePoints)', ctx: 'all', keys: ['Shift+F2'], run: () => rebuildAll() },
   { id: 'tools.keys', label: 'Atajos de teclado', ctx: 'all', keys: [], run: (s) => s.open({ kind: 'shortcuts' }) },
   { id: 'tools.osnap', label: 'Referencias a objetos (activar/desactivar)', ctx: 'all', keys: ['F3'], run: () => toggleOsnap() },
   { id: 'tools.osnapcfg', label: 'Referencias a objetos (modos)', ctx: 'all', keys: [], run: (s) => s.open({ kind: 'osnap' }) },

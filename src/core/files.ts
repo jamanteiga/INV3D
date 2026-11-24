@@ -127,7 +127,8 @@ export async function saveDocById(id: string, o: { as?: boolean; silent?: boolea
     if (!o.silent) addRecent(path?.split('/').pop() ?? name, kind, path, content);
   };
   if (s.folder.state === 'granted' && (cur.path || !fileHandles.has(id) || o.as)) {
-    let path = cur.path ?? fn;
+    const sub = cur.path ? '' : (await import('./fdp')).subdirFor(kind);
+    let path = cur.path ?? (sub ? `${sub}/${fn}` : fn);
     if (o.as || !cur.path) {
       if (o.silent) return false;
       const p = prompt(`Guardar en la carpeta «${s.folder.name}» como (puedes poner subcarpetas, p. ej. Piezas/${fn}):`, path);
@@ -271,7 +272,7 @@ export function pickFile(accept: string): Promise<File | null> {
   });
 }
 
-export const OPEN_ACCEPT = '.i3p,.i3a,.i3d,.json,.zip,.step,.stp,.ipj,.ipt,.iam,.idw,.ipn,.dwg,.dxf';
+export const OPEN_ACCEPT = '.i3p,.i3a,.i3d,.fdp,.json,.zip,.step,.stp,.ipj,.ipt,.iam,.idw,.ipn,.dwg,.dxf';
 
 export async function openFile(file?: File | null, handle?: any) {
   const s = useStore.getState();
@@ -319,6 +320,8 @@ export async function openFile(file?: File | null, handle?: any) {
       await importStep(file, true);
     } else if (ext === 'dxf') {
       s.open({ kind: 'fileinfo', title: 'Dibujo DXF', info: await dwgInfo(file, true) });
+    } else if (ext === 'fdp') {
+      await (await import('./fdp')).openFdp(file);
     } else if (ext === 'ipj') {
       await openIpj(file);
     } else if (['ipt', 'iam', 'idw', 'ipn'].includes(ext)) {

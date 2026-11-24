@@ -19,3 +19,4 @@ import('./core/epoints').then((m) => { (window as unknown as { __ep: unknown }).
 import './ui/rules';
 import { loadUserProfiles, registerUserContent } from './ui/Panels2';
 loadUserProfiles(); registerUserContent();
+import('./core/fdp').then((m) => { const r = m.recallProject(); if (r) m.activateProject(r.p, r.fileName); });
