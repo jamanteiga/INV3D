@@ -178,6 +178,7 @@ export default function App() {
       if (e.key === 'Escape') {
         if (s.menuOpen) return s.set({ menuOpen: false });
         if (s.epConnect) return s.set({ epConnect: null });
+        if (s.freeRot) return s.set({ freeRot: null });
         if (s.dialog) return s.closeDialog();
         if (s.asmRotate) return s.set({ asmRotate: false });
         if (s.tool === 'place') return asmActions.finishPlace();

@@ -495,6 +495,32 @@ export default function AsmViewport() {
       rot = { top, c: bb.getCenter(new THREE.Vector3()), grps: meshes.map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() })), R0: tempRot.get(top)?.clone() ?? new THREE.Matrix4(), x: ev.clientX, y: ev.clientY, R: new THREE.Matrix4(), moved: false };
       cvs.style.cursor = 'grabbing';
     }, { capture: true });
+    // Giro libre con G (como Inventor): el componente elegido gira con el ratón sin pulsar; clic acepta, Esc cancela
+    let mouseXY = { x: 0, y: 0 };
+    window.addEventListener('pointermove', (ev) => { mouseXY = { x: ev.clientX, y: ev.clientY }; }, { capture: true });
+    const startFreeRot = (s: State, id: string) => {
+      const top = topOf(s, id);
+      const meshes = pickables.filter((m) => m.userData.kind === 'occ' && topOf(s, m.userData.id) === top);
+      if (!meshes.length) { useStore.setState({ freeRot: null }); return; }
+      const bb = new THREE.Box3(); for (const m of meshes) { m.geometry.computeBoundingBox(); bb.union(m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld)); }
+      V.controls.enabled = false;
+      rot = { top, c: bb.getCenter(new THREE.Vector3()), grps: meshes.map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() })), R0: tempRot.get(top)?.clone() ?? new THREE.Matrix4(), x: mouseXY.x, y: mouseXY.y, R: new THREE.Matrix4(), moved: false };
+      cvs.style.cursor = 'grabbing';
+      const name = s.asm.occurrences.find((o) => o.id === top)?.name ?? '';
+      s.notify(`Giro libre de ${name}: mueve el ratón · clic para aceptar · Esc para cancelar`);
+    };
+    const cancelFreeRot = () => {
+      if (!rot) return;
+      for (const { g, m } of rot.grps) { g.matrix.copy(m); g.matrixWorldNeedsUpdate = true; }
+      rot = null; V.controls.enabled = true; cvs.style.cursor = 'default'; V.request();
+    };
+    host.current!.addEventListener('pointerdown', (ev) => {
+      const s = useStore.getState(); if (!s.freeRot || !rot) return;
+      ev.stopImmediatePropagation(); ev.preventDefault();
+      if (ev.button === 0) { rot.moved = true; endRot(); } else cancelFreeRot();
+      freeRotEnded = true;
+      useStore.setState({ freeRot: null }); cvs.style.cursor = s.asmRotate ? 'grab' : 'default';
+    }, { capture: true });
     window.addEventListener('pointermove', (ev) => {
       if (!rot) return;
       const dx = ev.clientX - rot.x, dy = ev.clientY - rot.y;
@@ -567,7 +593,9 @@ export default function AsmViewport() {
       return true;
     };
     cvs.addEventListener('pointerdown', (ev) => { downAt = { x: ev.clientX, y: ev.clientY, button: ev.button }; });
+    let freeRotEnded = false;
     cvs.addEventListener('pointerup', (ev) => {
+      if (freeRotEnded) { freeRotEnded = false; downAt = null; ev.stopImmediatePropagation(); return; }
       if (endRot()) { downAt = null; ev.stopImmediatePropagation(); return; }
       if (endDrag(ev)) { downAt = null; return; }
       if (V.picking) { downAt = null; return; }
@@ -859,6 +887,7 @@ export default function AsmViewport() {
       if (p.dialog && !s.dialog && s.createTarget) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.createTarget) useStore.setState({ createTarget: null }); }, 0);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); if (p.tool === 'measure') measureReset(); drawMeasure(); }
       if (s.view !== p.view) V.setView(s.view.name);
+      if (s.freeRot !== p.freeRot) { if (s.freeRot && !p.freeRot) startFreeRot(s, s.freeRot); else if (!s.freeRot && p.freeRot) cancelFreeRot(); }
       if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
     });
     V.setView('home');
