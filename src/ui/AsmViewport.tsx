@@ -482,7 +482,7 @@ export default function AsmViewport() {
     let downAt: { x: number; y: number; button: number } | null = null;
     const cvs = V.renderer.domElement;
     // Rotar: giro libre de una sola pieza alrededor de su centro (trackball con el ratón)
-    let rot: { top: string; c: THREE.Vector3; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; R0: THREE.Matrix4; x: number; y: number; R: THREE.Matrix4; moved: boolean } | null = null;
+    let rot: { top: string; c: THREE.Vector3; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; R0: THREE.Matrix4; x: number; y: number; R: THREE.Matrix4; moved: boolean; roll?: { cx: number; cy: number } } | null = null;
     host.current!.addEventListener('pointerdown', (ev) => {
       const s = useStore.getState();
       if (!s.asmRotate || ev.button !== 0 || (s.tool && s.tool !== 'move') || s.mode === 'present') return;
@@ -495,39 +495,69 @@ export default function AsmViewport() {
       rot = { top, c: bb.getCenter(new THREE.Vector3()), grps: meshes.map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() })), R0: tempRot.get(top)?.clone() ?? new THREE.Matrix4(), x: ev.clientX, y: ev.clientY, R: new THREE.Matrix4(), moved: false };
       cvs.style.cursor = 'grabbing';
     }, { capture: true });
-    // Giro libre con G (como Inventor): el componente elegido gira con el ratón sin pulsar; clic acepta, Esc cancela
-    let mouseXY = { x: 0, y: 0 };
-    window.addEventListener('pointermove', (ev) => { mouseXY = { x: ev.clientX, y: ev.clientY }; }, { capture: true });
+    // Giro libre con G (como Inventor): círculo de giro alrededor del componente. Arrastrar dentro del círculo gira
+    // libremente; arrastrar fuera gira alrededor del eje de la vista. Se puede arrastrar varias veces; Esc o clic
+    // derecho termina. Mientras no se arrastra se puede orbitar la vista con el botón central.
+    let free: { top: string; c: THREE.Vector3; r: number; ring: HTMLDivElement; raf: number } | null = null;
+    const ringPx = () => {
+      if (!free) return null;
+      const rect = cvs.getBoundingClientRect(), a = V.project(free.c);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+      const b = V.project(free.c.clone().addScaledVector(right, free.r));
+      return { cx: rect.left + a.x, cy: rect.top + a.y, R: Math.max(30, Math.hypot(b.x - a.x, b.y - a.y)), lx: a.x, ly: a.y };
+    };
     const startFreeRot = (s: State, id: string) => {
       const top = topOf(s, id);
       const meshes = pickables.filter((m) => m.userData.kind === 'occ' && topOf(s, m.userData.id) === top);
       if (!meshes.length) { useStore.setState({ freeRot: null }); return; }
+      scene.updateMatrixWorld(true);
       const bb = new THREE.Box3(); for (const m of meshes) { m.geometry.computeBoundingBox(); bb.union(m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld)); }
-      V.controls.enabled = false;
-      rot = { top, c: bb.getCenter(new THREE.Vector3()), grps: meshes.map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() })), R0: tempRot.get(top)?.clone() ?? new THREE.Matrix4(), x: mouseXY.x, y: mouseXY.y, R: new THREE.Matrix4(), moved: false };
-      cvs.style.cursor = 'grabbing';
+      const sph = bb.getBoundingSphere(new THREE.Sphere());
+      const ring = document.createElement('div'); ring.className = 'free-ring';
+      for (const q of ['t', 'b', 'l', 'r']) { const h = document.createElement('i'); h.className = 'h-' + q; ring.appendChild(h); }
+      host.current!.appendChild(ring);
+      free = { top, c: sph.center, r: sph.radius * 0.85, ring, raf: 0 };
+      const tick = () => { if (!free) return; const g = ringPx(); if (g) { ring.style.left = `${g.lx - g.R}px`; ring.style.top = `${g.ly - g.R}px`; ring.style.width = ring.style.height = `${2 * g.R}px`; } free.raf = requestAnimationFrame(tick); };
+      tick();
       const name = s.asm.occurrences.find((o) => o.id === top)?.name ?? '';
-      s.notify(`Giro libre de ${name}: mueve el ratón · clic para aceptar · Esc para cancelar`);
+      s.notify(`Giro libre de ${name}: arrastra dentro del círculo para girar libremente, fuera para girar en el plano de la vista · Esc o clic derecho para terminar`);
     };
-    const cancelFreeRot = () => {
-      if (!rot) return;
-      for (const { g, m } of rot.grps) { g.matrix.copy(m); g.matrixWorldNeedsUpdate = true; }
-      rot = null; V.controls.enabled = true; cvs.style.cursor = 'default'; V.request();
+    const stopFreeRot = () => {
+      if (rot) { for (const { g, m } of rot.grps) { g.matrix.copy(m); g.matrixWorldNeedsUpdate = true; } rot = null; }
+      if (free) { cancelAnimationFrame(free.raf); free.ring.remove(); free = null; }
+      V.controls.enabled = true; cvs.style.cursor = useStore.getState().asmRotate ? 'grab' : 'default'; V.request();
     };
+    let freeRotEnded = false;
+    host.current!.addEventListener('contextmenu', (ev) => { if (free) { ev.preventDefault(); ev.stopImmediatePropagation(); } }, { capture: true });
     host.current!.addEventListener('pointerdown', (ev) => {
-      const s = useStore.getState(); if (!s.freeRot || !rot) return;
+      const s = useStore.getState(); if (!s.freeRot || !free) return;
+      if (ev.button === 1) return; // botón central: orbitar la vista
       ev.stopImmediatePropagation(); ev.preventDefault();
-      if (ev.button === 0) { rot.moved = true; endRot(); } else cancelFreeRot();
+      if (ev.button === 2) { freeRotEnded = true; useStore.setState({ freeRot: null }); return; }
+      const g = ringPx(); if (!g) return;
+      const inside = Math.hypot(ev.clientX - g.cx, ev.clientY - g.cy) <= g.R;
+      const meshes = pickables.filter((m) => m.userData.kind === 'occ' && topOf(s, m.userData.id) === free!.top);
+      V.controls.enabled = false;
+      rot = { top: free.top, c: free.c.clone(), grps: meshes.map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() })), R0: tempRot.get(free.top)?.clone() ?? new THREE.Matrix4(), x: ev.clientX, y: ev.clientY, R: new THREE.Matrix4(), moved: false, roll: inside ? undefined : { cx: g.cx, cy: g.cy } };
+      cvs.style.cursor = 'grabbing';
       freeRotEnded = true;
-      useStore.setState({ freeRot: null }); cvs.style.cursor = s.asmRotate ? 'grab' : 'default';
     }, { capture: true });
     window.addEventListener('pointermove', (ev) => {
       if (!rot) return;
       const dx = ev.clientX - rot.x, dy = ev.clientY - rot.y;
       if (!rot.moved && Math.hypot(dx, dy) <= 4) return;
       rot.moved = true;
-      const up = camera.up.clone().applyQuaternion(camera.quaternion).normalize(), right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
-      const q = new THREE.Quaternion().setFromAxisAngle(up, dx * 0.01).multiply(new THREE.Quaternion().setFromAxisAngle(right, dy * 0.01));
+      let q: THREE.Quaternion;
+      if (rot.roll) {
+        // fuera del círculo: giro alrededor del eje de la vista
+        const a0 = Math.atan2(rot.y - rot.roll.cy, rot.x - rot.roll.cx), a1 = Math.atan2(ev.clientY - rot.roll.cy, ev.clientX - rot.roll.cx);
+        const view = new THREE.Vector3(0, 0, 1).applyQuaternion(camera.quaternion).normalize();
+        q = new THREE.Quaternion().setFromAxisAngle(view, -(a1 - a0));
+      } else {
+        // dentro: giro libre (trackball) con los ejes de la pantalla
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize(), right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+        q = new THREE.Quaternion().setFromAxisAngle(up, dx * 0.01).multiply(new THREE.Quaternion().setFromAxisAngle(right, dy * 0.01));
+      }
       rot.R = new THREE.Matrix4().makeTranslation(rot.c.x, rot.c.y, rot.c.z).multiply(new THREE.Matrix4().makeRotationFromQuaternion(q)).multiply(new THREE.Matrix4().makeTranslation(-rot.c.x, -rot.c.y, -rot.c.z));
       for (const { g, m } of rot.grps) { g.matrix.copy(m).premultiply(rot.R); g.matrixWorldNeedsUpdate = true; }
       V.request();
@@ -593,9 +623,12 @@ export default function AsmViewport() {
       return true;
     };
     cvs.addEventListener('pointerdown', (ev) => { downAt = { x: ev.clientX, y: ev.clientY, button: ev.button }; });
-    let freeRotEnded = false;
     cvs.addEventListener('pointerup', (ev) => {
-      if (freeRotEnded) { freeRotEnded = false; downAt = null; ev.stopImmediatePropagation(); return; }
+      if (freeRotEnded) {
+        freeRotEnded = false; downAt = null; ev.stopImmediatePropagation();
+        if (rot) { endRot(); if (free) { V.controls.enabled = true; cvs.style.cursor = 'crosshair'; } }
+        return;
+      }
       if (endRot()) { downAt = null; ev.stopImmediatePropagation(); return; }
       if (endDrag(ev)) { downAt = null; return; }
       if (V.picking) { downAt = null; return; }
@@ -887,7 +920,7 @@ export default function AsmViewport() {
       if (p.dialog && !s.dialog && s.createTarget) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.createTarget) useStore.setState({ createTarget: null }); }, 0);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); if (p.tool === 'measure') measureReset(); drawMeasure(); }
       if (s.view !== p.view) V.setView(s.view.name);
-      if (s.freeRot !== p.freeRot) { if (s.freeRot && !p.freeRot) startFreeRot(s, s.freeRot); else if (!s.freeRot && p.freeRot) cancelFreeRot(); }
+      if (s.freeRot !== p.freeRot) { stopFreeRot(); if (s.freeRot) startFreeRot(s, s.freeRot); }
       if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
     });
     V.setView('home');

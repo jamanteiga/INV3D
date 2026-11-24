@@ -788,3 +788,8 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .tb-row.sel { background: var(--accent); color: #fff; }
 .tb-row.sel .muted { color: #fff; }
 .prj-list td { white-space: nowrap; } .prj-list td svg { vertical-align: middle; }
+/* Giro libre (G): círculo de giro alrededor del componente */
+.free-ring { position: absolute; z-index: 5; pointer-events: none; border: 2px solid var(--accent); border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,.6) inset; }
+.free-ring i { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; }
+.free-ring .h-t { left: calc(50% - 7px); top: -7px; } .free-ring .h-b { left: calc(50% - 7px); bottom: -7px; }
+.free-ring .h-l { top: calc(50% - 7px); left: -7px; } .free-ring .h-r { top: calc(50% - 7px); right: -7px; }
