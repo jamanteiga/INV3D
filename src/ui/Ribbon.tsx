@@ -73,9 +73,9 @@ export default function Ribbon() {
     if (k === 'part') return [
       ...(inSketch ? [['sketch', 'Boceto'] as [Tab, string]] : []),
       ...(isSheet ? [['sheet', 'Chapa'] as [Tab, string]] : []),
-      ['model', 'Modelo 3D'], ['annotate', 'Anotar'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['inspect', 'Inspeccionar'], ['measure', 'Medir'], ['tools', 'Herramientas'], ['manage', 'Administrar'], ['view', 'Vista'], ['env', 'Entornos'],
+      ['model', 'Modelo 3D'], ['annotate', 'Anotar'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['measure', 'Medir'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['manage', 'Administrar'], ['view', 'Vista'], ['env', 'Entornos'],
     ].filter(([t]) => !((s.settings as unknown as { hiddenTabs?: string[] }).hiddenTabs ?? []).includes(t as string)) as [Tab, string][];
-    if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['measure', 'Medir'], ['tools', 'Herramientas'], ['view', 'Vista']];
+    if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['measure', 'Medir'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista']];
     return [['place', 'Colocar vistas'], ['annotate', 'Anotar'], ['export', 'Exportar'], ['tools', 'Herramientas']];
   };
   const tabs = tabsFor();

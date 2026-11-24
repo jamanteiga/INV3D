@@ -5,6 +5,7 @@ import {
   syncModelParams,
   syncCenterAxes, eopIndex, eopNormalize } from './doc';
 import { makeEval } from './expr';
+import { migrateHvacDoc } from './hvac';
 import { solve, applySolution, checkNew } from './sketch';
 import { newAsm, solveAssembly, applyAssociative, type AsmDoc, type Xform } from './asm';
 import { normalizeAsm, expandAsm, hasSubs } from './subasm';
@@ -384,7 +385,7 @@ export const useStore = create<State>((set, get) => ({
   addDocument: (kind, data, fileName, activate = true, id) => {
     const nid = id ?? uid('d');
     data = migrateMaterials(data);
-    if (kind === 'part') { data = clone(data); resolveAll(data as PartDoc); }
+    if (kind === 'part') { data = clone(data); migrateHvacDoc(data as PartDoc); resolveAll(data as PartDoc); }
     set({ docs: [...get().docs, { id: nid, kind, fileName, data, past: [], future: [], dirty: false, hidden: !activate && kind !== 'drawing' ? true : undefined }] });
     if (activate) get().activate(nid);
     return nid;

@@ -138,18 +138,49 @@ function makeDuct(s: HvacSpec): PartDoc {
  *  Es una pieza de chapa: tiene desarrollo para corte (Chapa › Desarrollo) y espesor/radio en el estilo de chapa. */
 function makeRectDuctSheet(s: HvacSpec, t: number): PartDoc {
   const L = s.L, W = s.W, H = s.H, r = Math.max(t, 1), b = new B();
-  // Cierre a tope en la 4ª esquina: la pared izquierda apoya sobre la cara interior del fondo y el fondo llega hasta la cara
-  // exterior de la pared izquierda, de modo que las aristas interiores se tocan (holgura mínima para que el sólido sea válido).
-  const cl = 0.01;
-  const P: [number, number][] = [[-W / 2, -H / 2 + cl], [-W / 2, H / 2], [W / 2, H / 2], [W / 2, -H / 2], [-W / 2 - t, -H / 2]];
-  const ents: SkEntity[] = P.slice(0, -1).map((p, i) => ({ id: id('l'), type: 'line', a: [f1(p[0]), f1(p[1])], b: [f1(P[i + 1][0]), f1(P[i + 1][1])] }) as SkEntity);
-  const sk = b.sketch('Sección (boceto)', XY(), ents);
-  b.f.push({ id: 'cf1', name: 'Conducto (chapa plegada)', type: 'sm_contour', profile: sk, width: f1(L), dir: 'normal', side: 'in' });
+  const sk = b.sketch('Sección (boceto)', XY(), rectDuctSection());
+  b.f.push({ id: 'cf1', name: 'Conducto (chapa plegada)', type: 'sm_contour', profile: sk, width: 'L', dir: 'normal', side: 'in' });
   endJoints(b, s, t, L);
   const d = doc(s, `Conducto ${sizeLabel(s)} L=${L} e=${t}`, `Conducto rectangular de chapa plegada ${sizeLabel(s)} · L ${L} mm · chapa ${String(t).replace('.', ',')} mm · 3 pliegues R${String(r).replace('.', ',')} y cierre a tope en la cuarta esquina${endsLabel(s)}`,
     [['W', W, 'Anchura interior'], ['H', H, 'Altura interior'], ['L', L, 'Longitud'], ['t', t, 'Espesor de chapa']]);
-  d.sheet = { t: `${t} mm`, r: `${r} mm`, k: '0.273' };
+  d.sheet = { t: 't', r: `${r} mm`, k: '0.273' };
   d.features = b.f; return d;
+}
+/** Sección del conducto rectangular ligada a los parámetros W, H y t.
+ *  Cierre a tope en la 4ª esquina: la pared izquierda apoya sobre la cara interior del fondo y el fondo llega hasta la
+ *  cara exterior de esa pared, de modo que las aristas interiores se tocan (holgura de 0,01 mm para que el sólido sea válido). */
+function rectDuctSection(): SkEntity[] {
+  const P: [string, string][] = [['-W/2', '-H/2 + 0.01'], ['-W/2', 'H/2'], ['W/2', 'H/2'], ['W/2', '-H/2'], ['-W/2 - t', '-H/2']];
+  return P.slice(0, -1).map((p, i) => ({ id: `l${i + 1}`, type: 'line', a: [p[0], p[1]], b: [P[i + 1][0], P[i + 1][1]] }) as SkEntity);
+}
+/** ePoints de las bocas del conducto rectangular, que siguen a W, H y L */
+function rectDuctEnds(): EPoint[] {
+  const tpl = (z: string) => ({ point: ['0', '0', z] as [string, string, string], radius: 'max(W, H)/2', name: 'Conducto {W}×{H}' });
+  return [
+    { id: 'ep1', name: 'Conducto', kind: 'insert', point: [0, 0, 0], dir: [0, 0, -1], tpl: tpl('0') },
+    { id: 'ep2', name: 'Conducto', kind: 'insert', point: [0, 0, 0], dir: [0, 0, 1], tpl: tpl('L') },
+  ];
+}
+/** Conductos rectangulares de versiones anteriores: sección paramétrica, cierre a tope y ePoints que siguen a las medidas */
+export function migrateHvacDoc(d: PartDoc): PartDoc {
+  if (d.iProperties?.designer !== 'Centro de contenido · HVAC') return d;
+  const cf = d.features.find((f) => f.id === 'cf1' && f.type === 'sm_contour' && f.name === 'Conducto (chapa plegada)') as (Feature & { profile: string; width: string }) | undefined;
+  if (!cf) return d;
+  const sk = d.features.find((f) => f.id === cf.profile && f.type === 'sketch') as (Feature & { entities: SkEntity[] }) | undefined;
+  const names = new Set(d.parameters.map((p) => p.name));
+  if (!sk || !['W', 'H', 'L', 't'].every((n) => names.has(n))) return d;
+  const already = sk.entities.length === 4 && (sk.entities[0] as { a?: string[] }).a?.[0] === '-W/2';
+  if (!already) {
+    sk.entities = rectDuctSection(); cf.width = 'L';
+    if (d.sheet) d.sheet.t = 't';
+    d.iProperties.description = d.iProperties.description.replace('cierre engatillado', 'cierre a tope');
+  }
+  const eps = d.epoints ?? [];
+  const e1 = eps.find((e) => e.id === 'ep1'), e2 = eps.find((e) => e.id === 'ep2');
+  if (e1 && e2 && !e2.tpl && !d.iProperties.stockNumber?.includes('SMACNA')) {
+    const [n1, n2] = rectDuctEnds(); e1.tpl = n1.tpl; e2.tpl = n2.tpl;
+  }
+  return d;
 }
 
 // ---------- Codos ----------
@@ -475,7 +506,9 @@ function hvacEnds(s: HvacSpec): EPoint[] {
   const two = (L: number) => [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [0, 0, L], [0, 0, 1])];
   const t = autoT(s);
   switch (s.kind) {
-    case 'duct': case 'silencer': return two(s.L);
+    case 'duct': if (s.shape === 'rect') return two(s.L).map((e, i) => ({ ...e, tpl: { point: ['0', '0', i ? 'L' : '0'] as [string, string, string], radius: 'max(W, H)/2', ...(s.std === 'SMACNA' ? {} : { name: 'Conducto {W}×{H}' }) } }));
+      return two(s.L);
+    case 'silencer': return two(s.L);
     case 'damper': return two(s.L || 150);
     case 'firedamper': return two(s.L || 350);
     case 'flex': return two(Math.max(2, Math.round(s.L / 25)) * 25);

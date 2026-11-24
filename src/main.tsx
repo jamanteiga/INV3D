@@ -15,6 +15,7 @@ import { initSession } from './ui/session';
 initSession();
 import { cad } from './core/cadClient';
 (window as unknown as { __cad: typeof cad }).__cad = cad;
+import('./core/epoints').then((m) => { (window as unknown as { __ep: unknown }).__ep = m.partEPoints; });
 import './ui/rules';
 import { loadUserProfiles, registerUserContent } from './ui/Panels2';
 loadUserProfiles(); registerUserContent();

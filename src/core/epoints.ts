@@ -4,7 +4,8 @@
 //  · Compuesto: grupo de ePoints que se conectan a la vez con otro compuesto del mismo nombre.
 // Toda pieza tiene además un ePoint de inserción por defecto (el origen, o el que se defina), que es el punto
 // por el que se coge la pieza al colocarla.
-import type { PartDoc, V3 } from './doc';
+import { docParams, type PartDoc, type V3 } from './doc';
+import { makeEval } from './expr';
 import type { AsmDoc, FaceRef, Joint } from './asm';
 
 export type EPointKind = 'mate' | 'insert' | 'composite';
@@ -22,14 +23,35 @@ export interface EPoint {
   isDefault?: boolean;
   /** Desactivado por el diseñador: no se conecta ni se ofrece al colocar */
   inactive?: boolean;
+  /** Plantilla ligada a los parámetros de la pieza: punto, radio y nombre ({expr} se sustituye por su valor) */
+  tpl?: { point?: [string, string, string]; radius?: string; name?: string };
   /** Oculto en el modelo (solo visualización) */
   hidden?: boolean;
 }
 
 /** ePoints de la pieza, con el de inserción por defecto en primer lugar */
+const tplCache = new WeakMap<PartDoc, EPoint[]>();
+/** Resuelve los ePoints con plantilla según los parámetros actuales de la pieza */
+function withTpl(doc: PartDoc): EPoint[] {
+  const list = doc.epoints ?? [];
+  if (!list.some((e) => e.tpl)) return list;
+  const hit = tplCache.get(doc); if (hit) return hit;
+  let ev: (s: string) => number;
+  try { const e0 = makeEval(docParams(doc)); ev = (s) => { try { const v = e0(s); return Number.isFinite(v) ? v : NaN; } catch { return NaN; } }; } catch { return list; }
+  const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  const out = list.map((e) => {
+    if (!e.tpl) return e;
+    const n: EPoint = { ...e };
+    if (e.tpl.point) { const p = e.tpl.point.map(ev); if (p.every(Number.isFinite)) n.point = p.map(r3) as V3; }
+    if (e.tpl.radius) { const r = ev(e.tpl.radius); if (Number.isFinite(r)) n.radius = r3(r); }
+    if (e.tpl.name) n.name = e.tpl.name.replace(/\{([^}]+)\}/g, (_, x: string) => { const v = ev(x); return Number.isFinite(v) ? String(Math.round(v * 10) / 10).replace('.', ',') : '?'; });
+    return n;
+  });
+  tplCache.set(doc, out); return out;
+}
 export function partEPoints(doc: PartDoc | null | undefined): EPoint[] {
   if (!doc) return [];
-  const list = doc.epoints ?? [];
+  const list = withTpl(doc);
   const def = list.find((e) => e.isDefault);
   return def ? [def, ...list.filter((e) => e !== def)] : [{ id: 'ep0', name: 'ePoint de inserción', kind: 'insert', point: [0, 0, 0], dir: [0, 0, 1], isDefault: true }, ...list];
 }
