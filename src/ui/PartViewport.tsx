@@ -5,6 +5,8 @@ import { updateCog } from './cog';
 import { osCfg, showSnapHint, OS_PRIO, intersect, perpFoot, tangentPts, quadrants, type OsMode, type Prim } from './osnap';
 import HeadsUp from './HeadsUp';
 import ClipBar from './ClipBar';
+import MeasurePanel from './MeasurePanel';
+import { useMeasure, measureOverlay, measureCompute, measureAdd, measureReset, edgeEnt, faceEnt, vertexEnt, nearestVertex, type MEnt } from './measure';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useStore, activeSketch, styled, type State } from '../core/store';
@@ -528,10 +530,9 @@ export default function PartViewport() {
     };
     let hoverFace = -1;
     // (cara seleccionada en el modelo: state.selFace)
-    let measureSel: number[] = [];
     const buildOverlay = (s: State) => {
       V.clearGroup(overlayGroup);
-      if (s.tool === 'measure' && state.mesh) for (const g of measureSel) if (g < state.mesh.edgeGroups.length) overlayGroup.add(V.segs(groupPts(g, state.mesh), V.lineMat(css('--accent'), 4, false, false)));
+      if (s.tool === 'measure') { const ms = useMeasure.getState(); let r = null; try { r = ms.sel.length ? measureCompute(ms.sel, ms.dist, ms.prec) : null; } catch { /* */ } overlayGroup.add(measureOverlay(ms.sel, r, (p, c, w) => V.segs(p, V.lineMat(c, w, false, false)), css('--accent'), '#d94f8a')); }
       const d = s.dialog && 'draft' in s.dialog ? s.dialog.draft : null;
       const m = pickMesh();
       if (state.mesh && state.selFace >= 0 && state.selFace < state.mesh.faceGroups.length && s.selFacePlane && s.mode !== 'sketch' && !s.tool) overlayGroup.add(faceOverlay(state.mesh, state.selFace, css('--accent'), 0.35));
@@ -1578,46 +1579,16 @@ export default function PartViewport() {
         return;
       }
       if (s.tool === 'measure') {
-        const m = state.mesh; if (!m) return;
-        const hit = V.nearestEdge(ev, m, null, occluders()); if (!hit) { measureSel = []; setHint('Medir: clic en una arista'); buildOverlay(s); return; }
-        const pts = groupPts(hit.group, m);
-        const P: THREE.Vector3[] = []; for (let i = 0; i < pts.length; i += 3) P.push(new THREE.Vector3(pts[i], pts[i + 1], pts[i + 2]));
-        measureSel = measureSel.length >= 2 ? [hit.group] : [...measureSel, hit.group];
-        const info = (g: number) => {
-          const a = groupPts(g, m), Q: THREE.Vector3[] = []; for (let i = 0; i < a.length; i += 3) Q.push(new THREE.Vector3(a[i], a[i + 1], a[i + 2]));
-          let L = 0; for (let i = 0; i + 1 < Q.length; i += 2) L += Q[i].distanceTo(Q[i + 1]);
-          // ¿circular? tres puntos y comprobación
-          const q2 = Q.map((v) => v);
-          let txt = `Longitud ${fmt(L, 3)} mm`;
-          if (q2.length > 6) {
-            const a0 = q2[0], b0 = q2[Math.floor(q2.length / 3)], c0 = q2[Math.floor((2 * q2.length) / 3)];
-            const ab = b0.clone().sub(a0), ac = c0.clone().sub(a0), n = ab.clone().cross(ac);
-            if (n.lengthSq() > 1e-12) {
-              const cc = a0.clone().add(ac.clone().multiplyScalar(ab.lengthSq()).sub(ab.clone().multiplyScalar(ac.lengthSq())).cross(n).multiplyScalar(-1 / (2 * n.lengthSq())));
-              const r = cc.distanceTo(a0);
-              if (q2.every((v) => Math.abs(v.distanceTo(cc) - r) < Math.max(1e-3, r * 1e-3))) txt += ` · R ${fmt(r, 3)} · Ø ${fmt(2 * r, 3)} mm`;
-            }
-          }
-          return { Q, txt };
-        };
-        const i1 = info(measureSel[0]);
-        if (measureSel.length === 1) setHint(i1.txt);
-        else {
-          const i2 = info(measureSel[1]);
-          let best = Infinity, pa = new THREE.Vector3(), pb = new THREE.Vector3();
-          for (let i = 0; i + 1 < i1.Q.length; i += 2) for (let j = 0; j + 1 < i2.Q.length; j += 2) {
-            const s1 = new THREE.Line3(i1.Q[i], i1.Q[i + 1]), s2 = new THREE.Line3(i2.Q[j], i2.Q[j + 1]);
-            for (const t of [0, 0.25, 0.5, 0.75, 1]) {
-              const p1 = s1.at(t, new THREE.Vector3()), q1 = new THREE.Vector3(); s2.closestPointToPoint(p1, true, q1);
-              const d1 = p1.distanceTo(q1); if (d1 < best) { best = d1; pa = p1; pb = q1; }
-              const p2 = s2.at(t, new THREE.Vector3()), q3 = new THREE.Vector3(); s1.closestPointToPoint(p2, true, q3);
-              const d2 = p2.distanceTo(q3); if (d2 < best) { best = d2; pa = q3; pb = p2; }
-            }
-          }
-          const dv = pb.clone().sub(pa);
-          setHint(`Distancia mínima ${fmt(best, 3)} mm · ΔX ${fmt(Math.abs(dv.x), 2)} ΔY ${fmt(Math.abs(dv.y), 2)} ΔZ ${fmt(Math.abs(dv.z), 2)}`);
-        }
-        buildOverlay(s);
+        const m = state.mesh; if (!m || !state.partMesh) return;
+        const mode = useMeasure.getState().mode, mw = state.partMesh.matrixWorld;
+        const hit = V.ray(ev).intersectObject(state.partMesh)[0];
+        const camDir = V.camDir(), lim = hit ? hit.point.dot(camDir) + V.worldPerPx() * 6 : Infinity;
+        let e: MEnt | null = null;
+        if (mode === 'auto' || mode === 'vertex') { const p = nearestVertex(V.local(ev), m.lines, mw, (q) => V.project(q), 9, (q) => q.dot(camDir) <= lim); if (p) e = vertexEnt(p); }
+        if (!e && (mode === 'auto' || mode === 'edge')) { const eh = V.nearestEdge(ev, m, null, occluders(), 7); if (eh) e = edgeEnt(m, eh.group, mw); }
+        if (!e && (mode === 'auto' || mode === 'face' || mode === 'loop') && hit && hit.faceIndex != null) e = faceEnt(m, hit.faceIndex, mw);
+        if (!e) { measureReset(); return; }
+        if (mode === 'loop') useMeasure.setState({ sel: [e] }); else measureAdd(e);
         return;
       }
       // Taladro en cara: cara (punto del centro) y aristas de referencia para acotar el centro
@@ -2127,6 +2098,7 @@ export default function PartViewport() {
     const s0 = useStore.getState();
     applyMouse(s0); buildPart(s0); buildSketches(s0);
     let firstMesh = !s0.result?.mesh;
+    const unsubM = useMeasure.subscribe(() => { const s = useStore.getState(); if (s.kind === 'part' && s.tool === 'measure') { buildOverlay(s); V.request(); } });
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'part') return;
       if (s.flatView && (s.active !== p.active || s.mode === 'sketch' || (s.tool && s.tool !== p.tool) || s.pendingFeature || (s.dialog && 'draft' in s.dialog && s.dialog !== p.dialog) || !s.doc.sheet)) { useStore.setState({ flatView: false }); return; }
@@ -2139,13 +2111,13 @@ export default function PartViewport() {
       }
       if (s.doc !== p.doc || s.sketchId !== p.sketchId || s.selEntity !== p.selEntity || s.selEntities !== p.selEntities || s.selCon !== p.selCon || s.tool !== p.tool || s.mode !== p.mode || s.skInfo !== p.skInfo || s.showCons !== p.showCons || s.dialog !== p.dialog) buildSketches(s);
       if ((s.mode !== p.mode || s.doc !== p.doc) && (state.selFace >= 0 || s.selFacePlane)) { state.selFace = -1; if (s.selFacePlane) useStore.setState({ selFacePlane: null }); }
-      if (s.tool !== p.tool || s.mode !== p.mode || s.conType !== p.conType) { applyMouse(s); cancelTool(); setHint(''); state.hoverEdge = -1; hoverFace = -1; measureSel = []; buildOverlay(s); }
+      if (s.tool !== p.tool || s.mode !== p.mode || s.conType !== p.conType) { applyMouse(s); cancelTool(); setHint(''); state.hoverEdge = -1; hoverFace = -1; if (p.tool === 'measure') measureReset(); buildOverlay(s); }
       if (s.view !== p.view) setView(s.view.name);
       if (s.ctxEdit !== p.ctxEdit || s.active !== p.active) buildCtx(s);
     });
     buildCtx(useStore.getState());
     setView('home');
-    return () => { unsub(); window.removeEventListener('keydown', onKey, true); V.dispose(); };
+    return () => { unsub(); unsubM(); window.removeEventListener('keydown', onKey, true); V.dispose(); };
   }, []);
 
   const commitDim = useCallback((id: string, value: string) => {
@@ -2192,6 +2164,7 @@ export default function PartViewport() {
       <div className="viewcube" ref={cubeHost} />
       <HeadsUp kind="part" />
       <ClipBar />
+      <MeasurePanel />
       <FlatBar />
       <PmiLayer />
       {ctxEdit && ctxEdit.part === active && (

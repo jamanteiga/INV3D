@@ -4,6 +4,7 @@ import { useStore, surfaceIds } from '../core/store';
 import { Icon } from './icons';
 import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { toggleClipTool } from './ClipBar';
+import { useMeasure, type MMode, type MDist } from './measure';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS, nextName } from '../core/doc';
 import * as P2 from './Panels2';
@@ -64,6 +65,7 @@ export async function confirmDiscard() {
 
 export default function Ribbon() {
   const s = useStore();
+  const mm = useMeasure();
   const k = s.kind;
   const inSketch = s.mode === 'sketch';
   const isSheet = k === 'part' && !!s.doc.sheet;
@@ -71,9 +73,9 @@ export default function Ribbon() {
     if (k === 'part') return [
       ...(inSketch ? [['sketch', 'Boceto'] as [Tab, string]] : []),
       ...(isSheet ? [['sheet', 'Chapa'] as [Tab, string]] : []),
-      ['model', 'Modelo 3D'], ['annotate', 'Anotar'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['manage', 'Administrar'], ['view', 'Vista'], ['env', 'Entornos'],
+      ['model', 'Modelo 3D'], ['annotate', 'Anotar'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['inspect', 'Inspeccionar'], ['measure', 'Medir'], ['tools', 'Herramientas'], ['manage', 'Administrar'], ['view', 'Vista'], ['env', 'Entornos'],
     ].filter(([t]) => !((s.settings as unknown as { hiddenTabs?: string[] }).hiddenTabs ?? []).includes(t as string)) as [Tab, string][];
-    if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista']];
+    if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['measure', 'Medir'], ['tools', 'Herramientas'], ['view', 'Vista']];
     return [['place', 'Colocar vistas'], ['annotate', 'Anotar'], ['export', 'Exportar'], ['tools', 'Herramientas']];
   };
   const tabs = tabsFor();
@@ -500,6 +502,33 @@ export default function Ribbon() {
             <Big icon="pdf" label="PDF 3D" disabled={!hasSolid} onClick={() => s.open({ kind: 'share' })} title="PDF con la vista del modelo y sus anotaciones" />
             <Big icon="export" label="Formato CAD" disabled={!hasSolid} onClick={() => exportSTEP()} title="STEP para otros programas CAD" />
             <Big icon="share" label="Vistas compartidas" disabled={!hasSolid} onClick={() => s.open({ kind: 'share' })} title="PDF, glTF y STEP para compartir" />
+          </Group>
+        </>); })()}
+        {(k === 'part' || k === 'assembly') && cur === 'measure' && (() => {
+          const M = (mode: MMode, dist?: MDist) => () => { useMeasure.setState({ mode, sel: [], ...(dist ? { dist } : {}) }); if (tool !== 'measure') s.setTool('measure'); };
+          const on = (mode: MMode, dist?: MDist) => tool === 'measure' && mm.mode === mode && (!dist || mm.dist === dist);
+          return (<>
+          <Group label="Medir">
+            <Big icon="measure" label="Medir" active={tool === 'measure'} onClick={() => { if (tool === 'measure') s.setTool(null); else M('auto')(); }} title="Medir vértices, aristas y caras: distancia, ángulo, longitud, radio, área, perímetro y bucles" />
+            <Big icon="dim3d" label="Distancia" active={on('auto', 'min')} onClick={M('auto', 'min')} title="Distancia mínima entre dos entidades, con ΔX/ΔY/ΔZ" />
+            <Big icon="dimang" label="Ángulo" onClick={M('auto')} title="Ángulo entre dos aristas rectas, dos caras planas, arista y cara, o tres vértices" />
+            <Big icon="smcontour" label="Bucle" active={on('loop')} onClick={M('loop')} title="Longitud de los contornos (bucles) de una cara" />
+            <Big icon="region" label="Área" active={on('face')} onClick={M('face')} title="Área, perímetro y centroide de una cara" />
+          </Group>
+          <Group label="Filtro">
+            <Big icon="point" label="Vértice" active={on('vertex')} onClick={M('vertex')} />
+            <Big icon="edges" label="Arista" active={on('edge')} onClick={M('edge')} />
+            <Big icon="surface" label="Cara" active={on('face')} onClick={M('face')} />
+          </Group>
+          <Group label="Distancia">
+            <Big icon="dim3d" label="Mínima" active={tool === 'measure' && mm.dist === 'min'} onClick={() => useMeasure.setState({ dist: 'min' })} />
+            <Big icon="dim3d" label="Máxima" active={tool === 'measure' && mm.dist === 'max'} onClick={() => useMeasure.setState({ dist: 'max' })} />
+            <Big icon="centermark" label="Centro a centro" active={tool === 'measure' && mm.dist === 'center'} onClick={() => useMeasure.setState({ dist: 'center' })} />
+          </Group>
+          <Group label="Propiedades">
+            {k === 'part' && <Big icon="region" label="Propiedades de región" disabled={!hasSolid} onClick={() => s.open({ kind: 'region' })} />}
+            <Big icon="mass" label="Propiedades físicas" onClick={() => s.open({ kind: k === 'part' ? 'iprops' : 'bom' })} />
+            {k === 'assembly' && <Big icon="interf" label="Interferencias" onClick={() => s.open({ kind: 'interf' })} />}
           </Group>
         </>); })()}
         {k === 'part' && cur === 'inspect' && (<>

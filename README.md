@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.33
+## Versión 0.34
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,13 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.34** — pestaña Medir (pieza y ensamblaje) y conductos rectangulares con cierre a tope
+- **Medir › Medir**: panel flotante tipo Inventor. Clic en vértices, aristas o caras (filtro Auto / Vértice / Arista / Cara / Bucle).
+  - 1 entidad: coordenadas del vértice; longitud, ΔX/ΔY/ΔZ, radio, diámetro, centro y ángulo de arco de aristas; área, perímetro, bucles, normal, radio (cilindro/esfera) y centroide de caras.
+  - 2 entidades: distancia mínima, máxima o centro a centro con ΔX/ΔY/ΔZ, ángulo (recta-recta, plano-plano, recta-plano), distancia entre planos paralelos y entre ejes. 3 vértices: ángulo en el vértice central.
+  - Precisión de 0 a 6 decimales, copiar, historial, propiedades físicas y de región. Cota amarilla y selecciones resaltadas en el visor.
+- **Conducto rectangular (HVAC)**: la cuarta esquina cierra a tope; la pared apoya en la cara interior del fondo y las aristas interiores se tocan (antes quedaba una holgura).
 
 **Novedades 0.33** — pestañas Anotar, Administrar y Entornos; Inspeccionar y Herramientas ampliadas (pieza)
 - **Anotar** (anotaciones 3D): tolerancia de operación, SRD (referencias A/B/C), asesor de tolerancias, cota 3D, promover cotas, nota de taladro/rosca automática, textura superficial, símbolo de soldadura, identificador y objetivo de referencia, marco de control ISO 1101, texto con directriz, nota general y de perfil, escala de anotación, media sección, ocultar anotaciones, análisis de tolerancias (peor caso y RSS), PDF con vista y anotaciones, STEP y vistas compartidas.

@@ -1,6 +1,8 @@
 import HeadsUp from './HeadsUp';
 import { updateCog } from './cog';
 import ClipBar from './ClipBar';
+import MeasurePanel from './MeasurePanel';
+import { useMeasure, measureOverlay, measureCompute, measureAdd, measureReset, edgeEnt, faceEnt, vertexEnt, nearestVertex, type MEnt } from './measure';
 import { insertPoint, partEPoints, activeEPoints, epRef, epJoint, type EPoint } from '../core/epoints';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -92,6 +94,7 @@ export default function AsmViewport() {
     const modelGroup = new THREE.Group(); scene.add(modelGroup);
     const lineGroup = new THREE.Group(); scene.add(lineGroup);
     const overlayGroup = new THREE.Group(); scene.add(overlayGroup);
+    const measureGroup = new THREE.Group(); scene.add(measureGroup);
     const refGroup = new THREE.Group(); scene.add(refGroup);
     let refHover: THREE.Object3D | null = null;
     /** Planos y ejes de origen del ensamblaje (al restringir) y planos de trabajo: visibles y seleccionables */
@@ -579,6 +582,27 @@ export default function AsmViewport() {
       if (!downAt || !small || ev.button !== 0 || (tc as any).dragging) { downAt = null; return; }
       downAt = null;
       const s = useStore.getState();
+      if (s.tool === 'measure') {
+        const mode = useMeasure.getState().mode, hit = hitAt(ev), camDir = V.camDir(), lim = hit ? hit.point.dot(camDir) + V.worldPerPx() * 6 : Infinity;
+        let e: MEnt | null = null;
+        const objs = pickables.filter((o) => o.visible !== false);
+        const nameOf = (o: THREE.Object3D) => (o.userData.kind === 'occ' ? findOcc(s, o.userData.id)?.name : undefined) ?? o.userData.kind;
+        if (mode === 'auto' || mode === 'vertex') {
+          let best: { p: THREE.Vector3; d: number; o: THREE.Object3D } | null = null; const P = V.local(ev);
+          for (const o of objs) { const m = meshOf(o.userData.kind, o.userData.id); if (!m) continue; const p = nearestVertex(P, m.lines, o.matrixWorld, (q) => V.project(q), 9, (q) => q.dot(camDir) <= lim); if (p) { const q = V.project(p), d = Math.hypot(q.x - P.x, q.y - P.y); if (!best || d < best.d) best = { p, d, o }; } }
+          if (best) e = vertexEnt(best.p, nameOf(best.o));
+        }
+        if (!e && (mode === 'auto' || mode === 'edge')) {
+          const occl = objs as THREE.Object3D[];
+          let best: { o: THREE.Object3D; g: number; m: NonNullable<ReturnType<typeof meshOf>> } | null = null;
+          for (const o of objs) { const m = meshOf(o.userData.kind, o.userData.id); if (!m) continue; const eh = V.nearestEdge(ev, m, o.matrixWorld, occl, 7); if (eh) { best = { o, g: eh.group, m }; break; } }
+          if (best) e = edgeEnt(best.m, best.g, best.o.matrixWorld, nameOf(best.o));
+        }
+        if (!e && (mode === 'auto' || mode === 'face' || mode === 'loop') && hit && hit.faceIndex != null) { const m = meshOf(hit.object.userData.kind, hit.object.userData.id); if (m) e = faceEnt(m, hit.faceIndex, hit.object.matrixWorld, nameOf(hit.object)); }
+        if (!e) { measureReset(); return; }
+        if (mode === 'loop') useMeasure.setState({ sel: [e] }); else measureAdd(e);
+        return;
+      }
       if (s.tool === 'place') {
         lastCursor = { x: ev.clientX, y: ev.clientY }; moveGhost(lastCursor);
         if (ghost && ghostXf) { asmActions.dropPlace(ghostXf, ghostSnap ? { a: ghostSnap.a.id, occ: ghostSnap.occ, ep: ghostSnap.ep } : undefined); ghostSnap = null; snapMark.visible = false; }
@@ -796,6 +820,12 @@ export default function AsmViewport() {
     const s0 = useStore.getState();
     applyMouse(s0); build(s0); buildRefs(s0);
     let first = !s0.asmResult;
+    const drawMeasure = () => {
+      V.clearGroup(measureGroup); const s = useStore.getState(); if (s.tool !== 'measure') return;
+      const ms = useMeasure.getState(); let r = null; try { r = ms.sel.length ? measureCompute(ms.sel, ms.dist, ms.prec) : null; } catch { /* */ }
+      measureGroup.add(measureOverlay(ms.sel, r, (p, c, w) => V.segs(p, V.lineMat(c, w, false, false)), css('--accent'), '#d94f8a')); V.request();
+    };
+    const unsubM = useMeasure.subscribe(drawMeasure);
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
       if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud) {
@@ -807,12 +837,12 @@ export default function AsmViewport() {
       if (s.epConnect !== p.epConnect) setHint(s.epConnect ? `${s.epConnect.label}: elige el ePoint de otro componente para conectarlos (Esc cancela)` : '');
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
-      if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); }
+      if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); if (p.tool === 'measure') measureReset(); drawMeasure(); }
       if (s.view !== p.view) V.setView(s.view.name);
       if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
     });
     V.setView('home');
-    return () => { unsub(); tc.dispose(); V.dispose(); };
+    return () => { unsub(); unsubM(); tc.dispose(); V.dispose(); };
   }, []);
 
   const tool = useStore((s) => s.tool);
@@ -836,6 +866,7 @@ export default function AsmViewport() {
       <div className="viewcube" ref={cubeHost} />
       <HeadsUp kind="asm" />
       <ClipBar />
+      <MeasurePanel />
       <button className="vp-home" title="Vista de inicio (F6)" onClick={() => useStore.getState().setView('home')}>
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </button>

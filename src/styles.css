@@ -735,3 +735,26 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .pmi-label.pmi-fcf { border-width: 1.5px; font-family: 'DejaVu Sans Mono', monospace; }
 .pmi-label.pmi-gnote, .pmi-label.pmi-profile { border-style: dashed; }
 .pmi-label:hover { background: #fff7d6; }
+/* ---------- Medir ---------- */
+.measure-panel { position: absolute; top: 12px; right: 12px; z-index: 30; width: 300px; max-height: calc(100% - 24px); overflow: auto; background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); font-size: 12px; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; }
+.measure-panel .mp-head { display: flex; justify-content: space-between; align-items: center; }
+.measure-panel .x { border: 0; background: none; color: var(--fg-2); cursor: pointer; padding: 2px 5px; border-radius: 4px; }
+.measure-panel .x:hover { background: var(--panel-2); }
+.measure-panel .mp-modes { display: flex; gap: 2px; flex-wrap: wrap; }
+.measure-panel .mp-modes button { flex: 1; border: 1px solid var(--line); background: var(--panel-2); color: var(--fg); border-radius: 4px; padding: 3px 4px; cursor: pointer; font-size: 11px; }
+.measure-panel .mp-modes button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.measure-panel .mp-sel { display: flex; flex-direction: column; gap: 3px; }
+.measure-panel .mp-slot { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px dashed var(--line-2); border-radius: 4px; color: var(--fg-2); }
+.measure-panel .mp-slot.full { border-style: solid; color: var(--fg); }
+.measure-panel .mp-slot .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.measure-panel .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.measure-panel .mp-hint { color: var(--fg-2); font-style: italic; }
+.measure-panel .mp-res { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.measure-panel .mp-res td { padding: 2px 4px; border-bottom: 1px solid var(--line); }
+.measure-panel .mp-res td:last-child { text-align: right; font-weight: 600; }
+.measure-panel .mp-res tr.sep td { border-bottom: 2px solid var(--line-2); padding: 0; }
+.measure-panel .mp-opts { display: flex; gap: 8px; }
+.measure-panel .mp-opts label { display: flex; flex-direction: column; gap: 2px; flex: 1; color: var(--fg-2); }
+.measure-panel .mp-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.measure-panel .mp-btns .btn { flex: 1; font-size: 11px; padding: 4px 6px; }
+.measure-panel .mp-hist div { padding: 2px 0; border-bottom: 1px solid var(--line); }
