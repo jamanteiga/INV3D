@@ -758,3 +758,5 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .measure-panel .mp-btns { display: flex; gap: 4px; flex-wrap: wrap; }
 .measure-panel .mp-btns .btn { flex: 1; font-size: 11px; padding: 4px 6px; }
 .measure-panel .mp-hist div { padding: 2px 0; border-bottom: 1px solid var(--line); }
+.cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 4px; margin: 2px 0 8px; }
+.cc-grid .btn { font-size: 12px; padding: 5px 6px; }

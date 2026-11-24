@@ -558,7 +558,7 @@ export default function Ribbon() {
           <Group label="Componente">
             <SplitBig onPick={(t) => s.open({ kind: t as 'place' | 'content' })} items={[
               { key: 'place', icon: 'place', label: 'Colocar', title: 'Colocar pieza (P)' }, { key: 'content', icon: 'content', label: 'Centro de contenido', title: 'Tornillería, pasadores, rodamientos y chavetas normalizados' }]} />
-            <Big icon="newpart" label="Crear" title="Crear una pieza nueva en contexto: elige una cara de otro componente para su primer boceto" onClick={A.createPart} />
+            <Big icon="newpart" label="Crear" title="Crear componente: elige un ePoint o una cara de un componente y después la pieza del centro de contenido HVAC o Mecánica (queda restringida), o modela una pieza nueva en contexto" active={tool === 'asmCreatePick'} onClick={A.createComponent} />
             <Big icon="part" label="Editar" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem && s.docs.find((d) => d.id === o.part)?.kind === 'part')} onClick={() => A.editInPlace(s.selItem!)} title="Editar la pieza seleccionada en contexto (doble clic sobre el componente)" />
             <Col>
               <Small icon="pattern_comp" label="Patrón" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={() => s.open({ kind: 'cpattern' })} title="Patrón rectangular o circular del componente seleccionado" />

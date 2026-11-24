@@ -180,6 +180,7 @@ export default function App() {
         if (s.dialog) return s.closeDialog();
         if (s.asmRotate) return s.set({ asmRotate: false });
         if (s.tool === 'place') return asmActions.finishPlace();
+        if (s.tool === 'asmCreatePick') { s.setTool(null); return s.open({ kind: 'createcomp' }); }
         if (s.tool) return s.setTool(null);
         if (s.mode === 'sketch' && (s.selEntity || s.selCon || s.selEntities.length)) return s.set({ selEntity: null, selCon: null, selEntities: [] });
         if (s.mode === 'sketch') return s.finishSketch();

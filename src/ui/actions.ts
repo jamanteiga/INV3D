@@ -1,6 +1,6 @@
 import { normalizeAsm } from '../core/subasm';
 import { recR, K_DEFAULT } from '../core/sheetrec';
-import { autoEPointJoints, partEPoints, epJoint } from '../core/epoints';
+import { autoEPointJoints, partEPoints, epJoint, epRef, type EPoint } from '../core/epoints';
 const partOf = (s: ReturnType<typeof useStore.getState>, id: string): PartDoc | null => { const d = s.docData(id) as PartDoc | null; return d && d.format === 'inv3d.part' ? d : null; };
 import { docGetter } from '../core/store';
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
@@ -332,10 +332,61 @@ export const asmActions = {
   },
   /** Colocar: el primer componente queda fijo en el origen; después cada copia sigue al cursor y se suelta con un clic.
    *  Esc o clic derecho terminan. X/Y/Z giran 90° la copia pendiente. */
+  /** Crear componente: 1) geometría de un componente (ePoint o cara), 2) centro de contenido HVAC / Mecánica o pieza modelada, 3) restricción automática */
+  createComponent: () => {
+    const s = S(); if (s.kind !== 'assembly') return;
+    if (s.placing) s.setTool(null);
+    useStore.setState({ createTarget: null });
+    if (!s.asm.occurrences.some((o) => !o.suppressed)) { s.open({ kind: 'createcomp' }); return; }
+    s.setTool('asmCreatePick');
+    s.notify('Crear componente: elige la geometría de un componente donde irá la pieza (ePoint o cara) · Esc: sin referencia');
+  },
+  /** Coloca la pieza del centro de contenido restringida a la geometría elegida en «Crear componente» */
+  placeAtTarget: (partId: string, extras: string[] = []): boolean => {
+    const s = S(); const T = s.createTarget; if (!T || s.kind !== 'assembly') return false;
+    const e = s.docs.find((d) => d.id === partId); if (!e) return false;
+    useStore.setState({ createTarget: null });
+    const eps = partEPoints(partOf(s, partId)).filter((x) => !x.inactive && x.kind !== 'composite');
+    const own = eps.filter((x) => !x.isDefault);
+    // ePoint de la pieza nueva: el del mismo tipo que el elegido (o inserción si la cara es cilíndrica); si no, el de inserción
+    const wantInsert = T.epKind ? T.epKind === 'insert' : T.ref.kind === 'axis';
+    const ne: EPoint | undefined = own.find((x) => (x.kind === 'insert') === wantInsert) ?? own[0] ?? eps[0];
+    const base = e.fileName.replace(/\.[^.]+$/, '');
+    const conj = (a: [number, number, number, number]): [number, number, number, number] => [-a[0], -a[1], -a[2], a[3]];
+    // posición inicial: el ePoint de la pieza sobre el punto elegido y con su dirección opuesta a la normal
+    let xf: Xform = { pos: [...T.pW] as V3, quat: [0, 0, 0, 1] };
+    if (ne) {
+      const quat = qq.mul(quatZTo(v3.mul(T.nW, -1)), conj(quatZTo(v3.norm(ne.dir))));
+      xf = { pos: v3.sub(T.pW, qq.rotate(quat, ne.point)), quat };
+    }
+    const occ = uid('o'); let jn = '';
+    s.commitAsm((a) => {
+      let k = 1; while (a.occurrences.some((o) => o.name === `${base}:${k}`)) k++;
+      a.occurrences.push({ id: occ, name: `${base}:${k}`, part: partId, xf: { pos: [...xf.pos] as V3, quat: [...xf.quat] as Xform['quat'] } });
+      for (const x of extras) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { pos: [...xf.pos] as V3, quat: [...xf.quat] as Xform['quat'] } });
+      if (!ne) return;
+      let j: Joint;
+      if (T.ep) {
+        const ob = a.occurrences.find((o) => o.id === T.occ);
+        const te = ob && partEPoints(partOf(S(), ob.part)).find((x) => x.id === T.ep);
+        if (!te) return;
+        j = epJoint(a, occ, ne, T.occ, te, uid);
+      } else {
+        const nr = epRef(ne, occ);
+        const b = T.ref.kind === 'axis' && ne.kind === 'insert' ? nr : { occ, point: ne.point, normal: ne.dir, kind: 'plane' as const, xdir: nr.xdir };
+        j = { id: uid('j'), name: `Unión${a.joints.length + 1}`, type: T.ref.kind === 'axis' && ne.kind === 'insert' ? 'insert' : 'mate', a: T.ref, b, offset: '0 mm', angle: '0 deg', aligned: T.ref.kind === 'axis' ? false : undefined };
+      }
+      a.joints.push(j); jn = `${j.name} (${j.type === 'insert' ? 'Insertar' : 'Coincidir'})`;
+    });
+    useStore.setState({ selItem: occ, dialog: null, tool: null });
+    s.notify(jn ? `${base} colocada y restringida a ${T.label} · ${jn}. Ajusta o añade restricciones con Restringir (J)` : `${base} colocada en ${T.label} (sin ePoint propio: restríngela con Restringir)`);
+    return true;
+  },
   startPlace: (partId: string, extras: string[] = [], firstAt?: { pos: [number, number, number]; grounded: boolean; label?: string }) => {
     const s = S();
     if (s.kind !== 'assembly') return;
     const e = s.docs.find((d) => d.id === partId); if (!e) return;
+    if (s.createTarget && asmActions.placeAtTarget(partId, extras)) return;
     if (s.placing) s.setTool(null);
     const base = e.fileName.replace(/\.[^.]+$/, '');
     const nextName = (a: { occurrences: { name: string }[] }) => { let k = 1; while (a.occurrences.some((o) => o.name === `${base}:${k}`)) k++; return `${base}:${k}`; };

@@ -723,3 +723,43 @@ export function SaveNewPartDialog({ part, occ, onClose }: { part: string; occ: s
     </Modal>
   );
 }
+
+/** Crear componente: centro de contenido HVAC / Mecánica (o pieza modelada) para la geometría elegida */
+export function CreateCompDialog({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const T = s.createTarget;
+  const go = (d: Parameters<ReturnType<typeof useStore.getState>['open']>[0]) => s.open(d);
+  const B = ({ l, d }: { l: string; d: Parameters<ReturnType<typeof useStore.getState>['open']>[0] }) => <button className="btn" onClick={() => go(d)}>{l}</button>;
+  const H = (hk: string) => ({ kind: 'hvac', hk }) as never;
+  const P = (pk: string, norm: string) => ({ kind: 'piping', pk, norm }) as never;
+  const cancel = () => { useStore.setState({ createTarget: null }); onClose(); };
+  return (
+    <Modal title="Crear componente" onClose={cancel} wide>
+      <div className="pick-info">{T ? <>Se restringirá a: <b>{T.label}</b> {T.ep ? '(ePoint)' : ''}</> : <>Sin geometría de referencia: se colocará con el ratón.</>}
+        {' '}<button className="btn sm" onClick={() => { onClose(); useStore.setState({ createTarget: null }); void import('./actions').then((m) => m.asmActions.createComponent()); }}>Cambiar</button></div>
+      <div className="plabel">HVAC</div>
+      <div className="cc-grid">
+        {([['Conducto', 'duct'], ['Codo', 'elbow'], ['Transición', 'transition'], ['Derivación', 'branch'], ['Manguito', 'coupling'], ['Tapa', 'cap'], ['Plenum', 'plenum'], ['Compuerta', 'damper'], ['Cortafuegos', 'firedamper'], ['Silenciador', 'silencer'], ['Flexible', 'flex'], ['Rejilla', 'grille'], ['Difusor', 'diffuser'], ['Brida / marco', 'flange'], ['Soporte', 'support'], ['UTA', 'ahu'], ['Fancoil', 'fancoil']] as const).map(([l, k]) => <B key={k} l={l} d={H(k)} />)}
+      </div>
+      <div className="plabel">HVAC · Espirotubo</div>
+      <div className="cc-grid">
+        {([['Espirotubo', 'tube'], ['Codo 15-90°', 'elbow'], ['Te / injerto', 'tee'], ['Reducción', 'reducer']] as const).map(([l, k]) => <B key={k} l={l} d={{ kind: 'spiro', sk: k } as never} />)}
+      </div>
+      {(['ASME', 'EN'] as const).map((n) => (<div key={n}>
+        <div className="plabel">Mecánica · Tubería {n}</div>
+        <div className="cc-grid">
+          {([['Tubo', 'pipe'], ['Brida', 'flange'], ['Codo', 'elbow'], ['Te', 'tee'], ['Te reducida', 'rtee'], ['Cruz', 'cross'], ['Reducción', 'reducer'], ['Casquete', 'cap'], ['Manguito', 'coupling'], ['Portabridas', 'stub']] as const).map(([l, k]) => <B key={k} l={l} d={P(k, n)} />)}
+        </div></div>))}
+      <div className="plabel">Mecánica · Tornillería</div>
+      <div className="cc-grid">
+        <B l="Tornillo EN" d={{ kind: 'contentf', fam: 'iso4014' } as never} />
+        <B l="Espárrago EN" d={{ kind: 'contentf', fam: 'enstud' } as never} />
+        <B l="Tuerca / arandela EN" d={{ kind: 'contentf', fam: 'iso4032' } as never} />
+      </div>
+      <div className="modal-btns">
+        <button className="btn" onClick={() => { useStore.setState({ createTarget: null }); onClose(); void import('./actions').then((m) => m.asmActions.createPart()); }}>Modelar pieza nueva en contexto</button>
+        <span className="grow" /><button className="btn" onClick={cancel}>Cancelar</button>
+      </div>
+    </Modal>
+  );
+}

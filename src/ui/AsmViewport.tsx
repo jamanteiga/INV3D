@@ -101,7 +101,7 @@ export default function AsmViewport() {
     /** Planos y ejes de origen del ensamblaje (al restringir) y planos de trabajo: visibles y seleccionables */
     const buildRefs = (s: State) => {
       V.clearGroup(refGroup); refHover = null;
-      const joint = s.dialog?.kind === 'joint' || s.dialog?.kind === 'asmwp';
+      const joint = s.dialog?.kind === 'joint' || s.dialog?.kind === 'asmwp' || s.tool === 'asmCreatePick';
       const box = V.viewBox(), size = Math.max(100, box.getSize(new THREE.Vector3()).length() * 0.45);
       const plane = (ref: FaceRef, label: string, color: string) => {
         const n = tv(ref.normal).normalize(), x = tv(ref.xdir ?? [1, 0, 0]).normalize(), y = n.clone().cross(x);
@@ -706,6 +706,19 @@ export default function AsmViewport() {
           : `${holes.length} taladro(s) Ø${Math.round(2 * r * 10) / 10} · espesor a abarcar ${holes[0].grip} mm${size ? ` · ${size}` : ''}`);
         return;
       }
+      if (s.tool === 'asmCreatePick') {
+        const r = refAt(ev); const ep = r?.object.userData.ep as { occ: string; id: string; kind: string; pW: V3; dW: V3 } | undefined;
+        let T: NonNullable<State['createTarget']> | null = null;
+        if (ep) T = { occ: ep.occ, ref: r!.object.userData.ref, ep: ep.id, epKind: ep.kind, label: r!.object.userData.label, pW: ep.pW, nW: ep.dW };
+        else {
+          const hit = hitAt(ev); const f = hit ? faceFromHit(hit) : null;
+          if (!f || f.ownerKind !== 'occ') { s.notify('Elige un ePoint o una cara plana o cilíndrica de un componente', 'error'); return; }
+          const nm = findOcc(s, f.owner)?.name ?? '';
+          T = { occ: f.owner, ref: { occ: f.owner, point: f.pointL, normal: f.normalL, kind: f.kind, radius: f.radius, convex: f.convex, center: f.centerL, xdir: f.xdirL }, label: `${nm} · cara ${f.kind === 'axis' ? 'cilíndrica' : 'plana'}`, pW: f.pointW, nW: f.normalW };
+        }
+        useStore.setState({ createTarget: T, tool: null, dialog: { kind: 'createcomp' } });
+        return;
+      }
       if (s.tool === 'asmFace' && dlg?.kind === 'joint' && d?.epMode) {
         const r = refAt(ev); const ep = r?.object.userData.ep as { occ: string; id: string } | undefined;
         if (ep) setJointEPoint(ep.occ, ep.id); else s.notify('Haz clic en un ePoint (o elígelo en la lista del diálogo)', 'error');
@@ -839,10 +852,11 @@ export default function AsmViewport() {
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }
       if (s.dialog?.kind !== p.dialog?.kind || s.asm.workPlanes !== p.asm.workPlanes || s.asm.workAxes !== p.asm.workAxes || s.asm.workPoints !== p.asm.workPoints
-        || s.asmResult !== p.asmResult || s.asmOrigins !== p.asmOrigins || s.hud.epoints !== p.hud.epoints || s.epConnect !== p.epConnect || s.docs !== p.docs || s.placing?.occ !== p.placing?.occ) buildRefs(s);
+        || s.asmResult !== p.asmResult || s.asmOrigins !== p.asmOrigins || s.tool !== p.tool || s.hud.epoints !== p.hud.epoints || s.epConnect !== p.epConnect || s.docs !== p.docs || s.placing?.occ !== p.placing?.occ) buildRefs(s);
       if (s.epConnect !== p.epConnect) setHint(s.epConnect ? `${s.epConnect.label}: elige el ePoint de otro componente para conectarlos (Esc cancela)` : '');
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
+      if (p.dialog && !s.dialog && s.createTarget) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.createTarget) useStore.setState({ createTarget: null }); }, 0);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); if (p.tool === 'measure') measureReset(); drawMeasure(); }
       if (s.view !== p.view) V.setView(s.view.name);
       if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
@@ -858,6 +872,7 @@ export default function AsmViewport() {
   const hints: Record<string, string> = {
     frameLine: 'Selecciona líneas de esqueleto o de boceto · clic de nuevo para quitar',
     skelPoint: step === 0 ? 'Punto inicial: vértice, extremo de línea o punto de una cara' : 'Punto final',
+    asmCreatePick: 'Crear componente: clic en un ePoint o en una cara de un componente · Esc: sin referencia',
     asmFace: dialog?.kind === 'asmwp' ? 'Cara plana o plano de base para el plano de trabajo' : (dialog as { draft?: { epMode?: boolean } } | null)?.draft?.epMode ? (step === 0 ? 'Primer ePoint: clic en un ePoint de un componente' : 'Segundo ePoint: clic en un ePoint de otro componente') : step === 0 ? 'Primera geometría: cara, eje o plano de origen' : step === 1 ? 'Segunda geometría (se moverá el componente libre)' : 'Plano de simetría',
     weldFace: step === 0 ? 'Primera cara a soldar' : 'Segunda cara a soldar',
     boltFace: 'Cara de inicio: donde apoya la cabeza del tornillo',

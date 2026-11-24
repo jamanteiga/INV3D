@@ -3294,6 +3294,7 @@ export function Modals() {
     case 'simplify': return <SimplifyDialog onClose={close} />;
     case 'pmi': return <PX.PmiDialog key={(d as { editId?: string }).editId ?? (d as { pmiKind: string }).pmiKind} kind={(d as unknown as { pmiKind: never }).pmiKind} editId={(d as { editId?: string }).editId} onClose={close} />;
     case 'drf': return <PX.DrfDialog onClose={close} />;
+    case 'createcomp': return <PX.CreateCompDialog onClose={close} />;
     case 'savenewpart': return <PX.SaveNewPartDialog part={(d as { part: string }).part} occ={(d as { occ: string }).occ} onClose={close} />;
     case 'promote': return <PX.PromoteDialog onClose={close} />;
     case 'toladvisor': return <PX.TolAdvisorDialog onClose={close} />;

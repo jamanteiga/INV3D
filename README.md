@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.35
+## Versión 0.36
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.36**
+- **Crear componente** (Ensamblar › Crear): 1) clic en un **ePoint** o en una **cara** (plana o cilíndrica) de una pieza del ensamblaje (Esc: sin referencia); 2) se abre el **centro de contenido** con HVAC (conductos, codos, transiciones, derivaciones, compuertas, terminales, espirotubo…), Mecánica · Tubería ASME/EN y tornillería, o *Modelar pieza nueva en contexto*; 3) al pulsar **Colocar** la pieza queda **restringida** a esa geometría: ePoint–ePoint (insertar si los dos son de inserción) o su ePoint contra la cara (coincidir; insertar en caras cilíndricas). Se puede afinar después con Restringir (J).
 
 **Novedades 0.35**
 - **Crear pieza en el ensamblaje** (Ensamblar › Crear): la pieza se modela dentro del ensamblaje viendo el resto de componentes. Al pulsar *Volver al ensamblaje* pide **nombre y guardarla** (*Guardar…* o *Más tarde*) y queda **libre** (sin fijar) para restringirla donde interese. Si no tiene sólido se descarta.
