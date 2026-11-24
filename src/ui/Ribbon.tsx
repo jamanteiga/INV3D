@@ -6,6 +6,8 @@ import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { toggleClipTool } from './ClipBar';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS, nextName } from '../core/doc';
+import * as P2 from './Panels2';
+import type { PmiKind } from '../core/pmi';
 import { asmActions, drwActions, partActions } from './actions';
 import { demoStair } from './demo';
 
@@ -69,8 +71,8 @@ export default function Ribbon() {
     if (k === 'part') return [
       ...(inSketch ? [['sketch', 'Boceto'] as [Tab, string]] : []),
       ...(isSheet ? [['sheet', 'Chapa'] as [Tab, string]] : []),
-      ['model', 'Modelo 3D'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista'],
-    ];
+      ['model', 'Modelo 3D'], ['annotate', 'Anotar'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['manage', 'Administrar'], ['view', 'Vista'], ['env', 'Entornos'],
+    ].filter(([t]) => !((s.settings as unknown as { hiddenTabs?: string[] }).hiddenTabs ?? []).includes(t as string)) as [Tab, string][];
     if (k === 'assembly') return [['asm', 'Ensamblar'], ['design', 'Diseño'], ['pipe', 'Mecánica'], ['hvac', 'HVAC'], ['weld', 'Soldadura'], ['present', 'Presentación'], ['inspect', 'Inspeccionar'], ['tools', 'Herramientas'], ['view', 'Vista']];
     return [['place', 'Colocar vistas'], ['annotate', 'Anotar'], ['export', 'Exportar'], ['tools', 'Herramientas']];
   };
@@ -465,10 +467,57 @@ export default function Ribbon() {
             </Col>
           </Group>
         </>); })()}
+        {k === 'part' && cur === 'annotate' && (() => { const PM = (pk: PmiKind) => () => s.open({ kind: 'pmi', pmiKind: pk }); return (<>
+          <Group label="Anotación geométrica">
+            <Big icon="tolfeat" label="Tolerancia de operación" disabled={!hasSolid} onClick={PM('tolfeat')} title="Tolerancia asociada a una operación (clic en una de sus caras)" />
+            <Big icon="drf" label="SRD" disabled={!hasSolid} onClick={() => s.open({ kind: 'drf' })} title="Sistema de referencia: referencias A, B y C sobre tres caras" />
+            <Big icon="toladv" label="Asesor de tolerancias" onClick={() => s.open({ kind: 'toladvisor' })} title="Revisa referencias, marcos de control y cotas sin tolerancia" />
+          </Group>
+          <Group label="Anotación general">
+            <Big icon="dim3d" label="Cota" disabled={!hasSolid} onClick={PM('dim')} title="Cota 3D entre dos puntos del modelo (vértices y aristas atraen)" />
+            <Big icon="promote" label="Promover cotas" onClick={() => s.open({ kind: 'promote' })} title="Muestra cotas de bocetos y operaciones como anotaciones 3D" />
+            <Big icon="holenote" label="Nota de taladro/rosca" disabled={!hasSolid} onClick={PM('hole')} title="Clic en la cara del taladro: diámetro, profundidad y rosca automáticos" />
+            <Big icon="surftex" label="Textura superficial" disabled={!hasSolid} onClick={PM('surf')} />
+            <Big icon="weldsym" label="Símbolo de soldadura" disabled={!hasSolid} onClick={PM('weld')} />
+            <Big icon="datum" label="Identificador de referencia" disabled={!hasSolid} onClick={PM('datum')} />
+            <Big icon="target" label="Objetivo de referencia" disabled={!hasSolid} onClick={PM('target')} />
+            <Big icon="fcf" label="Marco de control" disabled={!hasSolid} onClick={PM('fcf')} title="Tolerancia geométrica ISO 1101 (posición, planitud, paralelismo…)" />
+          </Group>
+          <Group label="Notas">
+            <Big icon="leader" label="Texto con directriz" disabled={!hasSolid} onClick={PM('note')} />
+            <Big icon="text" label="Nota general" onClick={PM('gnote')} />
+            <Big icon="profilenote" label="Nota de perfil general" onClick={PM('profile')} />
+          </Group>
+          <Group label="Administrar">
+            <Col>
+              <Small icon="docset" label="Escala de anotación" onClick={() => s.open({ kind: 'docset' })} title="Tamaño del texto de las anotaciones y tolerancia general" />
+              <Small icon="section" label="Vista de media sección" active={!!s.clipTool} onClick={() => toggleClipTool()} title="Corta el modelo por la mitad para ver las anotaciones interiores" />
+              <Small icon="eye" label={s.hud.pmiHidden ? 'Mostrar anotaciones' : 'Ocultar anotaciones'} onClick={() => s.set({ hud: { ...s.hud, pmiHidden: !s.hud.pmiHidden } } as never)} />
+            </Col>
+          </Group>
+          <Group label="Analizar"><Big icon="tolstack" label="Análisis de tolerancias" onClick={() => s.open({ kind: 'tolstack' })} title="Cadenas de cotas: peor caso y estadístico (RSS)" /></Group>
+          <Group label="Exportar">
+            <Big icon="pdf" label="PDF 3D" disabled={!hasSolid} onClick={() => s.open({ kind: 'share' })} title="PDF con la vista del modelo y sus anotaciones" />
+            <Big icon="export" label="Formato CAD" disabled={!hasSolid} onClick={() => exportSTEP()} title="STEP para otros programas CAD" />
+            <Big icon="share" label="Vistas compartidas" disabled={!hasSolid} onClick={() => s.open({ kind: 'share' })} title="PDF, glTF y STEP para compartir" />
+          </Group>
+        </>); })()}
         {k === 'part' && cur === 'inspect' && (<>
           <Group label="Medir">
             <Big icon="measure" label="Medir" active={tool === 'measure'} onClick={T('measure')} title="Distancia entre puntos, longitud de aristas, radios" />
             <Big icon="mass" label="Propiedades físicas" onClick={() => s.open({ kind: 'iprops' })} />
+            <Big icon="region" label="Propiedades de región" disabled={!hasSolid} onClick={() => s.open({ kind: 'region' })} title="Área, perímetro y centroide de caras" />
+          </Group>
+          <Group label="Analizar">
+            <Big icon="zebra" label="Cebra" active={s.analysis?.kind === 'zebra'} disabled={!hasSolid} onClick={() => { s.set({ analysis: { kind: 'zebra', dir: 'Z', angle: 1, stripes: 12 } } as never); s.open({ kind: 'analysis' }); }} />
+            <Big icon="draftan" label="Inclinación" active={s.analysis?.kind === 'draft'} disabled={!hasSolid} onClick={() => { s.set({ analysis: { kind: 'draft', dir: 'Z', angle: 1, stripes: 12 } } as never); s.open({ kind: 'analysis' }); }} title="Ángulo de desmoldeo por colores" />
+            <Big icon="curvan" label="Curvatura" active={s.analysis?.kind === 'curv'} disabled={!hasSolid} onClick={() => { s.set({ analysis: { kind: 'curv', dir: 'Z', angle: 1, stripes: 12 } } as never); s.open({ kind: 'analysis' }); }} />
+            <Big icon="section" label="Sección" active={!!s.clip} disabled={!hasSolid} onClick={() => toggleClipTool()} title="Sección del modelo (modo de recorte)" />
+            <Big icon="tolstack" label="Análisis de tolerancias" onClick={() => s.open({ kind: 'tolstack' })} />
+            {s.analysis && <Big icon="close" label="Quitar análisis" onClick={() => s.set({ analysis: null } as never)} />}
+          </Group>
+          <Group label="AutoLímites">
+            <Big icon="limits" label="AutoLímites" onClick={() => s.open({ kind: 'limits' })} title="Masa, volumen, área, medidas o distancias con mínimo y máximo vigilados" />
           </Group>
           <Group label="Simulación">
             <Big icon="fem" label="Análisis de tensiones" onClick={() => s.open({ kind: 'fem' })} title="Cálculo estático lineal por elementos finitos: elige caras fijas y caras cargadas" />
@@ -663,6 +712,90 @@ export default function Ribbon() {
           </Group>
         </>)}
         {/* ---------- COMUNES ---------- */}
+        {k === 'part' && cur === 'tools' && (<>
+          <Group label="Material y aspecto">
+            <Big icon="material" label="Material" onClick={() => s.open({ kind: 'material' })} />
+            <Big icon="appearance" label="Aspecto" onClick={() => s.open({ kind: 'appearance' })} />
+            <Col>
+              <Small icon="close" label="Borrar" disabled={!s.doc.appearance} onClick={() => s.commit((d) => { delete d.appearance; })} title="Quita el aspecto: vuelve al color del material" />
+              <Small icon="appearance" label="Ajustar" onClick={() => s.open({ kind: 'appearance' })} />
+              <Small icon="finishf" label="Acabado" disabled={!hasSolid} onClick={() => s.openFeatureDialog('finish')} />
+            </Col>
+          </Group>
+        </>)}
+        {k === 'part' && cur === 'manage' && (<>
+          <Group label="Actualizar">
+            <Big icon="refresh" label="Actualizar" onClick={() => s.set({ doc: { ...s.doc } } as never)} title="Regenera la pieza" />
+            <Col>
+              <Small icon="refresh" label="Reconstruir todo" onClick={() => { s.set({ doc: structuredClone(s.doc) } as never); s.notify('Reconstruyendo…'); }} />
+              <Small icon="mass" label="Actualizar masa" onClick={() => s.open({ kind: 'iprops' })} />
+            </Col>
+          </Group>
+          <Group label="Parámetros">
+            <Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} />
+            <Big icon="purge" label="Limpiar" onClick={() => s.open({ kind: 'purge' })} title="Quita parámetros sin usar y bocetos vacíos" />
+          </Group>
+          <Group label="Estilos y normas">
+            <Big icon="style" label="Editor de estilos" onClick={() => s.open({ kind: 'docset' })} title="Unidades, decimales, tolerancia general y tamaño de anotaciones del documento" />
+          </Group>
+          <Group label="Insertar">
+            <Big icon="derive" label="Derivar" onClick={() => s.openFeatureDialog('derive')} />
+            <Col>
+              <Small icon="ifeature" label="Operación" onClick={() => s.open({ kind: 'ifeature' })} title="Insertar eOperación" />
+              <Small icon="attach" label="Insertar objeto" onClick={() => s.open({ kind: 'insertobj' })} title="Adjuntar ficheros a la pieza" />
+              <Small icon="import" label="Importar" onClick={() => importStep().catch((e) => s.notify(e.message, 'error'))} />
+            </Col>
+            <Col>
+              <Small icon="ifeature" label="Insertar eOperación" onClick={() => s.open({ kind: 'ifeature' })} />
+              <Small icon="copy" label="Copiar operación" onClick={() => P2.copyFeatures()} title="Copia la operación seleccionada (con su boceto)" />
+              <Small icon="paste" label="Pegar" onClick={() => P2.pasteFeatures()} />
+            </Col>
+          </Group>
+          <Group label="Nube de puntos">
+            <Big icon="cloud" label="Adjuntar" onClick={() => s.open({ kind: 'cloud' })} title="Nube de puntos (XYZ, CSV, PLY): recorte por caja y puntos de trabajo sobre la nube" />
+          </Group>
+          <Group label="Composición">
+            <Big icon="newpart" label="Crear pieza" disabled={!hasSolid} onClick={partActions.makePart} />
+            <Big icon="makecomp" label="Crear componentes" disabled={!hasSolid} onClick={partActions.makeComponents} />
+          </Group>
+          <Group label="Autor">
+            <Big icon="epoint" label="ePoint" onClick={() => s.open({ kind: 'epoint' })} />
+            <Col>
+              <Small icon="exportobj" label="Exportar objetos" onClick={() => s.open({ kind: 'exportobj' })} title="Boceto a DXF" />
+              <Small icon="frame" label="Forma estructural" onClick={() => s.open({ kind: 'structshape' })} title="Perfiles propios para el generador de estructuras" />
+              <Small icon="ipart" label="Crear eFamily" onClick={() => s.open({ kind: 'ipart' })} />
+            </Col>
+            <Col><Small icon="ifeature" label="Extraer eOperación" onClick={() => s.open({ kind: 'ifeature' })} /></Col>
+          </Group>
+          <Group label="Reglas">
+            <Big icon="ilogic" label="Agregar regla" onClick={() => s.open({ kind: 'rules' })} title="Reglas en JavaScript que cambian parámetros, propiedades u operaciones" />
+            <Col>
+              <Small icon="ilogic" label="Navegador de reglas" onClick={() => s.open({ kind: 'rules' })} />
+              <Small icon="trigger" label="Desencadenadores" onClick={() => s.open({ kind: 'rules' })} title="Al cambiar parámetros, al guardar, manual o iTrigger" />
+              <Small icon="trigger" label="iTrigger" onClick={() => { import('./rules').then((m) => m.fireRules('trigger')); s.notify('iTrigger'); }} />
+            </Col>
+          </Group>
+          <Group label="Centro de contenido">
+            <Col>
+              <Small icon="ifeature" label="Publicar operación" onClick={() => s.open({ kind: 'ifeature' })} />
+              <Small icon="content" label="Publicar pieza" onClick={() => s.open({ kind: 'publish' })} />
+              <Small icon="content" label="Publicación por lotes" onClick={() => s.open({ kind: 'publish' })} />
+            </Col>
+          </Group>
+        </>)}
+        {k === 'part' && cur === 'env' && (<>
+          <Group label="Comenzar">
+            <Big icon="fem" label="Análisis de tensiones" disabled={!hasSolid} onClick={() => s.open({ kind: 'fem' })} />
+            <Big icon="studio" label="Estudio" disabled={!hasSolid} onClick={() => s.open({ kind: 'studio' })} title="Render realista: entorno, sombras y suelo; captura de imagen" />
+            <Big icon="tolstack" label="Análisis de tolerancias" onClick={() => s.open({ kind: 'tolstack' })} />
+            <Big icon="mold" label="Crear diseño de molde" disabled={!hasSolid} onClick={() => s.open({ kind: 'mold' })} title="Macho y hembra con contracción y plano de partición" />
+            <Big icon="shapegen" label="Generador de formas" disabled={!hasSolid} onClick={() => s.open({ kind: 'fem', shape: true })} />
+            <Big icon="bim" label="Contenido BIM" disabled={!hasSolid} onClick={() => s.open({ kind: 'bim' })} title="Clase y propiedades IFC; exportación IFC" />
+          </Group>
+          <Group label="Convertir"><Big icon="convsheet" label="Convertir a chapa" disabled={!hasSolid || !!s.doc.sheet} onClick={partActions.convertToSheet} /></Group>
+          <Group label="Impresión 3D"><Big icon="print3d" label="Impresión 3D" disabled={!hasSolid} onClick={() => s.open({ kind: 'print3d' })} title="Comprueba la bandeja y exporta 3MF" /></Group>
+          <Group label="Administrar"><Big icon="addins" label="Complementos" onClick={() => s.open({ kind: 'addins' })} title="Activa o desactiva módulos de la cinta" /></Group>
+        </>)}
         {cur === 'tools' && (<>
           <Group label="Opciones">
             {k === 'part' && <Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} />}
@@ -670,6 +803,29 @@ export default function Ribbon() {
             <Big icon="project" label="Proyectos" onClick={() => s.open({ kind: 'project' })} />
             {(k === 'part' || k === 'assembly') && <Big icon="workpoint" label="Referencias a objetos" kbd="F3" onClick={() => s.open({ kind: 'osnap' })} title="Punto final, medio, centro, cuadrante, intersección, perpendicular, tangente, cercano, nodo, origen" />}
           </Group>
+          <Group label="Configuración">
+            <Big icon="options" label="Opciones de la aplicación" onClick={() => s.open({ kind: 'options' } as never)} />
+            {k === 'part' && <Big icon="docset" label="Configuración del documento" onClick={() => s.open({ kind: 'docset' })} />}
+            <Col>
+              <Small icon="keyboard" label="Personalizar" onClick={() => s.open({ kind: 'shortcuts' } as never)} title="Atajos de teclado" />
+              <Small icon="link" label="Vínculos" disabled={k !== 'part'} onClick={() => s.open({ kind: 'links' })} />
+              <Small icon="addins" label="Complementos" onClick={() => s.open({ kind: 'addins' })} />
+            </Col>
+            <Col>
+              <Small icon="star" label="Novedades" onClick={() => s.open({ kind: 'news' })} />
+              <Small icon="macro" label="Macros" onClick={() => s.open({ kind: 'macros' })} />
+              <Small icon="macro" label="Editor de macros" onClick={() => s.open({ kind: 'macros' })} />
+            </Col>
+          </Group>
+          {k === 'part' && <Group label="Portapapeles">
+            <Col>
+              <Small icon="copy" label="Copiar" onClick={() => P2.copyFeatures()} title="Copia la operación seleccionada en el árbol" />
+              <Small icon="cut" label="Cortar" onClick={() => P2.copyFeatures(true)} />
+              <Small icon="paste" label="Pegado especial" onClick={() => P2.pasteFeatures()} title="Pega las operaciones copiadas (con sus bocetos) en la pieza activa" />
+            </Col>
+          </Group>}
+          <Group label="Buscar"><Big icon="find" label="Buscar componente" onClick={() => s.open({ kind: 'find' })} /></Group>
+          <Group label="Web"><Big icon="web" label="Web del proyecto" onClick={() => window.open('https://github.com/jamanteiga/INV3D', '_blank')} /></Group>
           <Group label="Intercambio">
             <Big icon="ilogic" label="Regla de exportación" onClick={() => s.open({ kind: 'ilogic' })} title="Regla (VB.NET) para exportar un proyecto .ipj a STEP y DWG" />
           </Group>

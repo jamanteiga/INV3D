@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.32
+## Versión 0.33
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,13 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.33** — pestañas Anotar, Administrar y Entornos; Inspeccionar y Herramientas ampliadas (pieza)
+- **Anotar** (anotaciones 3D): tolerancia de operación, SRD (referencias A/B/C), asesor de tolerancias, cota 3D, promover cotas, nota de taladro/rosca automática, textura superficial, símbolo de soldadura, identificador y objetivo de referencia, marco de control ISO 1101, texto con directriz, nota general y de perfil, escala de anotación, media sección, ocultar anotaciones, análisis de tolerancias (peor caso y RSS), PDF con vista y anotaciones, STEP y vistas compartidas.
+- **Inspeccionar**: propiedades de región (área, perímetro, centroide), análisis de cebra, inclinación (desmoldeo) y curvatura, sección, análisis de tolerancias y **AutoLímites** (masa, volumen, área, medidas y distancias vigiladas).
+- **Herramientas**: material, aspecto (presets, color, metálico, rugosidad, opacidad; borrar/ajustar), acabado, opciones, configuración del documento, personalizar, vínculos, complementos (ocultar pestañas), novedades, macros JavaScript, copiar/cortar/pegar operaciones entre piezas, buscar.
+- **Administrar**: actualizar, reconstruir, masa, parámetros, limpiar, estilos, derivar, insertar objeto (adjuntos), eOperaciones, **nube de puntos** (XYZ/CSV/PLY, recorte, punto de trabajo en la nube), crear pieza/componentes, ePoint, exportar boceto a DXF, **forma estructural** (perfiles propios), **reglas** (JavaScript al cambiar parámetros, al guardar, manual o iTrigger) y publicación en una biblioteca de usuario del centro de contenido.
+- **Entornos**: análisis de tensiones, **estudio de render** (entorno, sombras, captura ×2/×4), análisis de tolerancias, **diseño de molde** (macho y hembra con contracción), generador de formas, contenido BIM (clase y propiedades IFC), convertir a chapa, **impresión 3D** (comprobación de bandeja y 3MF) y complementos.
 
 **Novedades 0.32** — Modelo 3D completo (cinta reorganizada)
 - *Crear*: **Calcomanía** (imagen sobre cara plana), Importar, **Desenrollar** (caras planas, cilíndricas y cónicas a superficie plana).

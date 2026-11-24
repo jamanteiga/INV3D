@@ -68,6 +68,8 @@ export interface HudState {
   origin: boolean; sketches: boolean; triad: boolean; cube: boolean;
   /** mostrar el centro de gravedad (CDG) */
   cog?: boolean;
+  /** ocultar las anotaciones 3D */
+  pmiHidden?: boolean;
   /** mostrar los ePoints de los componentes en el ensamblaje (por defecto, sí) */
   epoints?: boolean;
   scene: 'grad' | 'white' | 'studio' | 'dark' | 'blue';
@@ -75,7 +77,7 @@ export interface HudState {
 const HUD0: HudState = { style: 'shaded', clipOff: 0, clipFlip: false, origin: true, sketches: true, triad: true, cube: true, scene: 'grad' };
 function loadHud(): HudState { try { return { ...HUD0, ...JSON.parse(localStorage.getItem('inv3d.hud') || '{}'), clipOff: 0, clipFlip: false }; } catch { return HUD0; } }
 export type Tool = null
-  | 'meshPick'
+  | 'meshPick' | 'pmiPick' | 'regionPick' | 'limitPick' | 'cloudPick'
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
   | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure'
@@ -95,6 +97,8 @@ export type Dialog =
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
   | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' | 'ucs' | 'simplify' | 'meshfit' }
   | { kind: 'fem'; shape?: boolean }
+  | { kind: 'pmi'; pmiKind: import('./pmi').PmiKind; editId?: string }
+  | { kind: 'tolstack' | 'toladvisor' | 'promote' | 'drf' | 'analysis' | 'region' | 'limits' | 'material' | 'appearance' | 'docset' | 'news' | 'links' | 'addins' | 'macros' | 'find' | 'purge' | 'insertobj' | 'exportobj' | 'structshape' | 'cloud' | 'rules' | 'publish' | 'studio' | 'mold' | 'bim' | 'print3d' | 'share' }
   | { kind: 'contentf'; fam: string }
   | { kind: 'fastener'; fx: Record<string, unknown> }
   | { kind: 'projto'; mode: 'face' | 'surf' }
@@ -181,6 +185,12 @@ export interface State {
   /** Chapa: el visor muestra el patrón plano */
   flatView: boolean;
   /** Ajustar a malla: zona elegida de una malla de referencia y su ajuste */
+  /** Análisis visual de superficie: cebra, inclinación (desmoldeo) o curvatura */
+  analysis: { kind: 'zebra' | 'draft' | 'curv'; dir: 'X' | 'Y' | 'Z'; angle: number; stripes: number } | null;
+  /** Modo estudio (render realista: entorno, sombras y suelo) */
+  studio: boolean;
+  /** Puntos elegidos en el modelo para una anotación, AutoLímite o región (con su normal) */
+  picks: { p: V3; n: V3; group: number }[];
   meshSel: { ref: string; tris: number[]; fit?: import('./meshfit').MeshFit; err?: string } | null;
   /** Cara plana seleccionada en el modelo: plano listo para «Iniciar boceto 2D» */
   selFacePlane: PlaneRef | null;
@@ -342,7 +352,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, asmRotate: false, aiOpen: false, flatView: false, meshSel: null, selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, asmRotate: false, aiOpen: false, flatView: false, meshSel: null, analysis: null, studio: false, picks: [], selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',

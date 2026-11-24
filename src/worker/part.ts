@@ -1080,7 +1080,25 @@ export async function buildPart(doc0: PartDoc, upTo?: number): Promise<PartBuild
           shape = combine(shape, x, 'join');
           break;
         }
-        case 'meshref': break;   // solo referencia visual
+        case 'meshref': case 'pointcloud': break;   // solo referencia visual
+        case 'mold': {
+          if (!f.doc) throw new Error('Pieza de origen no disponible');
+          const sub = await buildPart(f.doc);
+          if (!sub.shape) throw new Error('La pieza de origen no tiene sólido');
+          const k = 1 + ev(f.shrink) / 100, m = ev(f.margin);
+          if (!(k > 0.5 && k < 1.5) || !(m > 0)) throw new Error('Contracción o margen no válidos');
+          const bb = sub.shape.boundingBox.bounds, lo = bb[0] as V3, hi = bb[1] as V3, c: V3 = v3.mul(v3.add(lo, hi), 0.5);
+          const part = sub.shape.clone().scale(k, c);
+          const L: V3 = v3.sub(v3.add(c, v3.mul(v3.sub(lo, c), k)), [m, m, m]), H: V3 = v3.add(v3.add(c, v3.mul(v3.sub(hi, c), k)), [m, m, m]);
+          const block = (makeBox(L, H) as unknown as Shape3D).cut(part);
+          const n: V3 = f.plane === 'XY' ? [0, 0, 1] : f.plane === 'XZ' ? [0, 1, 0] : [1, 0, 0];
+          const x: V3 = f.plane === 'YZ' ? [0, 1, 0] : [1, 0, 0];
+          const r = block.split(new Plane(c, x, n));
+          if (!r.positive || !r.negative) throw new Error('El plano de partición no divide el molde');
+          shape = compoundShapes([r.negative as unknown as Shape3D, r.positive as unknown as Shape3D]) as unknown as Shape3D;
+          status[f.id] = { ok: true, error: 'Dos cuerpos: macho (lado −) y hembra (lado +); sepáralos con Mover cuerpo' };
+          break;
+        }
         case 'meshface': {
           const ft = f.fit;
           if (ft.kind === 'plane') {

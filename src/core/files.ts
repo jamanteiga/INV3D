@@ -106,6 +106,7 @@ const DOC_EXT = { part: ['.i3p', 'Pieza INV3D'], assembly: ['.i3a', 'Ensamblaje 
  *  actualizan los ensamblajes y planos abiertos que la usan. */
 export async function saveDoc(as = false) {
   const s = useStore.getState();
+  try { (await import('../ui/rules')).fireRules('save'); } catch { /* */ }
   const ok = await saveDocById(s.active, { as });
   if (ok && s.kind === 'part') await propagatePart(s.active);
 }

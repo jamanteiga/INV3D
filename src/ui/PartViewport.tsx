@@ -20,6 +20,8 @@ import {
 import { cad, type MeshData } from '../core/cadClient';
 import { flattenPath } from '../core/svgpath';
 import { fromB64, growRegion, fitRegion } from '../core/meshfit';
+import { zebraMaterial, draftColors, curvColors, studio } from './viewfx';
+import { pmiText, PMI_NAMES, type Pmi } from '../core/pmi';
 import { View3D, css, tv, r3, vArr, planarFaceAt, faceVertices, dpr } from './view3d';
 
 type Ev = (s: string) => number;
@@ -268,6 +270,7 @@ export default function PartViewport() {
     let patWpp = 0;
     V.onChange = () => { cancelAnimationFrame(labelRaf); labelRaf = requestAnimationFrame(() => {
       const st = useStore.getState();
+      updatePmi();
       // el patrón de trazos (construcción / línea eje) se recalcula si el zoom cambia mucho
       const w = V.worldPerPx(); if (patWpp && (w / patWpp > 1.5 || patWpp / w > 1.5)) { patWpp = w; buildSketches(st); } else if (!patWpp) patWpp = w;
       if (st.mode === 'sketch') { buildDims(st); updateLabels(); }
@@ -289,13 +292,48 @@ export default function PartViewport() {
     };
 
     // ---------- Pieza ----------
+    // ---------- Anotaciones 3D ----------
+    const pmiGroup = new THREE.Group(); scene.add(pmiGroup);
+    const buildPmi = (s: State) => {
+      V.clearGroup(pmiGroup);
+      const list = s.mode === 'sketch' || s.hud.pmiHidden ? [] : (s.doc.pmi ?? []);
+      const segs: number[] = [];
+      for (const a of list) {
+        const L = [a.p[0] + a.off[0], a.p[1] + a.off[1], a.p[2] + a.off[2]];
+        if (a.kind === 'dim' && a.p2) { const L2 = [a.p2[0] + a.off[0], a.p2[1] + a.off[1], a.p2[2] + a.off[2]]; segs.push(...a.p, ...L, ...a.p2, ...L2, ...L, ...L2); }
+        else if (a.kind !== 'gnote' && a.kind !== 'profile') segs.push(...a.p, ...L);
+      }
+      if (segs.length) { const l = V.segs(segs, V.lineMat('#1d5fbf', 1.2, false, false)); l.renderOrder = 7; pmiGroup.add(l); }
+      const sz = Math.max(0.6, V.worldPerPx() * 3.5);
+      for (const a of list) if (a.kind !== 'gnote' && a.kind !== 'profile') for (const q of a.p2 ? [a.p, a.p2] : [a.p]) { const sp = new THREE.Mesh(new THREE.SphereGeometry(sz, 8, 6), new THREE.MeshBasicMaterial({ color: a.kind === 'datum' ? 0x1d5fbf : 0x333333, depthTest: false })); sp.position.set(...q); sp.renderOrder = 7; pmiGroup.add(sp); }
+      updatePmi();
+    };
+    const updatePmi = () => {
+      const s = useStore.getState();
+      if (s.mode === 'sketch' || s.kind !== 'part' || s.hud.pmiHidden) { pmiBus.set?.([]); return; }
+      if (!host.current) return;
+      const r = V.renderer.domElement.getBoundingClientRect(), hr = host.current.getBoundingClientRect();
+      const out: PmiLabel[] = [];
+      let gi = 0;
+      for (const a of s.doc.pmi ?? []) {
+        let w: number[];
+        if (a.kind === 'gnote' || a.kind === 'profile') { out.push({ id: a.id, x: 14, y: hr.height - 40 - 22 * gi++, text: a.kind === 'profile' ? `Perfil general: ${a.text ?? ''}` : a.text ?? '', kind: a.kind, fixed: true }); continue; }
+        if (a.kind === 'dim' && a.p2) w = [(a.p[0] + a.p2[0]) / 2 + a.off[0], (a.p[1] + a.p2[1]) / 2 + a.off[1], (a.p[2] + a.p2[2]) / 2 + a.off[2]];
+        else w = [a.p[0] + a.off[0], a.p[1] + a.off[1], a.p[2] + a.off[2]];
+        const q = V.project(w as never) as { x: number; y: number };
+        const dist = a.p2 ? Math.hypot(a.p2[0] - a.p[0], a.p2[1] - a.p[1], a.p2[2] - a.p[2]) : undefined;
+        out.push({ id: a.id, x: r.left - hr.left + q.x, y: r.top - hr.top + q.y, text: pmiText(a, dist, s.doc.docset?.decimals ?? 2), kind: a.kind });
+      }
+      pmiBus.set?.(out);
+    };
     const meshCache = new Map<string, Float32Array>();
     let meshRefObjs: { id: string; mesh: THREE.Mesh; P: Float32Array }[] = [];
+    let cloudObjs: THREE.Points[] = [];
     const buildPart = (s: State) => {
       V.clearGroup(partGroup);
       state.partMesh = null;
       // mallas de referencia (STL/OBJ) en verde translúcido
-      meshRefObjs = [];
+      meshRefObjs = []; cloudObjs = [];
       for (const f of s.doc.features.slice(0, eopIndex(s.doc))) {
         if (f.type !== 'meshref' || f.suppressed) continue;
         let P = meshCache.get(f.id + f.data.length); if (!P) { P = fromB64(f.data); meshCache.set(f.id + f.data.length, P); }
@@ -303,6 +341,16 @@ export default function PartViewport() {
         const mm = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x5fae6a, metalness: 0, roughness: 0.8, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
         partGroup.add(mm); meshRefObjs.push({ id: f.id, mesh: mm, P });
         g.computeBoundingBox(); if (!s.result?.mesh?.triangles.length) { V.bbox.copy(g.boundingBox!); V.hasModel = true; }
+      }
+      for (const f of s.doc.features.slice(0, eopIndex(s.doc))) {
+        if (f.type !== 'pointcloud' || f.suppressed) continue;
+        let P = meshCache.get(f.id + f.data.length); if (!P) { P = fromB64(f.data); meshCache.set(f.id + f.data.length, P); }
+        let Q = P;
+        if (f.crop) { const [a, b] = f.crop, out: number[] = []; for (let i = 0; i < P.length; i += 3) if (P[i] >= a[0] && P[i] <= b[0] && P[i + 1] >= a[1] && P[i + 1] <= b[1] && P[i + 2] >= a[2] && P[i + 2] <= b[2]) out.push(P[i], P[i + 1], P[i + 2]); Q = new Float32Array(out); }
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(Q, 3));
+        const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x2c7be5, size: 2, sizeAttenuation: false }));
+        pts.userData.cloud = f.id; partGroup.add(pts); cloudObjs.push(pts);
+        g.computeBoundingBox(); if (!s.result?.mesh?.triangles.length && g.boundingBox && isFinite(g.boundingBox.min.x)) { V.bbox.copy(g.boundingBox); V.hasModel = true; }
       }
       const res = (s.dialog && 'draft' in s.dialog && s.preview) ? s.preview : s.result;
       const m = res?.mesh ?? null;
@@ -313,7 +361,7 @@ export default function PartViewport() {
         partGroup.add(grp);
         if (!m?.triangles.length) { mesh.geometry.computeBoundingBox(); V.bbox.copy(mesh.geometry.boundingBox!); }
       }
-      V.hasModel = !!m?.triangles.length || !!sm?.triangles.length || meshRefObjs.length > 0;
+      V.hasModel = !!m?.triangles.length || !!sm?.triangles.length || meshRefObjs.length > 0 || cloudObjs.length > 0;
       if (!m || !m.triangles.length) { buildOverlay(s); return; }
       const color = MATERIALS.find((x) => x.name === s.doc.iProperties.material)?.color ?? '#c3c8cf';
       const isPreview = res === s.preview && !!s.preview;
@@ -322,6 +370,19 @@ export default function PartViewport() {
       mesh.geometry.computeBoundingBox();
       V.bbox.copy(mesh.geometry.boundingBox!);
       state.partMesh = mesh;
+      // aspecto de la pieza (sustituye al color del material)
+      const ap = s.doc.appearance;
+      if (ap && !isPreview) { const mt = mesh.material as THREE.MeshStandardMaterial; mt.color.set(ap.color); mt.metalness = ap.metal; mt.roughness = ap.rough; if (ap.opacity < 1) { mt.transparent = true; mt.opacity = ap.opacity; mt.depthWrite = false; } }
+      // análisis de superficie
+      if (s.analysis && s.mode !== 'sketch') {
+        const an = s.analysis;
+        if (an.kind === 'zebra') (mesh as THREE.Mesh).material = zebraMaterial(an.stripes) as never;
+        else {
+          if (an.kind === 'draft') draftColors(mesh.geometry, new THREE.Vector3(an.dir === 'X' ? 1 : 0, an.dir === 'Y' ? 1 : 0, an.dir === 'Z' ? 1 : 0), an.angle);
+          else curvColors(mesh.geometry);
+          mesh.material = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0, roughness: 0.8, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+        }
+      }
       // acabados (color por cara) y calcomanías
       if (s.mode !== 'sketch') {
         const ev = safeEval(s);
@@ -381,6 +442,7 @@ export default function PartViewport() {
         }
       }
       V.applyVisual(s.mode === 'sketch' ? '' : s.clip, s.wire && s.mode !== 'sketch', [grp]);
+      studio(V.renderer, V.scene, partGroup, V.bbox.clone(), !!s.studio && s.mode !== 'sketch');
       // Roscas cosméticas (como Inventor): funda con textura helicoidal sobre la cara roscada
       const sleeve = (center: THREE.Vector3, axis: THREE.Vector3, r: number, tTop: number, len: number, pitch: number, inner: boolean, left = false) => {
         if (!(len > 0) || !(r > 0)) return;
@@ -480,6 +542,11 @@ export default function PartViewport() {
       }
       if (m && d && d.type === 'sm_flange' && d.edge) overlayGroup.add(V.segs([...d.edge.p0, ...d.edge.p1], V.lineMat(css('--accent'), 4, false, false)));
       if (m && d && d.type === 'sm_bend') for (const e of [d.edgeA, d.edgeB]) if (e) overlayGroup.add(V.segs([...e.p0, ...e.p1], V.lineMat(css('--accent'), 4, false, false)));
+      if (s.picks.length && (s.tool === 'pmiPick' || s.tool === 'regionPick' || s.tool === 'limitPick')) {
+        const sz = Math.max(0.8, V.worldPerPx() * 5);
+        for (const k of s.picks) { const sp = new THREE.Mesh(new THREE.SphereGeometry(sz, 12, 8), new THREE.MeshBasicMaterial({ color: 0xe03a3a, depthTest: false })); sp.position.set(...k.p); sp.renderOrder = 9; overlayGroup.add(sp); }
+        if (s.tool === 'regionPick' && m) for (const k of s.picks) if (k.group >= 0 && k.group < m.faceGroups.length) overlayGroup.add(faceOverlay(m, k.group, css('--accent'), 0.45));
+      }
       if (s.meshSel) {
         const o = meshRefObjs.find((x) => x.id === s.meshSel!.ref);
         if (o) {
@@ -1646,6 +1713,30 @@ export default function PartViewport() {
         s.set({ fem: { ...f, fixed, loads, res: undefined } });
         return;
       }
+      if (s.tool === 'cloudPick') {
+        if (!cloudObjs.length) return;
+        const r = V.renderer.domElement.getBoundingClientRect();
+        const rc = new THREE.Raycaster(); rc.params.Points = { threshold: V.worldPerPx() * 6 };
+        rc.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1), V.camera);
+        const h = rc.intersectObjects(cloudObjs, false)[0]; if (!h || h.index == null) return;
+        const P = (h.object as THREE.Points).geometry.getAttribute('position'), q: V3 = [P.getX(h.index), P.getY(h.index), P.getZ(h.index)].map((x) => +x.toFixed(4)) as V3;
+        s.commit((doc) => { doc.features.push({ id: uid('f'), name: nextName(doc, 'workpoint'), type: 'workpoint', origin: q.map(String) as never }); });
+        s.notify(`Punto de trabajo en la nube: ${q.join('; ')}`);
+        return;
+      }
+      if (s.tool === 'pmiPick' || s.tool === 'regionPick' || s.tool === 'limitPick') {
+        const fh = faceHit(ev); if (!fh) return;
+        let P = fh.point.clone();
+        // atracción a vértices y puntos medios de aristas cercanos (10 px)
+        const m = fh.mesh, r = V.renderer.domElement.getBoundingClientRect();
+        if (s.tool !== 'regionPick') {
+          let bd = 10; const cand: THREE.Vector3[] = [];
+          const L = m.lines; for (let i = 0; i < L.length; i += 6) { cand.push(new THREE.Vector3(L[i], L[i + 1], L[i + 2]), new THREE.Vector3(L[i + 3], L[i + 4], L[i + 5])); }
+          for (const c of cand) { const q = V.project([c.x, c.y, c.z] as never) as { x: number; y: number }; const d = Math.hypot(r.left + q.x - ev.clientX, r.top + q.y - ev.clientY); if (d < bd) { bd = d; P = c; } }
+        }
+        useStore.setState({ picks: [...s.picks, { p: vArr(P, 4), n: vArr(fh.normal.clone().normalize(), 5), group: fh.group }] });
+        return;
+      }
       if (s.tool === 'meshPick') {
         if (!meshRefObjs.length) return;
         const r = V.renderer.domElement.getBoundingClientRect();
@@ -2028,7 +2119,7 @@ export default function PartViewport() {
 
     const cancelTool = () => { state.chain = []; state.chainIds = []; state.clicks = []; state.picks = []; buildPreview(useStore.getState()); };
     const applyMouse = (s: State) => {
-      const picking = ['meshPick', 'pickEdges', 'pickPlane', 'pickFaces', 'femFace', 'epPick', 'pickFlangeEdge', 'pickWorkBase', 'measure', 'projFace', 'projSurf'].includes(s.tool ?? '');
+      const picking = ['meshPick', 'pmiPick', 'regionPick', 'limitPick', 'cloudPick', 'pickEdges', 'pickPlane', 'pickFaces', 'femFace', 'epPick', 'pickFlangeEdge', 'pickWorkBase', 'measure', 'projFace', 'projSurf'].includes(s.tool ?? '');
       V.setMouse(s.mode === 'sketch' || picking, s.mode === 'sketch');
       cvs.style.cursor = s.tool && !picking ? 'crosshair' : s.tool ? 'pointer' : 'default';
     };
@@ -2040,8 +2131,9 @@ export default function PartViewport() {
       if (s.kind !== 'part') return;
       if (s.flatView && (s.active !== p.active || s.mode === 'sketch' || (s.tool && s.tool !== p.tool) || s.pendingFeature || (s.dialog && 'draft' in s.dialog && s.dialog !== p.dialog) || !s.doc.sheet)) { useStore.setState({ flatView: false }); return; }
       if (s.flatView !== p.flatView || (s.flatView && s.result !== p.result)) { buildFlat(s); if (!s.flatView && p.flatView) setView('home'); }
-      if (s.pickBase !== p.pickBase || s.meshSel !== p.meshSel) buildOverlay(s);
-      if (s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material || s.fem !== p.fem || s.hud !== p.hud) {
+      if (s.pickBase !== p.pickBase || s.meshSel !== p.meshSel || s.picks !== p.picks) buildOverlay(s);
+      if (s.hud !== p.hud || s.doc.pmi !== p.doc.pmi || s.doc.pmiScale !== p.doc.pmiScale || s.mode !== p.mode || s.active !== p.active || s.result !== p.result) buildPmi(s);
+      if (s.analysis !== p.analysis || s.studio !== p.studio || s.result !== p.result || s.preview !== p.preview || s.dialog !== p.dialog || s.showEdges !== p.showEdges || s.wire !== p.wire || s.clip !== p.clip || s.mode !== p.mode || s.doc.iProperties.material !== p.doc.iProperties.material || s.fem !== p.fem || s.hud !== p.hud) {
         buildPart(s);
         if (firstMesh && s.result?.mesh) { firstMesh = false; setView('home'); }
       }
@@ -2101,6 +2193,7 @@ export default function PartViewport() {
       <HeadsUp kind="part" />
       <ClipBar />
       <FlatBar />
+      <PmiLayer />
       {ctxEdit && ctxEdit.part === active && (
         <div className="ctx-bar">
           <span>Edición en contexto · <b>{ctxEdit.asmName}</b></span>
@@ -2268,4 +2361,22 @@ function FlatBar() {
       <button className="btn primary" style={{ whiteSpace: 'nowrap' }} onClick={() => useStore.setState({ flatView: false })}>Ir a pieza plegada</button>
     </div>
   );
+}
+
+// ---------- Rótulos de las anotaciones 3D ----------
+type PmiLabel = { id: string; x: number; y: number; text: string; kind: string; fixed?: boolean };
+const pmiBus: { set?: (l: PmiLabel[]) => void } = {};
+function PmiLayer() {
+  const [labels, setLabels] = useState<PmiLabel[]>([]);
+  const scale = useStore((s) => (s.kind === 'part' ? s.doc.pmiScale ?? 12 : 12));
+  useEffect(() => { pmiBus.set = setLabels; return () => { pmiBus.set = undefined; }; }, []);
+  if (!labels.length) return null;
+  return (<>{labels.map((l) => (
+    <div key={l.id} className={`pmi-label pmi-${l.kind}`} style={{ left: l.x, top: l.y, fontSize: scale, transform: l.fixed ? 'none' : 'translate(-50%,-50%)' }}
+      title={`${PMI_NAMES[l.kind as keyof typeof PMI_NAMES] ?? ''} · clic para editar`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={() => { const a = (useStore.getState().doc.pmi ?? []).find((x) => x.id === l.id) as Pmi | undefined; if (a) useStore.getState().open({ kind: 'pmi', pmiKind: a.kind, editId: a.id }); }}>
+      {l.text}
+    </div>
+  ))}</>);
 }

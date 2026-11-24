@@ -1,4 +1,5 @@
 import FemPanel from './FemPanel';
+import * as PX from './Panels2';
 import TbTplDialog, { SheetTplDialog } from './TbDialog';
 import OccPropsDialog from './OccPropsDialog';
 import EPointPanel from './EPointPanel';
@@ -112,7 +113,7 @@ const Steps = ({ items, current }: { items: [string, boolean][]; current: number
 const ICONS: Record<string, string> = { extrude: 'extrude', revolve: 'revolve', fillet: 'fillet', chamfer: 'chamfer', hole: 'hole', pattern: 'prect', mirror: 'mirror', shell: 'shell', workplane: 'workplane', loft: 'loft', sweep: 'sweep', sm_face: 'smface', sm_flange: 'smflange',
   rib: 'rib', coil: 'coil', split: 'split', draft: 'draft', thicken: 'thicken', thread: 'thread', workaxis: 'axis', workpoint: 'point',
   surf_extrude: 'surfext', surf_revolve: 'surfrev', surf_loft: 'surfloft', surf_patch: 'patch', stitch: 'stitch', sm_loft: 'smloft', sketch3d: 'sketch3d',
-  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch', sm_roll: 'smroll', sm_bend: 'smbend', sm_fold: 'smfold', sm_seam: 'smseam', sm_rip: 'smrip', sm_unfold: 'smunfold', sm_refold: 'smrefold', sm_mark: 'smmark', skpattern: 'skpattern', slot: 'slot', direct: 'direct', delface: 'delface', finish: 'finishf', decal: 'decal', unwrap: 'unwrap', ruled: 'ruled', surftrim: 'surftrim', surfextend: 'surfextend', sculpt: 'sculpt', replaceface: 'replaceface', repair: 'repair', ffbox: 'ffbox', ffface: 'ffface', simplify: 'simplify', meshref: 'meshfit', meshface: 'patch', };
+  combine: 'combine', movebody: 'move', derive: 'derive', pathpattern: 'pathpattern', sm_contour: 'smcontour', sm_punch: 'punch', sm_roll: 'smroll', sm_bend: 'smbend', sm_fold: 'smfold', sm_seam: 'smseam', sm_rip: 'smrip', sm_unfold: 'smunfold', sm_refold: 'smrefold', sm_mark: 'smmark', skpattern: 'skpattern', slot: 'slot', direct: 'direct', delface: 'delface', finish: 'finishf', decal: 'decal', unwrap: 'unwrap', ruled: 'ruled', surftrim: 'surftrim', surfextend: 'surfextend', sculpt: 'sculpt', replaceface: 'replaceface', repair: 'repair', ffbox: 'ffbox', ffface: 'ffface', simplify: 'simplify', meshref: 'meshfit', meshface: 'patch', pointcloud: 'cloud', mold: 'mold', };
 
 /** Selector de plano (origen o de trabajo) con selección en pantalla. */
 function PlanePick({ value, onChange, exclude }: { value: PlaneRef; onChange: (p: PlaneRef) => void; exclude?: string }) {
@@ -3265,6 +3266,34 @@ export function Modals() {
     case 'sheetstyle': return <SheetStyleDialog onClose={close} />;
     case 'ucs': return <UcsDialog onClose={close} />;
     case 'simplify': return <SimplifyDialog onClose={close} />;
+    case 'pmi': return <PX.PmiDialog key={(d as { editId?: string }).editId ?? (d as { pmiKind: string }).pmiKind} kind={(d as unknown as { pmiKind: never }).pmiKind} editId={(d as { editId?: string }).editId} onClose={close} />;
+    case 'drf': return <PX.DrfDialog onClose={close} />;
+    case 'promote': return <PX.PromoteDialog onClose={close} />;
+    case 'toladvisor': return <PX.TolAdvisorDialog onClose={close} />;
+    case 'tolstack': return <PX.TolStackDialog onClose={close} />;
+    case 'analysis': return <PX.AnalysisDialog onClose={close} />;
+    case 'region': return <PX.RegionDialog onClose={close} />;
+    case 'limits': return <PX.LimitsDialog onClose={close} />;
+    case 'material': return <PX.MaterialDialog onClose={close} />;
+    case 'appearance': return <PX.AppearanceDialog onClose={close} />;
+    case 'docset': return <PX.DocSetDialog onClose={close} />;
+    case 'news': return <PX.NewsDialog onClose={close} />;
+    case 'links': return <PX.LinksDialog onClose={close} />;
+    case 'addins': return <PX.AddinsDialog onClose={close} />;
+    case 'macros': return <PX.MacrosDialog onClose={close} />;
+    case 'rules': return <PX.RulesDialog onClose={close} />;
+    case 'find': return <PX.FindDialog onClose={close} />;
+    case 'purge': return <PX.PurgeDialog onClose={close} />;
+    case 'insertobj': return <PX.InsertObjDialog onClose={close} />;
+    case 'exportobj': return <PX.ExportObjDialog onClose={close} />;
+    case 'structshape': return <PX.StructShapeDialog onClose={close} />;
+    case 'cloud': return <PX.CloudDialog onClose={close} />;
+    case 'publish': return <PX.PublishDialog onClose={close} />;
+    case 'studio': return <PX.StudioDialog onClose={close} />;
+    case 'mold': return <PX.MoldDialog onClose={close} />;
+    case 'bim': return <PX.BimDialog onClose={close} />;
+    case 'print3d': return <PX.Print3dDialog onClose={close} />;
+    case 'share': return <PX.ShareDialog onClose={close} />;
     case 'meshfit': return <MeshFitDialog onClose={close} />;
     case 'flat': return <FlatDialog onClose={close} />;
     case 'newdoc': return <NewDocDialog onClose={close} />;

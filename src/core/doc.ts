@@ -193,6 +193,10 @@ export interface SimplifyF extends FBase { type: 'simplify'; source: string; sou
 export interface MeshRefF extends FBase { type: 'meshref'; fileName: string; data: string }
 /** Cara ajustada a una zona de una malla de referencia */
 export interface MeshFaceF extends FBase { type: 'meshface'; fit: import('./meshfit').MeshFit }
+/** Nube de puntos de referencia (XYZ/CSV/PLY) con recorte opcional */
+export interface PointCloudF extends FBase { type: 'pointcloud'; fileName: string; data: string; crop: [V3, V3] | null }
+/** Diseño de molde: macho y hembra de la pieza (contracción, margen y plano de partición) */
+export interface MoldF extends FBase { type: 'mold'; source: string; sourceName: string; doc: PartDoc | null; shrink: string; margin: string; plane: 'XY' | 'XZ' | 'YZ' }
 /** Patrón controlado por boceto: copia las operaciones en cada punto del boceto (el primero es la base) */
 export interface SkPatternF extends FBase { type: 'skpattern'; features: string[]; sketch: string }
 export type Feature = SketchF | ExtrudeF | RevolveF | FilletF | ChamferF | ImportF | HoleF | PatternF | MirrorF | ShellF
@@ -200,7 +204,7 @@ export type Feature = SketchF | ExtrudeF | RevolveF | FilletF | ChamferF | Impor
   | CombineF | MoveBodyF | DeriveF | PathPatternF | SmContourF | SmPunchF
   | Sketch3dF | SurfExtrudeF | SurfRevolveF | SurfLoftF | SurfPatchF | StitchF | SmLoftF
   | SmRollF | SmBendF | SmFoldF | SmSeamF | SmRipF | SmUnfoldF | SmRefoldF | SmMarkF | SkPatternF
-  | SlotF | DirectF | DelFaceF | FinishF | DecalF | UnwrapF | RuledF | SurfTrimF | SurfExtendF | SculptF | ReplaceFaceF | RepairF | FfBoxF | FfFaceF | SimplifyF | MeshRefF | MeshFaceF;
+  | SlotF | DirectF | DelFaceF | FinishF | DecalF | UnwrapF | RuledF | SurfTrimF | SurfExtendF | SculptF | ReplaceFaceF | RepairF | FfBoxF | FfFaceF | SimplifyF | MeshRefF | MeshFaceF | PointCloudF | MoldF;
 export type FeatureType = Feature['type'];
 
 export interface IProps {
@@ -223,6 +227,24 @@ export interface PartDoc {
   features: Feature[];
   /** Fin de pieza: id de la última operación activa ('' = antes de todas; sin definir = al final) */
   eop?: string;
+  /** Anotaciones 3D (cotas, notas, GD&T, símbolos) */
+  pmi?: import('./pmi').Pmi[];
+  /** Escala de las anotaciones 3D (tamaño de texto en px) */
+  pmiScale?: number;
+  /** AutoLímites: valores vigilados con mínimo y máximo */
+  limits?: import('./pmi').Limit[];
+  /** Cadenas de tolerancias (análisis de tolerancias) */
+  tolStacks?: import('./pmi').TolStack[];
+  /** Reglas (automatización): código que se ejecuta a mano o con eventos */
+  rules?: import('./pmi').Rule[];
+  /** Aspecto de la pieza (sustituye al color del material) */
+  appearance?: { color: string; opacity: number; metal: number; rough: number };
+  /** Configuración del documento */
+  docset?: { decimals: number; angDecimals: number; genTol: string; units: 'mm' | 'in' };
+  /** Propiedades BIM (IFC) */
+  bim?: { ifcClass: string; props: { name: string; value: string }[] };
+  /** Objetos insertados (ficheros adjuntos) */
+  attachments?: { id: string; name: string; type: string; data: string }[];
   /** Pieza de chapa: espesor, radio de plegado interior y factor K */
   /** Chapa: espesor, radio, factor K y holgura del desahogo de esquina (por defecto 0,5 mm; «0» sin holgura; «-1» sin desahogo) */
   sheet?: { t: string; r: string; k: string; gap?: string; /** Cara A (lado de referencia del desarrollo): normal de la cara elegida */ aSide?: V3; /** patrón plano creado (nodo en el árbol) */ flat?: boolean };
@@ -234,7 +256,7 @@ export interface PartDoc {
 
 // ---------- Parámetros de modelo c1, c2… (un parámetro por cada valor de cada operación y cada cota de boceto) ----------
 /** Campos de operación que nunca son valores (referencias, textos, modos) */
-const NOT_VALUE = new Set(['dirMode', 'std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec', 'line', 'pick', 'flip', 'body', 'image', 'color', 'sel', 'pts', 'n', 'heal', 'surface', 'surfaces', 'center', 'extent', 'data', 'fit']);
+const NOT_VALUE = new Set(['dirMode', 'std', 'fastener', 'legacyKind', 'advNear', 'id', 'name', 'type', 'profile', 'sketch', 'path', 'axis', 'plane', 'op', 'dir', 'dir1', 'dir2', 'ptype', 'kind', 'designation', 'thread', 'side', 'shape', 'source', 'sourceName', 'mirror', 'keep', 'mode', 'a', 'b', 'fileName', 'step', 'base', 'standard', 'size', 'fit', 'end', 'tapStd', 'spec', 'line', 'pick', 'flip', 'body', 'image', 'color', 'sel', 'pts', 'n', 'heal', 'surface', 'surfaces', 'center', 'extent', 'data', 'fit', 'crop']);
 /** Nombre legible de cada campo (para la tabla de parámetros) */
 export const FIELD_NAMES: Record<string, string> = {
   distance: 'Distancia', distance2: 'Distancia 2', angle: 'Ángulo', radius: 'Radio', depth: 'Profundidad', dia: 'Diámetro', thickness: 'Espesor', offset: 'Desfase',
@@ -549,7 +571,7 @@ export const FEATURE_NAMES: Record<FeatureType, string> = {
   combine: 'Combinar', movebody: 'Mover cuerpo', derive: 'Pieza derivada', pathpattern: 'Patrón por trayectoria', sm_contour: 'Pestaña de contorno', sm_punch: 'Punzonado',
   sketch3d: 'Boceto 3D', surf_extrude: 'Superficie extruida', surf_revolve: 'Superficie de revolución', surf_loft: 'Superficie solevada', surf_patch: 'Parche', stitch: 'Coser', sm_loft: 'Pestaña solevada',
   sm_roll: 'Rodillo de contorno', sm_bend: 'Pliegue', sm_fold: 'Plegado', sm_seam: 'Costura de esquina', sm_rip: 'Rasgadura', sm_unfold: 'Desplegar', sm_refold: 'Volver a plegar', sm_mark: 'Marca', skpattern: 'Patrón de boceto',
-  slot: 'Ranura', direct: 'Directa', delface: 'Eliminar cara', finish: 'Acabado', decal: 'Calcomanía', unwrap: 'Desenrollado', ruled: 'Superficie reglada', surftrim: 'Recorte', surfextend: 'Alargamiento', sculpt: 'Esculpido', replaceface: 'Sustitución de cara', repair: 'Reparación', ffbox: 'Forma libre', ffface: 'Cara libre', simplify: 'Simplificación', meshref: 'Malla', meshface: 'Cara ajustada',
+  slot: 'Ranura', direct: 'Directa', delface: 'Eliminar cara', finish: 'Acabado', decal: 'Calcomanía', unwrap: 'Desenrollado', ruled: 'Superficie reglada', surftrim: 'Recorte', surfextend: 'Alargamiento', sculpt: 'Esculpido', replaceface: 'Sustitución de cara', repair: 'Reparación', ffbox: 'Forma libre', ffface: 'Cara libre', simplify: 'Simplificación', meshref: 'Malla', meshface: 'Cara ajustada', pointcloud: 'Nube de puntos', mold: 'Molde',
 };
 
 export const OP_NAMES: Record<BoolOp, string> = { join: 'Unir', cut: 'Cortar', intersect: 'Intersección', new: 'Nuevo sólido' };
@@ -599,7 +621,7 @@ export function consumedSketches(doc: PartDoc): Set<string> {
 }
 
 /** Operaciones que generan o quitan material (las que se pueden repetir en patrones y simetrías). */
-export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil', 'derive', 'sm_punch', 'stitch', 'sm_rip', 'slot', 'ffbox', 'simplify'];
+export const BODY_FEATURES: FeatureType[] = ['extrude', 'revolve', 'hole', 'loft', 'sweep', 'rib', 'coil', 'derive', 'sm_punch', 'stitch', 'sm_rip', 'slot', 'ffbox', 'simplify', 'mold'];
 
 export function newSheetDoc(): PartDoc {
   const d = newDoc();
