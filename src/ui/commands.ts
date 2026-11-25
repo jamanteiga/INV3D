@@ -91,7 +91,7 @@ export const COMMANDS: Command[] = [
   { id: 'sk.finish', label: 'Terminar boceto', ctx: 'sketch', keys: [], run: (s) => s.finishSketch() },
   // Ensamblaje
   { id: 'asm.place', label: 'Colocar componente', ctx: 'assembly', keys: ['P'], run: (s) => s.open({ kind: 'place' }) },
-  { id: 'asm.joint', label: 'Restringir (unión)', ctx: 'assembly', keys: ['J'], run: () => asmActions.openJoint() },
+  { id: 'asm.joint', label: 'Restringir (unión)', ctx: 'assembly', keys: ['R', 'J'], run: () => asmActions.openJoint() },
   { id: 'asm.epoints', label: 'Conectar ePoints', ctx: 'assembly', keys: [], run: () => asmActions.connectEPoints() },
   { id: 'asm.freerot', label: 'Giro libre del componente seleccionado', ctx: 'assembly', keys: ['G'], run: (s) => {
     const id = s.selItem; const o = id ? s.asm.occurrences.find((x) => x.id === id) : null;
@@ -99,7 +99,7 @@ export const COMMANDS: Command[] = [
     if (o.grounded) s.notify(`${o.name} está fijo: el giro será temporal`);
     s.set({ freeRot: s.freeRot ? null : o.id });
   } },
-  { id: 'asm.rotate', label: 'Rotar pieza (giro libre)', ctx: 'assembly', keys: ['R'], run: (s) => s.set({ asmRotate: !s.asmRotate }) },
+  { id: 'asm.rotate', label: 'Rotar pieza (giro libre)', ctx: 'assembly', keys: ['Shift+R'], run: (s) => s.set({ asmRotate: !s.asmRotate }) },
   { id: 'asm.workplane', label: 'Plano auxiliar del ensamblaje', ctx: 'assembly', keys: [], run: () => asmActions.openWorkPlane() },
   { id: 'asm.workaxis', label: 'Eje auxiliar del ensamblaje', ctx: 'assembly', keys: [], run: (s) => s.open({ kind: 'asmaux', aux: 'axis' }) },
   { id: 'asm.workpoint', label: 'Punto auxiliar del ensamblaje', ctx: 'assembly', keys: [], run: (s) => s.open({ kind: 'asmaux', aux: 'point' }) },

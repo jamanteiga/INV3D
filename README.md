@@ -29,6 +29,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
 
+**Novedades 0.39.1**
+- Ensamblaje: **R** abre **Restringir** (también sigue J). *Rotar* pasa a **Mayús+R**. Teclas cambiables en Herramientas › Atajos de teclado.
+
 **Novedades 0.39**
 - **Crear componente separado en HVAC y Mecánica** (Ensamblar › Crear ▾): *Crear*, *Crear HVAC* y *Crear Mecánica*. El cuadro tiene dos pestañas: **HVAC** (conductos y accesorios; regulación, terminales y equipos; espirotubo) y **Mecánica** (tubería ASME B16.5/B16.9/B16.11 y EN 1092-1/EN 10253; tornillería). Con *Crear* se abre la familia de la pieza elegida (un conducto o espirotubo → HVAC; un tubo, brida o tornillo → Mecánica); si no, la última usada.
 

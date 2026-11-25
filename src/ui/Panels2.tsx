@@ -712,7 +712,7 @@ export function SaveNewPartDialog({ part, occ, onClose }: { part: string; occ: s
     const fn = rename(); onClose();
     const { saveDocById } = await import('../core/files');
     const ok = await saveDocById(part, { as: true });
-    S().notify(ok ? `${fn} guardada · ahora restríngela: Ensamblar › Restringir (J) o clic derecho sobre una cara` : `${fn} sin guardar (queda en memoria; Archivo › Guardar al abrirla)`, ok ? 'info' : 'error');
+    S().notify(ok ? `${fn} guardada · ahora restríngela: Ensamblar › Restringir (R) o clic derecho sobre una cara` : `${fn} sin guardar (queda en memoria; Archivo › Guardar al abrirla)`, ok ? 'info' : 'error');
     useStore.setState({ selItem: occ });
   };
   const later = () => { rename(); onClose(); useStore.setState({ selItem: occ }); S().notify('Pieza en memoria sin guardar: se guarda con el ensamblaje o al abrirla (Archivo › Guardar)'); };

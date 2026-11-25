@@ -585,13 +585,13 @@ export default function Ribbon() {
           </Group>
           <Group label="Posición">
             <Big icon="move" label="Mover" active={tool === 'move'} onClick={T('move')} title="Mover o girar el componente seleccionado con el gizmo (respeta las restricciones)" />
-            <Big icon="rotate2d" label="Rotar" active={s.asmRotate} onClick={() => s.set({ asmRotate: !s.asmRotate })} title="Rotar una pieza sola arrastrándola, para ver y elegir su geometría (también con un diálogo de restricción abierto). Si está restringida o fija el giro es temporal: se restablece al salir con Esc o con este botón" />
+            <Big icon="rotate2d" label="Rotar" kbd="Mayús+R" active={s.asmRotate} onClick={() => s.set({ asmRotate: !s.asmRotate })} title="Rotar una pieza sola arrastrándola, para ver y elegir su geometría (también con un diálogo de restricción abierto). Si está restringida o fija el giro es temporal: se restablece al salir con Esc o con este botón" />
             <Col>
               <Small icon="ground" label="Fijar / liberar" disabled={!s.asm.occurrences.some((o) => o.id === s.selItem)} onClick={A.toggleGround} />
             </Col>
           </Group>
           <Group label="Relaciones">
-            <Big icon="constraint3d" label="Restringir" kbd="J" onClick={() => A.openJoint()} title="Coincidir, al ras, ángulo, perpendicular, tangente, insertar, simetría o rígida, entre componentes o con planos/ejes de origen (J). También con clic derecho sobre una cara" />
+            <Big icon="constraint3d" label="Restringir" kbd="R" onClick={() => A.openJoint()} title="Coincidir, al ras, ángulo, perpendicular, tangente, insertar, simetría o rígida, entre componentes o con planos/ejes de origen (J). También con clic derecho sobre una cara" />
             <Big icon="joint" label="Unión" onClick={() => { A.openJoint(); s.updateDraft({ type: 'rot', name: 'Unión' }); }} title="Unión de rotación, corredera, cilíndrica, planar o bola" />
             <Big icon="epoint" label="Conectar ePoints" onClick={() => A.connectEPoints()} title="Une automáticamente los ePoints del mismo nombre y tipo de los componentes (coincidencia, inserción y compuestos)" />
             <Col>

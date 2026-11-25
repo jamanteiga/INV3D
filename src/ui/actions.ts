@@ -380,7 +380,7 @@ export const asmActions = {
       a.joints.push(j); jn = `${j.name} (${j.type === 'insert' ? 'Insertar' : 'Coincidir'})`;
     });
     useStore.setState({ selItem: occ, dialog: null, tool: null });
-    s.notify(jn ? `${base} colocada y restringida a ${T.label} · ${jn}. Ajusta o añade restricciones con Restringir (J)` : `${base} colocada en ${T.label} (sin ePoint propio: restríngela con Restringir)`);
+    s.notify(jn ? `${base} colocada y restringida a ${T.label} · ${jn}. Ajusta o añade restricciones con Restringir (R)` : `${base} colocada en ${T.label} (sin ePoint propio: restríngela con Restringir)`);
     return true;
   },
   startPlace: (partId: string, extras: string[] = [], firstAt?: { pos: [number, number, number]; grounded: boolean; label?: string }) => {
@@ -437,7 +437,7 @@ export const asmActions = {
     s.commitAsm((a) => { const js = autoEPointJoints(a, (id) => partOf(S(), id), undefined, uid); a.joints.push(...js); n = js.length; });
     s.notify(n ? `${n} uniones creadas a partir de ePoints` : 'No hay ePoints libres con el mismo nombre en componentes distintos (créalos en la pieza: Modelo 3D › ePoint)', n ? 'info' : 'error');
   },
-  finishPlace: () => { const s = S(); if (s.placing) { s.setTool(null); s.notify('Colocación terminada · Restringir (J) para relacionar los componentes'); } },
+  finishPlace: () => { const s = S(); if (s.placing) { s.setTool(null); s.notify('Colocación terminada · Restringir (R) para relacionar los componentes'); } },
   rotatePlace: (axis: 0 | 1 | 2) => {
     const s = S(); const p = s.placing; if (!p) return;
     const h = Math.SQRT1_2, r: [number, number, number, number] = [axis === 0 ? h : 0, axis === 1 ? h : 0, axis === 2 ? h : 0, h];

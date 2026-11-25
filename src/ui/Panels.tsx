@@ -1304,7 +1304,7 @@ function AsmSummary() {
       <Row label="Tornillos"><span className="ro">{r?.bolts.reduce((a, x) => a + x.count, 0) ?? 0}</span></Row>
       <Row label="Masa total"><span className="ro strong">{fmt(mass, 2)} kg</span></Row>
       {r && Object.keys(r.errors).length > 0 && <Err text={`${Object.keys(r.errors).length} elemento(s) con error; pasa el ratón por el icono rojo del navegador`} />}
-      {!s.asm.occurrences.length && !s.asm.frames.length && <p className="phelp">Ensamblaje vacío. <b>Colocar (P)</b> inserta piezas abiertas o desde disco (la primera se coloca por su ePoint de inserción en 0, 0, 0 o donde indiques); <b>Restringir (J)</b> las relaciona; <b>Diseño › Insertar perfil</b> crea estructura sobre líneas de esqueleto (<b>Ensamblar › Línea 3D</b>).</p>}
+      {!s.asm.occurrences.length && !s.asm.frames.length && <p className="phelp">Ensamblaje vacío. <b>Colocar (P)</b> inserta piezas abiertas o desde disco (la primera se coloca por su ePoint de inserción en 0, 0, 0 o donde indiques); <b>Restringir (R)</b> las relaciona; <b>Diseño › Insertar perfil</b> crea estructura sobre líneas de esqueleto (<b>Ensamblar › Línea 3D</b>).</p>}
     </div>
   );
 }
@@ -1643,7 +1643,7 @@ function PlaceDialog({ onClose }: { onClose: () => void }) {
   const shown = files.filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase())).slice(0, 200);
   return (
     <Modal title="Colocar componente" onClose={onClose}>
-      <p className="phelp">En un ensamblaje vacío, el primer componente se coloca por su <b>ePoint de inserción</b>, otro ePoint o su origen, en las coordenadas que indiques (por defecto <b>0, 0, 0</b>). Las demás copias siguen al cursor: <b>clic</b> para soltar (puedes soltar varias), <b>X/Y/Z</b> giran 90°, <b>Esc</b> o clic derecho termina. Después relaciónalas con <b>Restringir (J)</b>.</p>
+      <p className="phelp">En un ensamblaje vacío, el primer componente se coloca por su <b>ePoint de inserción</b>, otro ePoint o su origen, en las coordenadas que indiques (por defecto <b>0, 0, 0</b>). Las demás copias siguen al cursor: <b>clic</b> para soltar (puedes soltar varias), <b>X/Y/Z</b> giran 90°, <b>Esc</b> o clic derecho termina. Después relaciónalas con <b>Restringir (R)</b>.</p>
       <div className="modal-btns" style={{ marginTop: 0 }}>
         <button className="btn primary" onClick={browse}>Examinar… (.i3p, .i3a, STEP)</button>
         <button className="btn" onClick={() => { onClose(); asmActions.createPart(); }}>Crear pieza nueva</button>
