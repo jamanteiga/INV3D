@@ -1,6 +1,7 @@
 import { normalizeAsm } from '../core/subasm';
 import { recR, K_DEFAULT } from '../core/sheetrec';
 import { autoEPointJoints, partEPoints, epJoint, epRef, type EPoint } from '../core/epoints';
+import * as R from './hvacroute';
 const partOf = (s: ReturnType<typeof useStore.getState>, id: string): PartDoc | null => { const d = s.docData(id) as PartDoc | null; return d && d.format === 'inv3d.part' ? d : null; };
 import { docGetter } from '../core/store';
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
@@ -347,18 +348,24 @@ export const asmActions = {
     const s = S(); const T = s.createTarget; if (!T || s.kind !== 'assembly') return false;
     const e = s.docs.find((d) => d.id === partId); if (!e) return false;
     useStore.setState({ createTarget: null });
-    const eps = partEPoints(partOf(s, partId)).filter((x) => !x.inactive && x.kind !== 'composite');
+    const pd = partOf(s, partId)!;
+    const eps = partEPoints(pd).filter((x) => !x.inactive && x.kind !== 'composite');
     const own = eps.filter((x) => !x.isDefault);
-    // ePoint de la pieza nueva: el del mismo tipo que el elegido (o inserción si la cara es cilíndrica); si no, el de inserción
-    const wantInsert = T.epKind ? T.epKind === 'insert' : T.ref.kind === 'axis';
-    const ne: EPoint | undefined = own.find((x) => (x.kind === 'insert') === wantInsert) ?? own[0] ?? eps[0];
     const base = e.fileName.replace(/\.[^.]+$/, '');
     const conj = (a: [number, number, number, number]): [number, number, number, number] => [-a[0], -a[1], -a[2], a[3]];
-    // posición inicial: el ePoint de la pieza sobre el punto elegido y con su dirección opuesta a la normal
+    let ne: EPoint | undefined;
     let xf: Xform = { pos: [...T.pW] as V3, quat: [0, 0, 0, 1] };
-    if (ne) {
-      const quat = qq.mul(quatZTo(v3.mul(T.nW, -1)), conj(quatZTo(v3.norm(ne.dir))));
-      xf = { pos: v3.sub(T.pW, qq.rotate(quat, ne.point)), quat };
+    const F = T.ep ? R.epFrame(T.occ, T.ep) : null;
+    if (F) {
+      // boca contra boca: entrada de la pieza nueva, encajada (W con W) y girada hacia el giro elegido
+      ne = R.inletFor(pd, F);
+      if (ne) xf = R.placeOnFrame(F, pd, ne, R.turnOf(F));
+    } else {
+      // ePoint de la pieza nueva: el del mismo tipo que el elegido (o inserción si la cara es cilíndrica); si no, el de inserción
+      const wantInsert = T.epKind ? T.epKind === 'insert' : T.ref.kind === 'axis';
+      ne = own.find((x) => (x.kind === 'insert') === wantInsert) ?? own[0] ?? eps[0];
+      // posición inicial: el ePoint de la pieza sobre el punto elegido y con su dirección opuesta a la normal
+      if (ne) { const quat = qq.mul(quatZTo(v3.mul(T.nW, -1)), conj(quatZTo(v3.norm(ne.dir)))); xf = { pos: v3.sub(T.pW, qq.rotate(quat, ne.point)), quat }; }
     }
     const occ = uid('o'); let jn = '';
     s.commitAsm((a) => {
@@ -380,6 +387,16 @@ export const asmActions = {
       a.joints.push(j); jn = `${j.name} (${j.type === 'insert' ? 'Insertar' : 'Coincidir'})`;
     });
     useStore.setState({ selItem: occ, dialog: null, tool: null });
+    // recursivo: la siguiente boca libre de la pieza nueva pasa a ser la referencia y se vuelve a abrir el centro de contenido
+    const nx = ne && S().createRecursive ? R.nextPort(pd, ne) : undefined;
+    if (nx) {
+      const F2 = R.epFrame(occ, nx.id);
+      if (F2) {
+        useStore.setState({ createTarget: { occ, ref: epRef(nx, occ), ep: nx.id, epKind: nx.kind, label: `${base}:… · ${nx.name}`, pW: [F2.P.x, F2.P.y, F2.P.z], nW: [F2.D.x, F2.D.y, F2.D.z] }, dialog: { kind: 'createcomp' } });
+        s.notify(`${base} colocada y restringida (${jn}). Siguiente pieza desde su boca libre · desactiva «Recursivo» o pulsa Terminar para acabar`);
+        return true;
+      }
+    }
     s.notify(jn ? `${base} colocada y restringida a ${T.label} · ${jn}. Ajusta o añade restricciones con Restringir (R)` : `${base} colocada en ${T.label} (sin ePoint propio: restríngela con Restringir)`);
     return true;
   },

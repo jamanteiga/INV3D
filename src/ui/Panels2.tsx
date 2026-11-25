@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../core/store';
 import { Icon } from './icons';
+import { useRoute, epFrame, turnOf, turnNeedsSwap, DIR_LABELS, isVertical } from './hvacroute';
+import { asmEnv } from '../core/asm';
 import { Modal, Row, Seg, Expr } from './Panels';
 import { uid, newDoc, MATERIALS, docParams, planeFrame, resolveWorkPlanes, entityOutline, type V3, type PartDoc, type Feature, type SketchF } from '../core/doc';
 import { makeEval } from '../core/expr';
@@ -741,20 +743,41 @@ export function CreateCompDialog({ onClose }: { onClose: () => void }) {
   const T = s.createTarget;
   const auto = (() => { if (!T) return null; const o = s.asm.occurrences.find((x) => x.id === T.occ); return o ? catOfPart(s.docData(o.part) as PartDoc | null) : null; })();
   const last = (() => { try { return localStorage.getItem(CAT_LS) as 'hvac' | 'mech' | null; } catch { return null; } })();
-  const [cat, setCat0] = useState<'hvac' | 'mech'>(s.createCat ?? auto ?? last ?? 'hvac');
+  const env0 = asmEnv(s.asm);
+  const [cat, setCat0] = useState<'hvac' | 'mech'>(!env0.mech ? 'hvac' : !env0.hvac ? 'mech' : s.createCat ?? auto ?? last ?? 'hvac');
   const setCat = (c: 'hvac' | 'mech') => { setCat0(c); try { localStorage.setItem(CAT_LS, c); } catch { /* */ } };
   const go = (d: Parameters<ReturnType<typeof useStore.getState>['open']>[0]) => { try { localStorage.setItem(CAT_LS, cat); } catch { /* */ } s.open(d); };
   const B = ({ l, d }: { l: string; d: Parameters<ReturnType<typeof useStore.getState>['open']>[0] }) => <button className="btn" onClick={() => go(d)}>{l}</button>;
-  const H = (hk: string) => ({ kind: 'hvac', hk }) as never;
+  // boca de referencia: la pieza toma su sección; los codos y derivaciones hacia el lado H se piden con W y H cambiados
+  const R = useRoute();
+  const F = T?.ep ? epFrame(T.occ, T.ep) : null;
+  const Tw = F ? turnOf(F) : null;
+  const H = (hk: string) => {
+    if (!F?.m) return ({ kind: 'hvac', hk }) as never;
+    const sw = (hk === 'elbow' || hk === 'branch') && !!Tw && turnNeedsSwap(F, Tw);
+    const m = F.m;
+    const turning = hk === 'elbow' || hk === 'branch';
+    // piezas rectas: sección con W ≥ H (se colocan giradas para encajar); codos y derivaciones según el giro
+    const Wc = turning ? (sw ? m.H : m.W) : Math.max(m.W, m.H), Hc = turning ? (sw ? m.W : m.H) : Math.min(m.W, m.H);
+    return ({ kind: 'hvac', hk, shape: m.shape, init: { W: Wc, H: Hc, D: m.D || m.W, spiral: m.spiral } }) as never;
+  };
+  const env = asmEnv(s.asm);
   const P = (pk: string, norm: string) => ({ kind: 'piping', pk, norm }) as never;
   const cancel = () => { useStore.setState({ createTarget: null, createCat: null }); onClose(); };
   return (
     <Modal title={`Crear componente · ${cat === 'hvac' ? 'HVAC' : 'Mecánica'}`} onClose={cancel} wide>
       <div className="pick-info">{T ? <>Se restringirá a: <b>{T.label}</b> {T.ep ? '(ePoint)' : ''}</> : <>Sin geometría de referencia: se colocará con el ratón.</>}
         {' '}<button className="btn sm" onClick={() => { onClose(); useStore.setState({ createTarget: null }); void import('./actions').then((m) => m.asmActions.createComponent(cat)); }}>Cambiar</button></div>
+      {F && (<div className="cc-turn">
+        <span>Giro (codos y derivaciones):</span>
+        {(['up', 'down', 'left', 'right'] as const).map((d) => <button key={d} className={`btn sm ${R.dir === d ? 'primary' : ''}`} onClick={() => useRoute.setState({ dir: d })}>{DIR_LABELS(isVertical(F as never))[d]}</button>)}
+        {(!F.m || F.m.shape === 'round') && <label>giro extra ° <input className="num" style={{ width: 55 }} type="number" value={R.roll} onChange={(e) => useRoute.setState({ roll: Number(e.target.value) || 0 })} onKeyDown={(e) => e.stopPropagation()} /></label>}
+        {F.m && <span className="muted">boca {F.m.shape === 'round' ? `Ø${F.m.D}` : `${F.m.W}×${F.m.H}${F.m.shape === 'oval' ? ' oval' : ''}`}</span>}
+      </div>)}
+      <label className="check"><input type="checkbox" checked={s.createRecursive} onChange={(e) => { useStore.setState({ createRecursive: e.target.checked }); try { localStorage.setItem('inv3d.recursive', e.target.checked ? '1' : '0'); } catch { /* */ } }} />Recursivo: después de colocar, seguir desde la boca libre de la pieza nueva (si no, se inserta pieza a pieza)</label>
       <div className="cc-tabs">
-        <button className={cat === 'hvac' ? 'on hvac' : 'hvac'} onClick={() => setCat('hvac')}><Icon name="hduct" size={18} />HVAC<span>conductos, accesorios, terminales, espirotubo</span></button>
-        <button className={cat === 'mech' ? 'on mech' : 'mech'} onClick={() => setCat('mech')}><Icon name="pipe" size={18} />Mecánica<span>tubería ASME / EN, bridas, tornillería</span></button>
+        <button disabled={!env.hvac} title={env.hvac ? '' : 'HVAC desactivada en este ensamblaje (Herramientas › Entornos)'} className={cat === 'hvac' ? 'on hvac' : 'hvac'} onClick={() => setCat('hvac')}><Icon name="hduct" size={18} />HVAC<span>conductos, accesorios, terminales, espirotubo</span></button>
+        <button disabled={!env.mech} title={env.mech ? '' : 'Mecánica desactivada en este ensamblaje (Herramientas › Entornos)'} className={cat === 'mech' ? 'on mech' : 'mech'} onClick={() => setCat('mech')}><Icon name="pipe" size={18} />Mecánica<span>tubería ASME / EN, bridas, tornillería</span></button>
       </div>
       {auto && auto !== cat && <p className="phelp">La pieza de referencia es de {auto === 'hvac' ? 'HVAC' : 'Mecánica'}.</p>}
       {cat === 'hvac' ? (<>
@@ -768,7 +791,7 @@ export function CreateCompDialog({ onClose }: { onClose: () => void }) {
         </div>
         <div className="plabel">Espirotubo</div>
         <div className="cc-grid">
-          {([['Espirotubo', 'tube'], ['Codo 15-90°', 'elbow'], ['Te / injerto', 'tee'], ['Reducción', 'reducer']] as const).map(([l, k]) => <B key={k} l={l} d={{ kind: 'spiro', sk: k } as never} />)}
+          {([['Espirotubo', 'tube'], ['Codo 15-90°', 'elbow'], ['Te / injerto', 'tee'], ['Reducción', 'reducer'], ['Manguito macho', 'nipple'], ['Manguito hembra', 'sleeve'], ['Compuerta', 'damper'], ['Tapón', F?.m?.male ? 'capF' : 'capM']] as const).map(([l, k]) => <B key={l} l={l} d={{ kind: 'spiro', sk: k, ...(F?.m ? { D: F.m.D } : {}) } as never} />)}
         </div>
       </>) : (<>
         {(['ASME', 'EN'] as const).map((n) => (<div key={n}>
@@ -785,7 +808,7 @@ export function CreateCompDialog({ onClose }: { onClose: () => void }) {
       </>)}
       <div className="modal-btns">
         <button className="btn" onClick={() => { useStore.setState({ createTarget: null, createCat: null }); onClose(); void import('./actions').then((m) => m.asmActions.createPart()); }}>Modelar pieza nueva en contexto</button>
-        <span className="grow" /><button className="btn" onClick={cancel}>Cancelar</button>
+        <span className="grow" /><button className="btn" onClick={cancel}>{s.createRecursive && T?.ep ? 'Terminar' : 'Cancelar'}</button>
       </div>
     </Modal>
   );

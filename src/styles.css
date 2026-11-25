@@ -799,3 +799,7 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .cc-tabs button span { font-weight: 400; font-size: 11px; color: var(--fg-2); }
 .cc-tabs button.on.hvac { border-color: #1f8fb3; background: rgba(31,143,179,.10); }
 .cc-tabs button.on.mech { border-color: #c2711b; background: rgba(194,113,27,.10); }
+.tab.envoff { opacity: .45; text-decoration: line-through; }
+.envoff-panel { opacity: .35; pointer-events: none; filter: grayscale(1); }
+.env-banner { position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); margin-top: 30px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 10px; box-shadow: var(--shadow); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.cc-turn { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0; font-size: 12px; } .cc-turn label { display: flex; gap: 4px; align-items: center; } .cc-tabs button:disabled { opacity: .4; cursor: not-allowed; }

@@ -2454,13 +2454,14 @@ function DimIn({ label, mm, std, list, onChange }: { label: string; mm: number; 
   );
 }
 
-function HvacDialog({ hk, shape0, onClose }: { hk: string; shape0?: DuctShape; onClose: () => void }) {
+function HvacDialog({ hk, shape0, init, onClose }: { hk: string; shape0?: DuctShape; init?: { W: number; H: number; D: number; spiral?: boolean }; onClose: () => void }) {
   const s = useStore();
   const [kind, setKind] = useState<HvacKind>(hk as HvacKind);
   const [std, setStd] = useState<'EN' | 'SMACNA'>(s.settings.drawingStd === 'ANSI' ? 'SMACNA' : 'EN');
   const [shape, setShape] = useState<DuctShape>(shape0 ?? (['flex'].includes(hk) ? 'round' : 'rect'));
-  const [spiral, setSpiral] = useState(true), [seamGeo, setSeamGeo] = useState(false);
-  const [W, setW] = useState(600), [H, setH] = useState(400), [D, setD] = useState(400);
+  // con una boca de referencia (Crear componente) la pieza toma su sección
+  const [spiral, setSpiral] = useState(init?.spiral ?? true), [seamGeo, setSeamGeo] = useState(false);
+  const [W, setW] = useState(init?.W || 600), [H, setH] = useState(init?.H || 400), [D, setD] = useState(init?.D || 400);
   const [shape2, setShape2] = useState<DuctShape>('round');
   const [W2, setW2] = useState(400), [H2, setH2] = useState(300), [D2, setD2] = useState(250);
   const [ex, setEx] = useState(0), [ey, setEy] = useState(0);
@@ -2608,10 +2609,10 @@ function HvacDialog({ hk, shape0, onClose }: { hk: string; shape0?: DuctShape; o
 /** Equivalencias entre el centro de contenido HVAC y el catálogo de espirotubo */
 const HVAC_TO_SPIRO: Partial<Record<HvacKind, SpiroKind>> = { duct: 'tube', elbow: 'elbow', transition: 'reducer', branch: 'tee', coupling: 'nipple', cap: 'capM', damper: 'damper', support: 'clamp' };
 const SPIRO_TO_HVAC: Partial<Record<SpiroKind, HvacKind>> = { tube: 'duct', elbow: 'elbow', tee: 'branch', tee45: 'branch', cross: 'branch', saddle: 'branch', reducer: 'transition', reducerEcc: 'transition', nipple: 'coupling', capM: 'cap', capF: 'cap', damper: 'damper', clamp: 'support' };
-function SpiroDialog({ sk, onClose }: { sk: string; onClose: () => void }) {
+function SpiroDialog({ sk, D0, onClose }: { sk: string; D0?: number; onClose: () => void }) {
   const s = useStore();
   const [kind, setKind] = useState<SpiroKind>((sk in SPIRO_KINDS ? sk : 'tube') as SpiroKind);
-  const [D, setD] = useState(200), [D2, setD2] = useState(160);
+  const [D, setD] = useState(D0 || 200), [D2, setD2] = useState(160);
   const [angle, setAngle] = useState(90), [rd, setRd] = useState(1), [build, setBuild] = useState<'auto' | 'pressed' | 'segmented'>('auto');
   const [L, setL] = useState(3000), [Lx, setLx] = useState(0);
   const [gasket, setGasket] = useState(true), [tOv, setTOv] = useState(0), [mat, setMat] = useState(HVAC_DUCT_MATS[0]);
@@ -3193,7 +3194,7 @@ function NewDocDialog({ onClose }: { onClose: () => void }) {
       <div className="tpl-sec">Pieza — crear objetos 2D y 3D</div>
       <div className="tpl-row"><T icon="part" name="Normal (mm).i3p" desc="Pieza sólida" k="part" /><T icon="sheetmetal" name="Chapa (mm).i3p" desc="Chapa con pestañas y desarrollo" k="sheet" /></div>
       <div className="tpl-sec">Ensamblaje — ensamblar componentes 2D y 3D</div>
-      <div className="tpl-row"><T icon="assembly" name="Normal (mm).i3a" desc="Componentes, uniones, estructura, tornillería" k="assembly" /><T icon="weldment" name="Soldadura (ISO).i3a" desc="Construcción soldada" k="weldment" /></div>
+      <div className="tpl-row"><T icon="assembly" name="Normal (mm).i3a" desc="General: HVAC y Mecánica activas" k="assembly" /><T icon="hduct" name="HVAC (mm).i3a" desc="Conductos y equipos; Mecánica desactivada" k="asmHvac" /><T icon="pipe" name="Mecánica (mm).i3a" desc="Tubería, bridas, tornillería; HVAC desactivada" k="asmMech" /><T icon="weldment" name="Soldadura (ISO).i3a" desc="Construcción soldada" k="weldment" /></div>
       <div className="tpl-sec">Dibujo — crear un documento anotado</div>
       <div className="tpl-row tpl-row5">{(['A4', 'A3', 'A2', 'A1', 'A0'] as SheetSize[]).map((z) => <T key={z} icon="drawing" name={`ISO ${z}.i3d`} desc={`${SHEETS[z][0]} × ${SHEETS[z][1]} mm, cajetín y proyección europea`} k="drawing" sheet={z} />)}</div>
       <p className="phelp">La presentación (explosionado y animación) es un modo del ensamblaje: pestaña Presentación.</p>
@@ -3269,8 +3270,8 @@ export function Modals() {
     case 'cpattern': return <CompPatternDialog onClose={close} />;
     case 'drive': return <DriveDialog onClose={close} />;
     case 'motion': return <MotionDialog onClose={close} />;
-    case 'hvac': return <HvacDialog key={`${(d as { hk: string }).hk}${(d as { shape?: string }).shape ?? ''}`} hk={(d as { hk: string }).hk} shape0={(d as { shape?: DuctShape }).shape} onClose={close} />;
-    case 'spiro': return <SpiroDialog key={(d as { sk: string }).sk} sk={(d as { sk: string }).sk} onClose={close} />;
+    case 'hvac': return <HvacDialog key={`${(d as { hk: string }).hk}${(d as { shape?: string }).shape ?? ''}`} hk={(d as { hk: string }).hk} shape0={(d as { shape?: DuctShape }).shape} init={(d as { init?: { W: number; H: number; D: number; spiral?: boolean } }).init} onClose={close} />;
+    case 'spiro': return <SpiroDialog key={(d as { sk: string }).sk} sk={(d as { sk: string }).sk} D0={(d as { D?: number }).D} onClose={close} />;
     case 'ductcalc': return <DuctCalcDialog onClose={close} />;
     case 'piping': return <PipingDialog pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} onClose={close} />;
     case 'ipart': return <IPartDialog onClose={close} />;

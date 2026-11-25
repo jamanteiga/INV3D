@@ -6,6 +6,7 @@ import { ICON_THEMES, iconThemeOf } from '../core/persist';
 import { toggleClipTool } from './ClipBar';
 import { useMeasure, type MMode, type MDist } from './measure';
 import { rebuildAll } from '../core/store';
+import { asmEnv } from '../core/asm';
 import { TabCtx, useRibbonReg, ribbonCtl } from './toolbars';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
 import { demoDoc, MATERIALS, nextName } from '../core/doc';
@@ -88,6 +89,11 @@ export default function Ribbon() {
   const [tab, setTab] = useState<Tab>(tabs[0][0]);
   useEffect(() => { setTab(tabsFor()[0][0]); }, [k, inSketch, isSheet, s.active]);
   const cur = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
+  // ensamblaje HVAC / Mecánica: la pestaña de la otra familia queda desactivada (se puede activar en Herramientas › Entornos)
+  const env = asmEnv(s.asm);
+  const envOff = (id: string) => k === 'assembly' && ((id === 'hvac' && !env.hvac) || (id === 'pipe' && !env.mech));
+  const ENV_NAMES = { general: 'general', hvac: 'HVAC', mech: 'Mecánica' } as const;
+  const setEnv = (p: Partial<{ hvac: boolean; mech: boolean }>) => s.commitAsm((a) => { const e = asmEnv(a); a.env = { ...e, ...p }; });
   ribbonCtl.setTab = (t: string) => setTab(t as Tab); ribbonCtl.tab = cur; ribbonCtl.tabs = tabs.map((t) => t[0] as string);
   const tool = s.tool;
   const T = (t: typeof tool) => () => s.setTool(tool === t ? null : t);
@@ -120,11 +126,12 @@ export default function Ribbon() {
       <nav className="tabs">
         <button className={`tab file ${s.menuOpen ? 'on' : ''}`} onClick={() => s.set({ menuOpen: !s.menuOpen })}>Archivo</button>
         {tabs.map(([id, l]) => (
-          <button key={id} className={`tab ${cur === id ? 'on' : ''} ${id === 'sketch' || id === 'present' ? 'ctxtab' : ''}`} onClick={() => setTab(id)}>{l}</button>
+          <button key={id} className={`tab ${cur === id ? 'on' : ''} ${id === 'sketch' || id === 'present' ? 'ctxtab' : ''} ${envOff(id) ? 'envoff' : ''}`} title={envOff(id) ? `${l} desactivada en este ensamblaje (${ENV_NAMES[env.type]}). Herramientas › Entornos para activarla` : undefined} onClick={() => setTab(id)}>{l}</button>
         ))}
       </nav>
       <TabCtx.Provider value={{ kind: k, tab: cur, tabLabel: tabs.find((t) => t[0] === cur)?.[1] ?? cur }}>
-      <div className="panel-row">
+      {envOff(cur) && <div className="env-banner">{cur === 'hvac' ? 'HVAC' : 'Mecánica'} está desactivada en este ensamblaje ({ENV_NAMES[env.type]}). <button className="btn sm" onClick={() => setEnv(cur === 'hvac' ? { hvac: true } : { mech: true })}>Activar</button></div>}
+      <div className={`panel-row ${envOff(cur) ? 'envoff-panel' : ''}`}>
         {/* ---------- PIEZA ---------- */}
         {k === 'part' && cur === 'sketch' && inSketch && (<>
           <Group label="Crear">
@@ -263,7 +270,7 @@ export default function Ribbon() {
         </>); })()}
         {cur === 'hvac' && (() => { const H = (hk: string) => () => s.open({ kind: 'hvac', hk }); return (<>
           {k === 'assembly' && <Group label="Tendido">
-            <Big icon="hduct" label="Tender" active={tool === 'hvacRoute'} onClick={() => (tool === 'hvacRoute' ? s.setTool(null) : void import('./hvacroute').then((m) => m.routeStart()))} title="Tender conductos desde una boca libre: rectos, codos, transiciones, tes, compuertas… encajados y restringidos por ePoints; solo se elige el giro y las medidas" />
+            <Big icon="hduct" label="Tender" active={tool === 'asmCreatePick' && s.createCat === 'hvac'} onClick={() => { s.set({ createRecursive: true } as never); A.createComponent('hvac'); }} title="Tender conductos: clic en una boca libre (o cerca de ella) y elige la pieza en el centro de contenido HVAC; queda encajada y restringida por ePoints y se sigue desde su boca libre (recursivo)" />
           </Group>}
           <Group label="Conductos (EN 1505/1506 · SMACNA)">
             <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular, circular, espiral u oval plano" />
@@ -841,6 +848,12 @@ export default function Ribbon() {
           <Group label="Impresión 3D"><Big icon="print3d" label="Impresión 3D" disabled={!hasSolid} onClick={() => s.open({ kind: 'print3d' })} title="Comprueba la bandeja y exporta 3MF" /></Group>
           <Group label="Administrar"><Big icon="addins" label="Complementos" onClick={() => s.open({ kind: 'addins' })} title="Activa o desactiva módulos de la cinta" /></Group>
         </>)}
+        {k === 'assembly' && cur === 'tools' && (
+          <Group label="Entornos">
+            <Big icon="hduct" label="HVAC" active={env.hvac} onClick={() => setEnv({ hvac: !env.hvac })} title="Activa o desactiva la pestaña HVAC en este ensamblaje" />
+            <Big icon="pipe" label="Mecánica" active={env.mech} onClick={() => setEnv({ mech: !env.mech })} title="Activa o desactiva la pestaña Mecánica en este ensamblaje" />
+          </Group>
+        )}
         {cur === 'tools' && (<>
           <Group label="Opciones">
             {k === 'part' && <Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} />}
@@ -959,6 +972,10 @@ function FileMenu() {
         {s.kind === 'drawing' && <button onClick={act(drwActions.exportPdf)}><Icon name="pdf" size={20} />Exportar PDF</button>}
         <hr />
         <button onClick={act(() => s.open({ kind: 'project' }))}><Icon name="project" size={20} />Proyectos (.fdp)…</button>
+        {s.kind === 'assembly' && (() => { const e = asmEnv(s.asm); const tg = (p: { hvac?: boolean; mech?: boolean }) => s.commitAsm((a) => { a.env = { ...asmEnv(a), ...p }; }); return (<>
+          <button onClick={() => tg({ hvac: !e.hvac })} title="Activa o desactiva la pestaña HVAC en este ensamblaje"><Icon name="hduct" size={20} />{e.hvac ? '☑' : '☐'} Entorno HVAC</button>
+          <button onClick={() => tg({ mech: !e.mech })} title="Activa o desactiva la pestaña Mecánica en este ensamblaje"><Icon name="pipe" size={20} />{e.mech ? '☑' : '☐'} Entorno Mecánica</button>
+        </>); })()}
         <button onClick={act(() => s.open({ kind: 'project', create: true } as never))}><Icon name="project" size={20} />Crear proyecto .fdp</button>
         <button onClick={act(() => s.open({ kind: 'iprops' }))}><Icon name="iprops" size={20} />iProperties</button>
         <hr />

@@ -241,3 +241,59 @@ export function RoutePanel() {
     </div>
   );
 }
+
+// ---------- Colocación genérica en una boca (Crear componente, recursivo) ----------
+/** Marco global de un ePoint (con o sin sección de boca) */
+export function epFrame(occ: string, epId: string) {
+  const s = S(); const o = s.asm.occurrences.find((x) => x.id === occ); if (!o) return null;
+  const pd = s.docData(o.part) as PartDoc | null; if (!pd) return null;
+  const e = partEPoints(pd).find((x) => x.id === epId); if (!e) return null;
+  const m = mouthOf(e, pd.iProperties?.designer);
+  const X: Xform = s.asmResult?.xf[o.id] ?? o.xf;
+  const q = new THREE.Quaternion(...X.quat);
+  const P = tv(e.point).applyQuaternion(q).add(tv(X.pos)), D = tv(e.dir).applyQuaternion(q).normalize();
+  let Xw = m ? tv(m.xdir).applyQuaternion(q) : new THREE.Vector3(Math.abs(D.x) > 0.9 ? 0 : 1, Math.abs(D.x) > 0.9 ? 1 : 0, 0);
+  Xw.sub(D.clone().multiplyScalar(Xw.dot(D))); if (Xw.lengthSq() < 1e-9) Xw = new THREE.Vector3(0, 0, 1).cross(D); Xw.normalize();
+  return { P, D, X: Xw, Y: D.clone().cross(Xw).normalize(), m, e, o, name: `${o.name} · ${e.name}` };
+}
+export type EF = NonNullable<ReturnType<typeof epFrame>>;
+/** ePoints útiles de una pieza (bocas): sin el de inserción por defecto ni los desactivados */
+export const portsOf = (pd: PartDoc) => { const all = partEPoints(pd).filter((e) => !e.inactive && e.kind !== 'composite'); const own = all.filter((e) => !e.isDefault); return own.length ? own : all; };
+/** Boca de entrada de la pieza para unirla a la boca F: misma sección si se conoce; si no, ep1 o la primera */
+export function inletFor(pd: PartDoc, F: EF): EPoint | undefined {
+  const P = portsOf(pd), des = pd.iProperties?.designer ?? '';
+  const same = (e: EPoint) => { const m = mouthOf(e, des); if (!m || !F.m) return false; return m.shape === F.m.shape && (m.shape === 'round' ? Math.abs(m.D - F.m.D) < 0.5 : (Math.abs(m.W - F.m.W) < 0.5 && Math.abs(m.H - F.m.H) < 0.5) || (Math.abs(m.W - F.m.H) < 0.5 && Math.abs(m.H - F.m.W) < 0.5)); };
+  return P.find((e) => e.id === 'ep1' && same(e)) ?? P.find(same) ?? P.find((e) => e.id === 'ep1') ?? P[0];
+}
+/** Posición de la pieza: su boca de entrada contra la boca F; las piezas que giran (codos, tes) giran hacia T; las rectas encajan W con W */
+export function placeOnFrame(F: EF, pd: PartDoc, inlet: EPoint, T: THREE.Vector3 | null): Xform {
+  const des = pd.iProperties?.designer ?? '';
+  const fl = tv(inlet.dir).negate().normalize();
+  // dirección de giro local: la boca lateral más girada respecto a la entrada (codo: salida; te: derivación)
+  let bl: THREE.Vector3 | null = null, best = 0.2;
+  for (const e of portsOf(pd)) { if (e.id === inlet.id) continue; const d = tv(e.dir); const pr = d.clone().sub(fl.clone().multiplyScalar(d.dot(fl))); if (pr.length() > best) { best = pr.length(); bl = pr.normalize(); } }
+  const im = mouthOf(inlet, des);
+  let xl: THREE.Vector3, xw: THREE.Vector3;
+  if (bl && T) { xl = bl; xw = T.clone().sub(F.D.clone().multiplyScalar(T.dot(F.D))).normalize(); }
+  else {
+    const x0 = im ? tv(im.xdir) : new THREE.Vector3(1, 0, 0); if (Math.abs(x0.dot(fl)) > 0.9) x0.set(0, 1, 0);
+    xl = x0.sub(fl.clone().multiplyScalar(x0.dot(fl))).normalize();
+    // rectangular: si la pieza tiene W y H cambiados respecto a la boca, su W va con el H de la boca
+    const swapped = !!(im && F.m && im.shape !== 'round' && Math.abs(im.W - F.m.H) < 0.5 && Math.abs(im.W - F.m.W) > 0.5);
+    xw = swapped ? F.Y.clone() : F.X.clone();
+  }
+  const yl = fl.clone().cross(xl), fw = F.D.clone(), yw = fw.clone().cross(xw);
+  const R = new THREE.Matrix4().makeBasis(fw, xw, yw).multiply(new THREE.Matrix4().makeBasis(fl, xl, yl).transpose());
+  const q = new THREE.Quaternion().setFromRotationMatrix(R).normalize();
+  const p = F.P.clone().sub(tv(inlet.point).applyQuaternion(q));
+  const r = (x: number) => Math.round(x * 1e4) / 1e4;
+  return { pos: [r(p.x), r(p.y), r(p.z)], quat: [q.x, q.y, q.z, q.w] };
+}
+/** Siguiente boca libre de la pieza recién colocada (la que sigue más recta) */
+export function nextPort(pd: PartDoc, inlet: EPoint): EPoint | undefined {
+  const fl = tv(inlet.dir).negate();
+  return portsOf(pd).filter((e) => e.id !== inlet.id).sort((a, b) => tv(b.dir).dot(fl) - tv(a.dir).dot(fl))[0];
+}
+/** ¿El giro pide la pieza con W y H cambiados? (codos y derivaciones rectangulares hacia el lado H) */
+export function turnNeedsSwap(F: EF, T: THREE.Vector3) { return !!F.m && F.m.shape !== 'round' && Math.abs(T.dot(F.Y)) > Math.abs(T.dot(F.X)); }
+export function turnOf(F: EF) { const R = useRoute.getState(); return turnDir(F as unknown as MW, R.dir, F.m && F.m.shape !== 'round' ? 0 : R.roll); }

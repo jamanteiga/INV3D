@@ -134,8 +134,12 @@ export interface ViewRep { id: string; name: string; hidden: string[]; /** color
 /** Estado de modelo: qué componentes, barras, cordones y tornillos están suprimidos, y posiciones de los no restringidos */
 export interface ModelState { id: string; name: string; suppressed: string[]; positions?: Record<string, Xform> }
 
+/** Tipo de ensamblaje: general, HVAC o Mecánica (activa o desactiva sus pestañas; se pueden mezclar) */
+export interface AsmEnv { type: 'general' | 'hvac' | 'mech'; hvac: boolean; mech: boolean }
+export const asmEnv = (a: { env?: AsmEnv }): AsmEnv => a.env ?? { type: 'general', hvac: true, mech: true };
 export interface AsmDoc {
   format: 'inv3d.assembly';
+  env?: AsmEnv;
   viewReps?: ViewRep[];
   modelStates?: ModelState[];
   ductNets?: import('./ductnet').DuctNet[];
@@ -356,7 +360,8 @@ export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => 
     case 'insert': {
       const out = [...(j.aligned ? sub3(na, nb) : v3.add(na, nb)), ...perp(sub3(pb, pa), na), dot3(sub3(pb, pa), na) - off];
       // bocas de conducto: giro bloqueado (lado W con W)
-      if (j.lock && j.a.xdir && j.b.xdir) out.push(dot3(cross3(v3.norm(xfDir(A, j.a.xdir)), v3.norm(xfDir(B, j.b.xdir))), na));
+      // (múltiplos de 90°: una pieza con W y H cambiados encaja con su W contra el H de la boca)
+      if (j.lock && j.a.xdir && j.b.xdir) { const xa = v3.norm(xfDir(A, j.a.xdir)), xb = v3.norm(xfDir(B, j.b.xdir)); out.push(2 * dot3(cross3(xa, xb), na) * dot3(xa, xb)); }
       return out;
     }
     case 'rigid': return [...v3.add(na, nb), ...sub3(pb, v3.add(pa, v3.mul(na, off)))];

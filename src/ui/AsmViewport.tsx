@@ -2,7 +2,7 @@ import HeadsUp from './HeadsUp';
 import { updateCog } from './cog';
 import ClipBar from './ClipBar';
 import MeasurePanel from './MeasurePanel';
-import { RoutePanel, useRoute, mouthWorld, routeStart, mouthOf } from './hvacroute';
+import { useRoute, mouthWorld, mouthOf, epFrame, portsOf } from './hvacroute';
 import { useMeasure, measureOverlay, measureCompute, measureAdd, measureReset, edgeEnt, faceEnt, vertexEnt, nearestVertex, type MEnt } from './measure';
 import { insertPoint, partEPoints, activeEPoints, epRef, epJoint, type EPoint } from '../core/epoints';
 import { setJointEPoint } from './jointep';
@@ -804,6 +804,14 @@ export default function AsmViewport() {
           const hit = hitAt(ev); const f = hit ? faceFromHit(hit) : null;
           if (!f || f.ownerKind !== 'occ') { s.notify('Elige un ePoint o una cara plana o cilíndrica de un componente', 'error'); return; }
           const nm = findOcc(s, f.owner)?.name ?? '';
+          // clic sobre la pieza cerca de una boca libre: se toma esa boca (ePoint)
+          const oc = s.asm.occurrences.find((o) => o.id === f.owner);
+          const pdo = oc ? (s.docData(oc.part) as PartDoc | null) : null;
+          if (oc && pdo) {
+            let bestE: { id: string; d: number } | null = null;
+            for (const e of portsOf(pdo)) { const Fr = epFrame(oc.id, e.id); if (!Fr) continue; const rr = Fr.m ? (Fr.m.shape === 'round' ? Fr.m.D / 2 : Math.max(Fr.m.W, Fr.m.H) / 2) : (e.radius ?? 50); const dd = Fr.P.distanceTo(new THREE.Vector3(...f.pointW)); if (dd < rr * 1.3 && (!bestE || dd < bestE.d)) bestE = { id: e.id, d: dd }; }
+            if (bestE) { const Fr = epFrame(oc.id, bestE.id)!; T = { occ: oc.id, ref: epRef(Fr.e, oc.id), ep: bestE.id, epKind: Fr.e.kind, label: Fr.name, pW: [Fr.P.x, Fr.P.y, Fr.P.z], nW: [Fr.D.x, Fr.D.y, Fr.D.z] }; useStore.setState({ createTarget: T, tool: null, dialog: { kind: 'createcomp' } }); return; }
+          }
           T = { occ: f.owner, ref: { occ: f.owner, point: f.pointL, normal: f.normalL, kind: f.kind, radius: f.radius, convex: f.convex, center: f.centerL, xdir: f.xdirL }, label: `${nm} · cara ${f.kind === 'axis' ? 'cilíndrica' : 'plana'}`, pW: f.pointW, nW: f.normalW };
         }
         useStore.setState({ createTarget: T, tool: null, dialog: { kind: 'createcomp' } });
@@ -917,7 +925,8 @@ export default function AsmViewport() {
 
     const applyMouse = (s: State) => {
       const picking = !!s.tool && s.tool !== 'move';
-      V.setMouse(picking, false);
+      // las herramientas de ensamblaje se eligen con clic: arrastrar con el botón izquierdo sigue girando la vista
+      V.setMouse(false, false);
       cvs.style.cursor = picking ? 'pointer' : 'default';
     };
 
@@ -992,7 +1001,6 @@ export default function AsmViewport() {
       <HeadsUp kind="asm" />
       <ClipBar />
       <MeasurePanel />
-      <RoutePanel />
       <button className="vp-home" title="Vista de inicio (F6)" onClick={() => useStore.getState().setView('home')}>
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </button>
@@ -1045,7 +1053,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
     <div className="ctx" style={{ left: ctx.x, top: ctx.y, position: 'fixed' }} onContextMenu={(e) => e.preventDefault()}>
       <div className="ctx-title">{ctx.label}</div>
       <button title="Este ePoint es el origen; después haz clic en el ePoint destino de otro componente" onClick={() => epEp(ctx.ep)}>Restringir ePoint origen → ePoint destino…</button>
-      <button title="Encadenar rectos, codos, transiciones, tes… desde esta boca, restringidos por ePoints" onClick={() => { close(); routeStart(ctx.ep ? { occ: ctx.ep.occ, ep: ctx.ep.id } : undefined); }}>Tender conductos desde aquí…</button>
+      <button title="Encadenar rectos, codos, transiciones, tes… desde esta boca, restringidos por ePoints" onClick={() => { close(); const F = ctx.ep && epFrame(ctx.ep.occ, ctx.ep.id); if (!F) return; useStore.setState({ createRecursive: true, createCat: 'hvac', createTarget: { occ: F.o.id, ref: epRef(F.e, F.o.id), ep: F.e.id, epKind: F.e.kind, label: F.name, pW: [F.P.x, F.P.y, F.P.z], nW: [F.D.x, F.D.y, F.D.z] }, dialog: { kind: 'createcomp' } }); }}>Tender conductos desde aquí…</button>
     </div>
   );
   return (
