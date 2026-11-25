@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.41
+## Versión 0.41.1
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.41.1**
+- **Tender / Crear componente**: ya no se muestran ni resaltan los planos y ejes de origen del ensamblaje, los planos de trabajo ni el origen de las piezas; solo las **bocas (ePoints)** de los componentes, para hacer clic en una y que salga directamente el centro de contenido HVAC/Mecánica. El ePoint de inserción (origen) se oculta si la pieza tiene bocas.
 
 **Novedades 0.41**
 - **Crear componente recursivo** (Ensamblar › Crear y **HVAC › Tendido › Tender**): clic en una boca libre (ePoint) **o sobre la pieza cerca de la boca**; se abre el centro de contenido (HVAC o Mecánica) con la **sección de la boca ya puesta** y el **giro** (Arriba/Abajo/Izquierda/Derecha) para codos y derivaciones. Al pulsar *Colocar* la pieza queda encajada (W con W) y restringida por ePoints; con **Recursivo** activado (casilla del cuadro) se vuelve a abrir desde la boca libre de la pieza nueva para elegir la siguiente; desactivado, se inserta pieza a pieza. *Terminar* acaba. Sustituye al panel de tendido de la 0.40. Clic derecho sobre una boca › *Tender conductos desde aquí*.

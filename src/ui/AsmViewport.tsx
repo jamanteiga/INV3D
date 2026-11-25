@@ -104,7 +104,9 @@ export default function AsmViewport() {
     /** Planos y ejes de origen del ensamblaje (al restringir) y planos de trabajo: visibles y seleccionables */
     const buildRefs = (s: State) => {
       V.clearGroup(refGroup); refHover = null;
-      const joint = s.dialog?.kind === 'joint' || s.dialog?.kind === 'asmwp' || s.tool === 'asmCreatePick' || s.tool === 'hvacRoute';
+      // planos/ejes de origen solo al restringir o crear planos; al tender / crear componente solo ePoints
+      const joint = s.dialog?.kind === 'joint' || s.dialog?.kind === 'asmwp';
+      const picking = s.tool === 'asmCreatePick' || s.tool === 'hvacRoute';
       const box = V.viewBox(), size = Math.max(100, box.getSize(new THREE.Vector3()).length() * 0.45);
       const plane = (ref: FaceRef, label: string, color: string) => {
         const n = tv(ref.normal).normalize(), x = tv(ref.xdir ?? [1, 0, 0]).normalize(), y = n.clone().cross(x);
@@ -121,8 +123,8 @@ export default function AsmViewport() {
         m.userData = { kind: 'ref', ref, label, base: 0.55 }; m.renderOrder = 4; refGroup.add(m);
       };
       if (joint) for (const o of ORIGIN_REFS) (o.ref.kind === 'axis' ? axis : plane)(o.ref, `Ensamblaje · ${o.label}`, o.key.includes('X') && o.key.length === 1 ? '#d9480f' : o.key === 'Y' ? '#2b8a3e' : o.key === 'Z' ? '#1c7ed6' : '#e8a33d');
-      for (const w of s.asm.workPlanes ?? []) if (!w.hidden || joint) plane(workPlaneRef(w), w.name, '#e8a33d');
-      for (const w of s.asm.workAxes ?? []) if (!w.hidden || joint) axis(workAxisRef(w), w.name, '#e8a33d');
+      if (!picking) for (const w of s.asm.workPlanes ?? []) if (!w.hidden || joint) plane(workPlaneRef(w), w.name, '#e8a33d');
+      if (!picking) for (const w of s.asm.workAxes ?? []) if (!w.hidden || joint) axis(workAxisRef(w), w.name, '#e8a33d');
       for (const w of s.asm.workPoints ?? []) if (!w.hidden) {
         const m = new THREE.Mesh(new THREE.SphereGeometry(size * 0.012, 12, 8), new THREE.MeshBasicMaterial({ color: '#e8a33d', depthTest: false }));
         m.position.set(...w.origin); m.renderOrder = 5; m.userData = { label: w.name }; refGroup.add(m);
@@ -130,13 +132,14 @@ export default function AsmViewport() {
       // ePoints de los componentes (visibles por defecto): se eligen en las restricciones y para conectar
       const occX = (id: string) => s.asmResult?.xf[id] ?? s.asm.occurrences.find((o) => o.id === id)?.xf;
       const rotD = (X: Xform, d: V3) => vArr(new THREE.Vector3(...d).applyQuaternion(new THREE.Quaternion(...X.quat)).normalize(), 6);
-      if (s.hud.epoints !== false || joint) for (const o of s.asm.occurrences) {
+      if (s.hud.epoints !== false || joint || picking) for (const o of s.asm.occurrences) {
         if (o.suppressed || (s.placing && o.id === s.placing.occ)) continue;
         const pd = s.docData(o.part) as PartDoc | null; if (!pd || pd.format !== 'inv3d.part') continue;
         const X = occX(o.id); if (!X) continue;
         for (const e of partEPoints(pd)) {
           if (e.inactive || e.hidden || e.kind === 'composite') continue;
           if (s.tool === 'hvacRoute' && !mouthOf(e, pd.iProperties?.designer)) continue; // al tender, solo las bocas de conducto
+          if (s.tool === 'asmCreatePick' && e.isDefault && partEPoints(pd).some((x) => !x.isDefault && !x.inactive && !x.hidden)) continue; // el de inserción no tapa las bocas
           let pW = xfPoint(X, e.point), dW = rotD(X, e.dir);
           const tr = tempRot.get(findOcc(s, o.id)?.sub ?? o.id);
           if (tr) { pW = vArr(new THREE.Vector3(...pW).applyMatrix4(tr), 4); dW = vArr(new THREE.Vector3(...dW).transformDirection(tr), 6); }
@@ -151,7 +154,7 @@ export default function AsmViewport() {
         }
       }
       // origen (planos y ejes) de las piezas elegidas: referencias locales del componente
-      for (const id of s.asmOrigins) {
+      if (!picking) for (const id of s.asmOrigins) {
         const o = s.asm.occurrences.find((x) => x.id === id); const X = o && occX(id); if (!o || !X) continue;
         const qq = new THREE.Quaternion(...X.quat), P0 = new THREE.Vector3(...X.pos), sz = size * 0.5;
         const defs: [string, FaceRef, string][] = [
