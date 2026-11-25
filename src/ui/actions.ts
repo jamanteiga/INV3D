@@ -397,6 +397,7 @@ export const asmActions = {
         return true;
       }
     }
+    if (ne?.isDefault && T.ep) { s.notify(`${base} no tiene bocas (ePoints propios): se ha unido por su ePoint de inserción (origen). Define sus ePoints en la pieza (Modelo 3D › ePoint) o ajústala con Restringir (R)`, 'error'); return true; }
     s.notify(jn ? `${base} colocada y restringida a ${T.label} · ${jn}. Ajusta o añade restricciones con Restringir (R)` : `${base} colocada en ${T.label} (sin ePoint propio: restríngela con Restringir)`);
     return true;
   },

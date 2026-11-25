@@ -521,6 +521,21 @@ function hvacEnds(s: HvacSpec): EPoint[] {
     case 'flex': return two(Math.max(2, Math.round(s.L / 25)) * 25);
     case 'coupling': return two(s.L > 0 && s.L < 600 ? s.L : (s.shape === 'round' ? s.D : s.W) <= 315 ? 100 : 150);
     case 'cap': return [ep(1, false, [0, 0, t], [0, 0, 1])];
+    // terminales y equipos: bocas para unirlos (rejilla: el cuello entra en el conducto y el marco apoya en su boca) a un conducto (antes solo tenían el ePoint de origen)
+    case 'grille': return [ep(1, false, [0, 0, 8], [0, 0, 1], [1, 0, 0], { shape: 'rect', W: s.W, H: s.H, D: 0 })];
+    case 'diffuser': { const N = s.neck ?? 250; return [ep(1, false, [0, 0, s.shape === 'rect' ? 124 : 120], [0, 0, 1], [1, 0, 0], { shape: 'round', W: N, H: N, D: N })]; }
+    case 'plenum': {
+      const D2 = s.D2 ?? 200, Hp = s.L, rd = { shape: 'round' as DuctShape, W: D2, H: D2, D: D2 };
+      return [ep(1, false, [0, 0, 0], [0, 0, -1], [1, 0, 0], { shape: 'rect', W: s.W, H: s.H, D: 0 }),
+        (s.spigot ?? 'top') === 'top' ? ep(2, false, [0, 0, Hp + t + 80], [0, 0, 1], [1, 0, 0], rd) : ep(2, false, [s.W / 2 + t + 80, 0, Hp / 2], [1, 0, 0], [0, 1, 0], rd)];
+    }
+    // marco/brida: se monta sobre la boca del conducto (el collarín hacia dentro del conducto, la cara de unión enrasada)
+    case 'flange': return [ep(1, false, [0, 0, 0], [0, 0, 1])];
+    case 'ahu': case 'fancoil': {
+      const fc = s.kind === 'fancoil', w = fc ? 1 : 50, W2 = s.W2 ?? s.W * 0.5, H2 = s.H2 ?? s.H * 0.5, yc = fc ? 0 : s.H / 2 - H2 / 2 - w - 20, ln = fc ? 60 : 80;
+      const sz = { shape: 'rect' as DuctShape, W: W2, H: H2, D: 0 };
+      return [{ ...ep(1, false, [0, yc, -ln], [0, 0, -1], [1, 0, 0], sz), name: `Retorno ${W2}×${H2}` }, { ...ep(2, false, [0, yc, s.L + ln], [0, 0, 1], [1, 0, 0], sz), name: `Impulsión ${W2}×${H2}` }];
+    }
     case 'transition': return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, true, [s.ex ?? 0, s.ey ?? 0, s.L], [0, 0, 1])];
     case 'elbow': {
       const ang = s.angle ?? 90, a = (ang * Math.PI) / 180;
