@@ -134,13 +134,13 @@ export function ctxNow(s: State): Ctx[] {
 }
 
 /** Ejecuta el comando con esa combinación en el contexto actual (devuelve si lo encontró) */
-export function runShortcut(e: KeyboardEvent): boolean {
+export function runShortcut(e: KeyboardEvent, viewOnly = false): boolean {
   const combo = comboOf(e); if (!combo) return false;
   const s = S(), ctx = ctxNow(s), map = s.settings.keymap;
   // los contextos más concretos primero (boceto antes que global)
   const order = [...ctx].reverse();
   for (const c of order) {
-    const cmd = COMMANDS.find((x) => x.ctx === c && keysOf(x, map).includes(combo));
+    const cmd = COMMANDS.find((x) => x.ctx === c && (!viewOnly || x.id.startsWith('view.')) && keysOf(x, map).includes(combo));
     if (cmd) { e.preventDefault(); cmd.run(s); return true; }
   }
   return false;

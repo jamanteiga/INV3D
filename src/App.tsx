@@ -1,6 +1,8 @@
 import AiPanel from './ui/AiPanel';
 import { useEffect, useState } from 'react';
 import { toggleOsnap } from './ui/osnap';
+import { installDlgDrag } from './ui/dragdlg';
+installDlgDrag();
 import { runShortcut } from './ui/commands';
 import { useStore, activeSketch, startCad } from './core/store';
 import { iconThemeOf } from './core/persist';
@@ -174,7 +176,9 @@ export default function App() {
       const k = e.key.toLowerCase();
       // atajos con Ctrl: valen aunque haya un diálogo abierto
       if (e.ctrlKey || e.metaKey) { runShortcut(e); return; }
-      if (s.confirmBox || (s.dialog && !('draft' in s.dialog) && s.dialog.kind !== 'skop')) return;
+      if (s.confirmBox) return;
+      // con un cuadro abierto siguen funcionando las órdenes de vista (Zoom todo, vista inicial…)
+      if (s.dialog && !('draft' in s.dialog) && s.dialog.kind !== 'skop') { if (e.key !== 'Escape') runShortcut(e, true); return; }
       if (e.key === 'Escape') {
         if (s.menuOpen) return s.set({ menuOpen: false });
         if (s.epConnect) return s.set({ epConnect: null });
@@ -211,7 +215,7 @@ export default function App() {
           });
         }
       }
-      if (s.dialog && !(s.kind === 'part' && s.mode === 'sketch' && (e.key === 'F8' || e.key === 'F9'))) return;
+      if (s.dialog && !(s.kind === 'part' && s.mode === 'sketch' && (e.key === 'F8' || e.key === 'F9'))) { runShortcut(e, true); return; }
       // resto de atajos: personalizables en Herramientas › Atajos de teclado
       runShortcut(e);
     };

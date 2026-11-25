@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.41.1
+## Versión 0.42
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.42**
+- **Cuadros de diálogo flotantes y no bloqueantes**: se mueven arrastrando su barra de título (doble clic en el título los devuelve a su sitio) y recuerdan su posición durante la sesión. Con un cuadro abierto se puede **girar, desplazar y hacer zoom** en el área gráfica, y siguen funcionando las órdenes de vista (T / Inicio = Zoom todo, F6 = vista inicial…). Solo las confirmaciones (Sí/Cancelar) siguen bloqueando.
 
 **Novedades 0.41.1**
 - **Tender / Crear componente**: ya no se muestran ni resaltan los planos y ejes de origen del ensamblaje, los planos de trabajo ni el origen de las piezas; solo las **bocas (ePoints)** de los componentes, para hacer clic en una y que salga directamente el centro de contenido HVAC/Mecánica. El ePoint de inserción (origen) se oculta si la pieza tiene bocas.

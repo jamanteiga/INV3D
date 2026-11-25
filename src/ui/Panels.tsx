@@ -1,3 +1,4 @@
+import { restoreDlg } from './dragdlg';
 import FemPanel from './FemPanel';
 import * as PX from './Panels2';
 import TbTplDialog, { SheetTplDialog } from './TbDialog';
@@ -1471,9 +1472,9 @@ export function Modal({ title, onClose, children, wide, xwide, float }: { title:
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, [onClose]);
   return (
-    <div className={`modal-shade ${float ? 'float' : ''}`} onMouseDown={(e) => { if (!float && e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal ${wide ? 'wide' : ''} ${xwide ? 'xwide' : ''}`} role="dialog" aria-label={title}>
-        <div className="modal-head"><span>{title}</span><button className="x" onClick={onClose} aria-label="Cerrar"><Icon name="close" size={18} /></button></div>
+    <div className={`modal-shade nb ${float ? 'float' : ''}`}>
+      <div ref={restoreDlg} className={`modal ${wide ? 'wide' : ''} ${xwide ? 'xwide' : ''}`} role="dialog" aria-label={title}>
+        <div className="modal-head" title="Arrastrar para mover · doble clic: volver a su sitio"><span>{title}</span><button className="x" onClick={onClose} aria-label="Cerrar"><Icon name="close" size={18} /></button></div>
         <div className="modal-body">{children}</div>
       </div>
     </div>
