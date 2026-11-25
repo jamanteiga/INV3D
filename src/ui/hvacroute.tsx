@@ -263,7 +263,8 @@ export const portsOf = (pd: PartDoc) => { const all = partEPoints(pd).filter((e)
 export function inletFor(pd: PartDoc, F: EF): EPoint | undefined {
   const P = portsOf(pd), des = pd.iProperties?.designer ?? '';
   const same = (e: EPoint) => { const m = mouthOf(e, des); if (!m || !F.m) return false; return m.shape === F.m.shape && (m.shape === 'round' ? Math.abs(m.D - F.m.D) < 0.5 : (Math.abs(m.W - F.m.W) < 0.5 && Math.abs(m.H - F.m.H) < 0.5) || (Math.abs(m.W - F.m.H) < 0.5 && Math.abs(m.H - F.m.W) < 0.5)); };
-  return P.find((e) => e.id === 'ep1' && same(e)) ?? P.find(same) ?? P.find((e) => e.id === 'ep1') ?? P[0];
+  const sameName = (e: EPoint) => e.name === F.e.name;
+  return P.find((e) => e.id === 'ep1' && same(e)) ?? P.find(same) ?? P.find((e) => e.id === 'ep1' && sameName(e)) ?? P.find(sameName) ?? P.find((e) => e.id === 'ep1') ?? P[0];
 }
 /** Posición de la pieza: su boca de entrada contra la boca F; las piezas que giran (codos, tes) giran hacia T; las rectas encajan W con W */
 export function placeOnFrame(F: EF, pd: PartDoc, inlet: EPoint, T: THREE.Vector3 | null): Xform {

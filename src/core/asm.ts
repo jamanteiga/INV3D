@@ -332,6 +332,8 @@ const sub3 = v3.sub, dot3 = v3.dot, cross3 = v3.cross;
 
 /** Residuos de una restricción con las poses dadas de A y B. */
 const UNION = new Set<JointType>(['rot', 'slider', 'cyl', 'planar', 'ball']);
+/** Brazo (mm) con el que se pesa el bloqueo de giro de las bocas: comparable a los residuos de posición (bien condicionado para los GDL) */
+const LOCK_L = 500;
 export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => number, C?: Xform): number[] {
   const u = UNION.has(j.type);
   const pa = xfPoint(A, u ? j.a.center ?? j.a.point : j.a.point), na = v3.norm(xfDir(A, j.a.normal));
@@ -361,7 +363,7 @@ export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => 
       const out = [...(j.aligned ? sub3(na, nb) : v3.add(na, nb)), ...perp(sub3(pb, pa), na), dot3(sub3(pb, pa), na) - off];
       // bocas de conducto: giro bloqueado (lado W con W)
       // (múltiplos de 90°: una pieza con W y H cambiados encaja con su W contra el H de la boca)
-      if (j.lock && j.a.xdir && j.b.xdir) { const xa = v3.norm(xfDir(A, j.a.xdir)), xb = v3.norm(xfDir(B, j.b.xdir)); out.push(2 * dot3(cross3(xa, xb), na) * dot3(xa, xb)); }
+      if (j.lock && j.a.xdir && j.b.xdir) { const xa = v3.norm(xfDir(A, j.a.xdir)), xb = v3.norm(xfDir(B, j.b.xdir)); out.push(LOCK_L * 2 * dot3(cross3(xa, xb), na) * dot3(xa, xb)); }
       return out;
     }
     case 'rigid': return [...v3.add(na, nb), ...sub3(pb, v3.add(pa, v3.mul(na, off)))];
@@ -448,10 +450,10 @@ export function solveAssembly(asm: AsmDoc, ev: (s: string) => number, opts: { do
   const w = new Array(n).fill(0).map((_, i) => (i % 6 < 3 ? 1 : 1e-4));
   const norm2 = (r: number[]) => r.reduce((a, b) => a + b * b, 0);
   let r = R(x), f = norm2(r);
-  const jac = (xx: number[], m: number) => {
+  const jac = (xx: number[], m: number, hr = 1e-7) => {
     const J = Array.from({ length: m }, () => new Array(n).fill(0)), y = xx.slice();
     for (let k = 0; k < n; k++) {
-      const h = k % 6 < 3 ? 1e-5 : 1e-7;
+      const h = k % 6 < 3 ? 1e-5 : hr;
       y[k] = xx[k] + h; const rp = R(y); y[k] = xx[k] - h; const rm = R(y); y[k] = xx[k];
       for (let i = 0; i < m; i++) J[i][k] = (rp[i] - rm[i]) / (2 * h);
     }
@@ -479,7 +481,7 @@ export function solveAssembly(asm: AsmDoc, ev: (s: string) => number, opts: { do
   const dof: Record<string, number> = {};
   for (const o of asm.occurrences) dof[o.id] = grounded.has(o.id) ? 0 : 6;
   if (opts.dof && n) {
-    const r0 = R(x), J = r0.length ? jac(x, r0.length) : [];
+    const r0 = R(x), J = r0.length ? jac(x, r0.length, 1e-6) : [];
     const ns = nullspace(J, n);
     for (const id of movers) {
       const o = idx.get(id)!;
@@ -505,7 +507,9 @@ function gauss(A: number[][], b: number[]): number[] {
 /** Base del espacio nulo de J (m×n) por escalonamiento reducido. */
 function nullspace(J: number[][], n: number): number[][] {
   const M = J.map((r) => r.slice()), m = M.length, piv: number[] = [];
-  const scale = Math.max(1e-12, ...M.flat().map(Math.abs)), tol = 1e-7 * scale;
+  // tolerancia por encima del ruido de las diferencias finitas, pero sin tomar por libres los giros mal condicionados
+  // (mm frente a radianes en conjuntos de varios metros)
+  const scale = Math.max(1e-12, ...M.flat().map(Math.abs)), tol = 2e-9 * scale;
   let row = 0;
   for (let c = 0; c < n && row < m; c++) {
     let p = row; for (let i = row + 1; i < m; i++) if (Math.abs(M[i][c]) > Math.abs(M[p][c])) p = i;

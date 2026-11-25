@@ -1056,7 +1056,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
     <div className="ctx" style={{ left: ctx.x, top: ctx.y, position: 'fixed' }} onContextMenu={(e) => e.preventDefault()}>
       <div className="ctx-title">{ctx.label}</div>
       <button title="Este ePoint es el origen; después haz clic en el ePoint destino de otro componente" onClick={() => epEp(ctx.ep)}>Restringir ePoint origen → ePoint destino…</button>
-      <button title="Encadenar rectos, codos, transiciones, tes… desde esta boca, restringidos por ePoints" onClick={() => { close(); const F = ctx.ep && epFrame(ctx.ep.occ, ctx.ep.id); if (!F) return; useStore.setState({ createRecursive: true, createCat: 'hvac', createTarget: { occ: F.o.id, ref: epRef(F.e, F.o.id), ep: F.e.id, epKind: F.e.kind, label: F.name, pW: [F.P.x, F.P.y, F.P.z], nW: [F.D.x, F.D.y, F.D.z] }, dialog: { kind: 'createcomp' } }); }}>Tender conductos desde aquí…</button>
+      <button title="Encadenar tubos, conductos, codos, tes… desde esta boca, restringidos por ePoints" onClick={() => { close(); const F = ctx.ep && epFrame(ctx.ep.occ, ctx.ep.id); if (!F) return; useStore.setState({ createRecursive: true, createCat: /^(Tubo|Cara brida|Cara portabridas)/.test(F.e.name) ? 'mech' : 'hvac', createTarget: { occ: F.o.id, ref: epRef(F.e, F.o.id), ep: F.e.id, epKind: F.e.kind, label: F.name, pW: [F.P.x, F.P.y, F.P.z], nW: [F.D.x, F.D.y, F.D.z] }, dialog: { kind: 'createcomp' } }); }}>Añadir desde aquí…</button>
     </div>
   );
   return (

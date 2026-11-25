@@ -379,6 +379,13 @@ export const asmActions = {
         const te = ob && partEPoints(partOf(S(), ob.part)).find((x) => x.id === T.ep);
         if (!te) return;
         j = epJoint(a, occ, ne, T.occ, te, uid);
+        // bocas sin sección (tubería): se bloquea el giro sobre el eje con la orientación con la que se ha colocado
+        if (j.type === 'insert' && !j.lock && F) {
+          const Xt = S().asmResult?.xf[T.occ] ?? ob!.xf, W: V3 = [F.X.x, F.X.y, F.X.z];
+          const loc = (q: [number, number, number, number]) => v3.norm(qq.rotate(conj(q), W));
+          const xd = (o: string) => (o === occ ? loc(xf.quat as [number, number, number, number]) : loc(Xt.quat as [number, number, number, number]));
+          j = { ...j, lock: true, a: { ...j.a, xdir: xd(j.a.occ) }, b: { ...j.b, xdir: xd(j.b.occ) } };
+        }
       } else {
         const nr = epRef(ne, occ);
         const b = T.ref.kind === 'axis' && ne.kind === 'insert' ? nr : { occ, point: ne.point, normal: ne.dir, kind: 'plane' as const, xdir: nr.xdir };

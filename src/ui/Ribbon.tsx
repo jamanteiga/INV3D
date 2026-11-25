@@ -270,7 +270,7 @@ export default function Ribbon() {
         </>); })()}
         {cur === 'hvac' && (() => { const H = (hk: string) => () => s.open({ kind: 'hvac', hk }); return (<>
           {k === 'assembly' && <Group label="Tendido">
-            <Big icon="hduct" label="Tender" active={tool === 'asmCreatePick' && s.createCat === 'hvac'} onClick={() => { s.set({ createRecursive: true } as never); A.createComponent('hvac'); }} title="Tender conductos: clic en una boca libre (o cerca de ella) y elige la pieza en el centro de contenido HVAC; queda encajada y restringida por ePoints y se sigue desde su boca libre (recursivo)" />
+            <Big icon="hduct" label="Añadir" active={tool === 'asmCreatePick' && s.createCat === 'hvac'} onClick={() => { s.set({ createRecursive: true } as never); A.createComponent('hvac'); }} title="Añadir conductos y accesorios: clic en una boca libre (o cerca de ella) y elige la pieza en el centro de contenido HVAC; queda encajada y restringida por ePoints y se sigue desde su boca libre (recursivo)" />
           </Group>}
           <Group label="Conductos (EN 1505/1506 · SMACNA)">
             <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular, circular, espiral u oval plano" />
@@ -320,6 +320,9 @@ export default function Ribbon() {
                     <Group label="Cálculo"><Big icon="hcalc" label="Dimensionar" onClick={() => s.open({ kind: 'ductcalc' })} title="Dimensionado de conductos por pérdida de carga o velocidad (Darcy-Weisbach / Colebrook)" /></Group>
         </>); })()}
         {cur === 'pipe' && (<>
+          {k === 'assembly' && <Group label="Tendido">
+            <Big icon="pipe" label="Añadir" active={tool === 'asmCreatePick' && s.createCat === 'mech'} onClick={() => { s.set({ createRecursive: true } as never); A.createComponent('mech'); }} title="Añadir tubería: clic en un extremo libre (ePoint) de un tubo, accesorio o brida y elige la pieza (tubo, codo, te, reducción, brida…); toma la norma, el tamaño y el schedule, queda encajada y restringida por ePoints y se sigue desde su extremo libre (recursivo)" />
+          </Group>}
           {([['ASME', 'Tubería ASME (B36.10 · B16.5 · B16.47 · B16.9 · B16.11)'], ['EN', 'Tubería EN (EN 10220 · EN 1092-1 · EN 10253)']] as const).map(([norm, lbl]) => (
             <Group key={norm} label={lbl}>
               <Big icon="pipe" label="Tubo" onClick={() => s.open({ kind: 'piping', pk: 'pipe', norm })} />

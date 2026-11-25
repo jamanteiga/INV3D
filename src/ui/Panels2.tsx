@@ -738,6 +738,7 @@ function catOfPart(d: PartDoc | null): 'hvac' | 'mech' | null {
 const CAT_LS = 'inv3d.createCat';
 
 /** Crear componente: centro de contenido HVAC o Mecánica (o pieza modelada) para la geometría elegida */
+type PipeSpecLite = { kind: string; norm: string; size: string; size2?: string; sch?: string; wall?: number; wall2?: number; material: string; flStd?: string; rating?: number; flType?: string };
 export function CreateCompDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const T = s.createTarget;
@@ -762,7 +763,14 @@ export function CreateCompDialog({ onClose }: { onClose: () => void }) {
     return ({ kind: 'hvac', hk, shape: m.shape, init: { W: Wc, H: Hc, D: m.D || m.W, spiral: m.spiral } }) as never;
   };
   const env = asmEnv(s.asm);
-  const P = (pk: string, norm: string) => ({ kind: 'piping', pk, norm }) as never;
+  // tubería: la pieza nueva toma la norma, el tamaño (el del extremo elegido), el schedule/espesor, el material y la brida de la pieza de referencia
+  const ps = (() => { if (!T) return null; const o = s.asm.occurrences.find((x) => x.id === T.occ); const d = o ? (s.docData(o.part) as (PartDoc & { pipeSpec?: PipeSpecLite }) | null) : null; return d?.pipeSpec ?? null; })();
+  const pInit = (norm: string) => {
+    if (!ps || ps.norm !== norm) return undefined;
+    const second = !!ps.size2 && ((ps.kind === 'reducer' && T?.ep === 'ep2') || ((ps.kind === 'rtee' || ps.kind === 'cross') && (T?.ep === 'ep3' || T?.ep === 'ep4')));
+    return { size: second ? ps.size2 : ps.size, sch: ps.sch, wall: second ? ps.wall2 ?? ps.wall : ps.wall, material: ps.material, ...(ps.kind === 'flange' ? { flStd: ps.flStd, rating: ps.rating, flType: ps.flType } : {}) };
+  };
+  const P = (pk: string, norm: string) => ({ kind: 'piping', pk, norm, init: pInit(norm) }) as never;
   const cancel = () => { useStore.setState({ createTarget: null, createCat: null }); onClose(); };
   return (
     <Modal title={`Crear componente · ${cat === 'hvac' ? 'HVAC' : 'Mecánica'}`} onClose={cancel} wide>
@@ -794,7 +802,7 @@ export function CreateCompDialog({ onClose }: { onClose: () => void }) {
           {([['Espirotubo', 'tube'], ['Codo 15-90°', 'elbow'], ['Te / injerto', 'tee'], ['Reducción', 'reducer'], ['Manguito macho', 'nipple'], ['Manguito hembra', 'sleeve'], ['Compuerta', 'damper'], ['Tapón', F?.m?.male ? 'capF' : 'capM']] as const).map(([l, k]) => <B key={l} l={l} d={{ kind: 'spiro', sk: k, ...(F?.m ? { D: F.m.D } : {}) } as never} />)}
         </div>
       </>) : (<>
-        {(['ASME', 'EN'] as const).map((n) => (<div key={n}>
+        {(ps?.norm === 'EN' ? ['EN', 'ASME'] as const : ['ASME', 'EN'] as const).map((n) => (<div key={n}>
           <div className="plabel">Tubería {n === 'ASME' ? 'ASME (B16.5, B16.9, B16.11)' : 'EN (EN 1092-1, EN 10253)'}</div>
           <div className="cc-grid">
             {([['Tubo', 'pipe'], ['Brida', 'flange'], ['Codo', 'elbow'], ['Te', 'tee'], ['Te reducida', 'rtee'], ['Cruz', 'cross'], ['Reducción', 'reducer'], ['Casquete', 'cap'], ['Manguito', 'coupling'], ['Portabridas', 'stub']] as const).map(([l, k]) => <B key={k} l={l} d={P(k, n)} />)}

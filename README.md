@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.42.1
+## Versión 0.43
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.43**
+- **Añadir** (antes *Tender*) en **HVAC › Tendido › Añadir** y nuevo en **Mecánica › Tendido › Añadir** (ensamblaje): clic en un extremo libre (ePoint) de un tubo, accesorio o brida y se abre el centro de contenido de Mecánica. La pieza nueva toma la **norma, el tamaño del extremo elegido** (también el pequeño de reducciones y tes reducidas), **schedule/espesor y material**, y en bridas la norma, clase y tipo; se encaja por el extremo del mismo nombre (tubo con tubo, cara de brida con cara de brida), queda restringida por ePoints **con el giro bloqueado** y, con *Recursivo*, se sigue desde su extremo libre. Giro de codos y tes con los botones de dirección y *giro extra*. Clic derecho sobre un ePoint › *Añadir desde aquí…*.
+- Grados de libertad: cálculo más robusto en conjuntos grandes (ya no se marcan como libres piezas totalmente restringidas en tendidos de varios metros).
 
 **Novedades 0.42.1**
 - **Crear componente / Tender**: la rejilla, el difusor, el plenum, la brida/marco, la UTA y el fancoil se unían por su **ePoint de inserción (origen)** porque no tenían bocas, y no encajaban. Ahora tienen sus **bocas (ePoints)** y encajan en la boca elegida: rejilla (cuello dentro del conducto, marco contra la boca), difusor (extremo del cuello), plenum (boca inferior W×H y boca circular superior o lateral), brida/marco (enrasado con la boca del conducto), UTA y fancoil (retorno e impulsión). Si una pieza no tiene bocas propias se avisa. Las piezas de estos tipos ya insertadas hay que volver a crearlas desde el centro de contenido.

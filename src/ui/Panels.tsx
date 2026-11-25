@@ -2778,13 +2778,14 @@ function DuctCalcDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function PipingDialog({ pk: pk0, norm: norm0, onClose }: { pk: string; norm: 'ASME' | 'EN'; onClose: () => void }) {
+type PipeInit = { size?: string; sch?: string; wall?: number; material?: string; flStd?: string; rating?: number; flType?: string };
+function PipingDialog({ pk: pk0, norm: norm0, init, onClose }: { pk: string; norm: 'ASME' | 'EN'; init?: PipeInit; onClose: () => void }) {
   const s = useStore();
   const [kind, setKind] = useState<PipeKind>(pk0 as PipeKind);
   const [norm, setNorm] = useState<'ASME' | 'EN'>(norm0);
-  const [flStd, setFlStd] = useState<FlangeStd>(norm0 === 'EN' ? 'EN1092' : 'B16.5');
-  const [rating, setRating] = useState<number>(norm0 === 'EN' ? 16 : 150);
-  const [flType, setFlType] = useState<string>(norm0 === 'EN' ? '11' : 'WN');
+  const [flStd, setFlStd] = useState<FlangeStd>((init?.flStd as FlangeStd) ?? (norm0 === 'EN' ? 'EN1092' : 'B16.5'));
+  const [rating, setRating] = useState<number>(init?.rating ?? (norm0 === 'EN' ? 16 : 150));
+  const [flType, setFlType] = useState<string>(init?.flType ?? (norm0 === 'EN' ? '11' : 'WN'));
   const sizeList = (): string[] => {
     if (kind === 'flange') {
       if (flStd === 'EN1092') return enSizes(rating).map(String);
@@ -2798,17 +2799,17 @@ function PipingDialog({ pk: pk0, norm: norm0, onClose }: { pk: string; norm: 'AS
   };
   const sizes = sizeList();
   const defSize = sizes.find((x) => x === '4' || x === '100') ?? sizes[Math.min(8, sizes.length - 1)] ?? '';
-  const [size, setSize] = useState<string>(defSize);
+  const [size, setSize] = useState<string>(init?.size ?? defSize);
   const sz = sizes.includes(size) ? size : defSize;
   const npsBig = norm === 'ASME' ? sz : DN_NPS[Number(sz)] ?? '';
   const size2List = (kind === 'rtee' || kind === 'reducer') ? reducedOptions(npsBig).map((n) => (norm === 'ASME' ? n : String(NPS_DN[n]))).filter((x) => norm === 'ASME' || EN_OD[Number(x)]) : [];
   const [size2, setSize2] = useState('');
   const sz2 = size2List.includes(size2) ? size2 : size2List[0] ?? '';
   const schs = norm === 'ASME' && ASME_PIPE[norm === 'ASME' ? sz : npsBig] ? Object.keys(ASME_PIPE[sz]?.[1] ?? {}) : [];
-  const [sch, setSch] = useState('STD');
+  const [sch, setSch] = useState(init?.sch ?? 'STD');
   const schV = schs.includes(sch) ? sch : schs.includes('STD') ? 'STD' : schs[0] ?? 'STD';
   const enW = norm === 'EN' ? enWalls(EN_OD[Number(sz)] ?? 0) : [];
-  const [wall, setWall] = useState(0);
+  const [wall, setWall] = useState(init?.wall ?? 0);
   const wallV = enW.includes(wall) ? wall : (EN_S[Number(sz)] ?? enW[0] ?? 0);
   const [len, setLen] = useState(6000);
   const [elbow, setElbow] = useState<'LR' | 'SR' | '3D' | '5D'>(norm0 === 'EN' ? '3D' : 'LR');
@@ -2821,7 +2822,7 @@ function PipingDialog({ pk: pk0, norm: norm0, onClose }: { pk: string; norm: 'AS
   const [stubShort, setStubShort] = useState(false);
   const use = kind === 'pipe' ? 'pipe' : kind === 'flange' ? 'flange' : 'fitting';
   const mats = PIPE_MATERIALS.filter((m) => m.std === norm && m.use.includes(use));
-  const [mat, setMat] = useState('');
+  const [mat, setMat] = useState(init?.material ?? '');
   const matV = mats.some((m) => m.name === mat) ? mat : mats[0]?.name ?? 'Acero S275JR';
   const ratings = flStd === 'EN1092' ? Object.keys(EN_PN).map(Number) : flStd === 'B16.5' ? B165_CLASSES : Object.keys(B1647_TABLES[flStd === 'B16.47A' ? 'A' : 'B']).map(Number);
   const types: [string, string][] = flStd === 'EN1092' ? Object.entries(EN_TYPES) : [['WN', 'Cuello para soldar (WN)'], ['SO', 'Deslizante (SO)'], ['BL', 'Ciega (BL)'], ...(flStd === 'B16.5' ? [['LJ', 'Loca (LJ)'], ['SW', 'Socket weld (SW)'], ['TH', 'Roscada (TH)']] as [string, string][] : [])];
@@ -3274,7 +3275,7 @@ export function Modals() {
     case 'hvac': return <HvacDialog key={`${(d as { hk: string }).hk}${(d as { shape?: string }).shape ?? ''}`} hk={(d as { hk: string }).hk} shape0={(d as { shape?: DuctShape }).shape} init={(d as { init?: { W: number; H: number; D: number; spiral?: boolean } }).init} onClose={close} />;
     case 'spiro': return <SpiroDialog key={(d as { sk: string }).sk} sk={(d as { sk: string }).sk} D0={(d as { D?: number }).D} onClose={close} />;
     case 'ductcalc': return <DuctCalcDialog onClose={close} />;
-    case 'piping': return <PipingDialog pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} onClose={close} />;
+    case 'piping': return <PipingDialog key={JSON.stringify(d)} pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} init={(d as { init?: PipeInit }).init} onClose={close} />;
     case 'ipart': return <IPartDialog onClose={close} />;
     case 'ifeature': return <IFeatureDialog onClose={close} />;
     case 'sketch3d': return <Sketch3dDialog id={(d as { id?: string }).id} onClose={close} />;

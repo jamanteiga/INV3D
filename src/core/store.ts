@@ -111,7 +111,7 @@ export type Dialog =
   | { kind: 'auxsketch'; init?: { pt?: string; ax?: string } }
   | { kind: 'asmaux'; aux: 'axis' | 'point' }
   | { kind: 'sketch3d'; id?: string }
-  | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN' }
+  | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN'; init?: { size?: string; sch?: string; wall?: number; material?: string; flStd?: string; rating?: number; flType?: string } }
   | { kind: 'hvac'; hk: string; shape?: 'rect' | 'round' | 'oval' }
   | { kind: 'spiro'; sk: string }
   | { kind: 'ductcalc' }
