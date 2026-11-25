@@ -262,6 +262,9 @@ export default function Ribbon() {
           <Group label="Configuración"><Big icon="style" label="Valores de chapa" onClick={() => s.open({ kind: 'sheetstyle' })} title="Valores por defecto de chapa: espesor, radio de plegado, factor K y desahogo" /></Group>
         </>); })()}
         {cur === 'hvac' && (() => { const H = (hk: string) => () => s.open({ kind: 'hvac', hk }); return (<>
+          {k === 'assembly' && <Group label="Tendido">
+            <Big icon="hduct" label="Tender" active={tool === 'hvacRoute'} onClick={() => (tool === 'hvacRoute' ? s.setTool(null) : void import('./hvacroute').then((m) => m.routeStart()))} title="Tender conductos desde una boca libre: rectos, codos, transiciones, tes, compuertas… encajados y restringidos por ePoints; solo se elige el giro y las medidas" />
+          </Group>}
           <Group label="Conductos (EN 1505/1506 · SMACNA)">
             <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular, circular, espiral u oval plano" />
             <Big icon="helbow" label="Codo" onClick={H('elbow')} title="Codo con radio, recto con álabes, prensado o por gajos" />

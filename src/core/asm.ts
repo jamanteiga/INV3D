@@ -353,7 +353,12 @@ export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => 
       if (ka === 'axis' && kb === 'axis') return [...cross3(rn, nb), ...perp(sub3(pb, ra), rn)];
       return [...sub3(rn, nb), dot3(sub3(pb, ra), nb)];
     }
-    case 'insert': return [...(j.aligned ? sub3(na, nb) : v3.add(na, nb)), ...perp(sub3(pb, pa), na), dot3(sub3(pb, pa), na) - off];
+    case 'insert': {
+      const out = [...(j.aligned ? sub3(na, nb) : v3.add(na, nb)), ...perp(sub3(pb, pa), na), dot3(sub3(pb, pa), na) - off];
+      // bocas de conducto: giro bloqueado (lado W con W)
+      if (j.lock && j.a.xdir && j.b.xdir) out.push(dot3(cross3(v3.norm(xfDir(A, j.a.xdir)), v3.norm(xfDir(B, j.b.xdir))), na));
+      return out;
+    }
     case 'rigid': return [...v3.add(na, nb), ...sub3(pb, v3.add(pa, v3.mul(na, off)))];
     case 'angle': return [dot3(na, nb) - Math.cos(((ev(j.angle || '0') || 0) * Math.PI) / 180)];
     case 'ball': return [...sub3(pb, pa)];

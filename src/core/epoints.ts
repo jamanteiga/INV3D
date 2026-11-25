@@ -10,6 +10,8 @@ import type { AsmDoc, FaceRef, Joint } from './asm';
 
 export type EPointKind = 'mate' | 'insert' | 'composite';
 export const EP_KIND_NAMES: Record<EPointKind, string> = { mate: 'Coincidencia', insert: 'Inserción', composite: 'Compuesto' };
+/** Sección de una boca de conducto. xdir: dirección del lado W (rectangular/oval). male: extremo macho de espirotubo */
+export interface Mouth { shape: 'rect' | 'round' | 'oval'; W: number; H: number; D: number; xdir: V3; male?: boolean; spiral?: boolean }
 export interface EPoint {
   id: string; name: string; kind: EPointKind;
   point: V3; dir: V3;
@@ -26,7 +28,9 @@ export interface EPoint {
   /** Anclaje a la geometría: centro de cara plana o extremo de cara cilíndrica (se recoloca al cambiar la pieza) */
   anchor?: import('./epanchor').EpAnchor;
   /** Plantilla ligada a los parámetros de la pieza: punto, radio y nombre ({expr} se sustituye por su valor) */
-  tpl?: { point?: [string, string, string]; radius?: string; name?: string };
+  tpl?: { point?: [string, string, string]; radius?: string; name?: string; mw?: string; mh?: string };
+  /** Boca de conducto: sección (para tender conductos y que las piezas encajen alineadas) */
+  mouth?: Mouth;
   /** Oculto en el modelo (solo visualización) */
   hidden?: boolean;
 }
@@ -46,6 +50,7 @@ function withTpl(doc: PartDoc): EPoint[] {
     const n: EPoint = { ...e };
     if (e.tpl.point) { const p = e.tpl.point.map(ev); if (p.every(Number.isFinite)) n.point = p.map(r3) as V3; }
     if (e.tpl.radius) { const r = ev(e.tpl.radius); if (Number.isFinite(r)) n.radius = r3(r); }
+    if (n.mouth && (e.tpl.mw || e.tpl.mh)) { const w = e.tpl.mw ? ev(e.tpl.mw) : NaN, h = e.tpl.mh ? ev(e.tpl.mh) : NaN; n.mouth = { ...n.mouth, ...(Number.isFinite(w) ? { W: r3(w) } : {}), ...(Number.isFinite(h) ? { H: r3(h) } : {}) }; }
     if (e.tpl.name) n.name = e.tpl.name.replace(/\{([^}]+)\}/g, (_, x: string) => { const v = ev(x); return Number.isFinite(v) ? String(Math.round(v * 10) / 10).replace('.', ',') : '?'; });
     return n;
   });
@@ -65,7 +70,7 @@ export const insertPoint = (doc: PartDoc | null | undefined): V3 => { const d = 
 /** Referencia de unión de un ePoint de un componente */
 export const epRef = (e: EPoint, occ: string): FaceRef => ref(e, occ);
 const ref = (e: EPoint, occ: string): FaceRef => (e.kind === 'insert'
-  ? { occ, point: e.point, normal: e.dir, kind: 'axis', radius: e.radius ?? 5, center: e.point }
+  ? { occ, point: e.point, normal: e.dir, kind: 'axis', radius: e.radius ?? 5, center: e.point, ...(e.mouth ? { xdir: e.mouth.xdir } : {}) }
   : { occ, point: e.point, normal: e.dir, kind: 'plane', center: e.point });
 /** Referencia de un ePoint dentro de una unión: si los dos no son de inserción, ambos actúan como plano (punto y normal) */
 const jref = (e: EPoint, occ: string, insert: boolean): FaceRef => (insert ? ref(e, occ) : { occ, point: e.point, normal: e.dir, kind: 'plane', center: e.point });
@@ -121,7 +126,7 @@ export function epJoint(asm: AsmDoc, occA: string, a: EPoint, occB: string, b: E
   const fixed = (id: string) => !!asm.occurrences.find((o) => o.id === id)?.grounded;
   if (fixed(A) && !fixed(B)) [A, ea, B, eb] = [B, b, A, a];
   const insert = ea.kind === 'insert' && eb.kind === 'insert';
-  return { id: uid('j'), name: `ePoint ${ea.name}–${eb.name}`, type: insert ? 'insert' : 'mate', a: jref(ea, A, insert), b: jref(eb, B, insert), offset: ea.offset || eb.offset || '0', angle: '0', ep: { a: ea.id, b: eb.id, name: ea.name } };
+  return { id: uid('j'), name: `ePoint ${ea.name}–${eb.name}`, type: insert ? 'insert' : 'mate', a: jref(ea, A, insert), b: jref(eb, B, insert), ...(insert && ea.mouth && eb.mouth ? { lock: true } : {}), offset: ea.offset || eb.offset || '0', angle: '0', ep: { a: ea.id, b: eb.id, name: ea.name } };
 }
 
 /** Las uniones entre ePoints toman la posición actual de sus ePoints (si la pieza cambia, la unión la sigue) */
@@ -133,7 +138,7 @@ export function refreshEpRefs(asm: AsmDoc, partDoc: (partId: string) => PartDoc 
     const get = (occ: string, id: string) => { const o = asm.occurrences.find((x) => x.id === occ); return o ? partEPoints(partDoc(o.part)).find((e) => e.id === id) : undefined; };
     const ea = get(j.a.occ, j.ep.a), eb = get(j.b.occ, j.ep.b); if (!ea || !eb) return j;
     const ins = j.type === 'insert'; const a = jref(ea, j.a.occ, ins), b = jref(eb, j.b.occ, ins);
-    const same = (x: FaceRef, y: FaceRef) => JSON.stringify([x.point, x.normal, x.radius]) === JSON.stringify([y.point, y.normal, y.radius]);
+    const same = (x: FaceRef, y: FaceRef) => JSON.stringify([x.point, x.normal, x.radius, x.xdir]) === JSON.stringify([y.point, y.normal, y.radius, y.xdir]);
     if (same(a, j.a) && same(b, j.b)) return j;
     changed = true; return { ...j, a: { ...j.a, ...a }, b: { ...j.b, ...b } };
   });

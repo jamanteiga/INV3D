@@ -155,7 +155,7 @@ function rectDuctSection(): SkEntity[] {
 }
 /** ePoints de las bocas del conducto rectangular, que siguen a W, H y L */
 function rectDuctEnds(): EPoint[] {
-  const tpl = (z: string) => ({ point: ['0', '0', z] as [string, string, string], radius: 'max(W, H)/2', name: 'Conducto {W}×{H}' });
+  const tpl = (z: string) => ({ point: ['0', '0', z] as [string, string, string], radius: 'max(W, H)/2', name: 'Conducto {W}×{H}', mw: 'W', mh: 'H' });
   return [
     { id: 'ep1', name: 'Conducto', kind: 'insert', point: [0, 0, 0], dir: [0, 0, -1], tpl: tpl('0') },
     { id: 'ep2', name: 'Conducto', kind: 'insert', point: [0, 0, 0], dir: [0, 0, 1], tpl: tpl('L') },
@@ -181,6 +181,9 @@ export function migrateHvacDoc(d: PartDoc): PartDoc {
   if (e1 && e2 && !e2.tpl && !d.iProperties.stockNumber?.includes('SMACNA')) {
     const [n1, n2] = rectDuctEnds(); e1.tpl = n1.tpl; e2.tpl = n2.tpl;
   }
+  // bocas: sección para tender conductos
+  const pv = (n: string) => parseFloat(d.parameters.find((p) => p.name === n)?.expr ?? '0') || 0;
+  for (const e of [e1, e2]) if (e && !e.mouth) { e.mouth = { shape: 'rect', W: pv('W'), H: pv('H'), D: 0, xdir: [1, 0, 0] }; if (e.tpl) e.tpl = { ...e.tpl, mw: 'W', mh: 'H' }; }
   return d;
 }
 
@@ -500,14 +503,17 @@ export function makeHvacPart(s: HvacSpec): PartDoc {
 /** ePoints de inserción en los centros de las bocas (dirección hacia fuera); bocas iguales se conectan solas */
 function hvacEnds(s: HvacSpec): EPoint[] {
   const r3 = (x: number) => Math.round(x * 1000) / 1000;
-  const ep = (n: number, second: boolean, point: V3, dir: V3): EPoint => {
-    const sh = second ? s.shape2 ?? s.shape : s.shape, W = second ? s.W2 ?? s.W : s.W, H = second ? s.H2 ?? s.H : s.H, D = second ? s.D2 ?? s.D : s.D;
-    return { id: `ep${n}`, name: `Conducto ${sizeLabel(s, second)}`, kind: 'insert', point: point.map(r3) as V3, dir: dir.map(r3) as V3, radius: r3((sh === 'round' ? D : Math.max(W, H)) / 2) };
+  const rv = (v: V3) => v.map(r3) as V3;
+  const ep = (n: number, second: boolean, point: V3, dir: V3, xdir: V3 = [1, 0, 0], sz?: { shape: DuctShape; W: number; H: number; D: number }): EPoint => {
+    const sh = sz?.shape ?? (second ? s.shape2 ?? s.shape : s.shape), W = sz?.W ?? (second ? s.W2 ?? s.W : s.W), H = sz?.H ?? (second ? s.H2 ?? s.H : s.H), D = sz?.D ?? (second ? s.D2 ?? s.D : s.D);
+    const label = sz ? (sh === 'round' ? `Ø${D}` : `${W}×${H}${sh === 'oval' ? ' oval' : ''}`) : sizeLabel(s, second);
+    return { id: `ep${n}`, name: `Conducto ${label}`, kind: 'insert', point: rv(point), dir: rv(dir), radius: r3((sh === 'round' ? D : Math.max(W, H)) / 2),
+      mouth: { shape: sh, W, H, D, xdir: rv(xdir), ...(s.seam === 'spiral' && sh === 'round' ? { spiral: true } : {}) } };
   };
   const two = (L: number) => [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [0, 0, L], [0, 0, 1])];
   const t = autoT(s);
   switch (s.kind) {
-    case 'duct': if (s.shape === 'rect') return two(s.L).map((e, i) => ({ ...e, tpl: { point: ['0', '0', i ? 'L' : '0'] as [string, string, string], radius: 'max(W, H)/2', ...(s.std === 'SMACNA' ? {} : { name: 'Conducto {W}×{H}' }) } }));
+    case 'duct': if (s.shape === 'rect') return two(s.L).map((e, i) => ({ ...e, tpl: { point: ['0', '0', i ? 'L' : '0'] as [string, string, string], radius: 'max(W, H)/2', mw: 'W', mh: 'H', ...(s.std === 'SMACNA' ? {} : { name: 'Conducto {W}×{H}' }) } }));
       return two(s.L);
     case 'silencer': return two(s.L);
     case 'damper': return two(s.L || 150);
@@ -523,14 +529,32 @@ function hvacEnds(s: HvacSpec): EPoint[] {
       if (s.shape === 'rect' && kind !== 'square') kind = 'radius';
       if (s.shape === 'oval') kind = 'radius';
       const rw = s.rw ?? (s.shape === 'round' ? 1.5 : 1);
-      if (kind === 'square') { const o = s.W / 2 + t, Lz = o + 60, Lx = o + 60; return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [Lx, 0, Lz], [1, 0, 0])]; }
+      // la boca 2 sale girada «ang» alrededor de Y: su lado W pasa de X a (cos a, 0, −sen a)
+      const x2: V3 = [Math.cos(a), 0, -Math.sin(a)];
+      if (kind === 'square') { const o = s.W / 2 + t, Lz = o + 60, Lx = o + 60; return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [Lx, 0, Lz], [1, 0, 0], [0, 0, -1])]; }
       if (kind === 'segmented') {
         const n = Math.max(3, s.gores ?? (ang >= 90 ? 5 : 3)), Rc = rw * s.D, dl = ((ang / (n - 1)) * Math.PI) / 180, full = 2 * Rc * Math.tan(dl / 2);
         let x = 0, z = 0; for (let i = 0; i < n; i++) { const phi = i * dl, len = i === 0 || i === n - 1 ? full / 2 : full; x += Math.sin(phi) * len; z += Math.cos(phi) * len; }
-        return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [x, 0, z], [Math.sin(a), 0, Math.cos(a)])];
+        return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [x, 0, z], [Math.sin(a), 0, Math.cos(a)], x2)];
       }
       const Rc = rw * (s.shape === 'round' ? s.D : s.W);
-      return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [Rc - Rc * Math.cos(a), 0, Rc * Math.sin(a)], [Math.sin(a), 0, Math.cos(a)])];
+      return [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [Rc - Rc * Math.cos(a), 0, Rc * Math.sin(a)], [Math.sin(a), 0, Math.cos(a)], x2)];
+    }
+    case 'branch': {
+      const L = s.L, kind = s.branch ?? 'tee', sh2 = s.shape2 ?? s.shape, W2 = s.W2 ?? s.W / 2, H2 = s.H2 ?? s.H, D2 = s.D2 ?? s.D / 2, Lb = 150, zb = L / 2;
+      const half = s.shape === 'rect' ? s.W / 2 + t : s.D / 2 + t;
+      const sz2 = { shape: sh2, W: W2, H: H2, D: D2 };
+      const main = [ep(1, false, [0, 0, 0], [0, 0, -1]), ep(2, false, [0, 0, L], [0, 0, 1])];
+      if (kind === 'y' && s.shape === 'round') {
+        const al = ((s.branchAngle ?? 30) * Math.PI) / 180, La = Math.max(150, D2 * 1.5), z0 = L - s.D * 0.3, len = La + s.D * 0.3;
+        return [ep(1, false, [0, 0, 0], [0, 0, -1]), ...[1, -1].map((sg, i) => ep(2 + i, true, [sg * Math.sin(al) * len, 0, z0 + Math.cos(al) * len], [sg * Math.sin(al), 0, Math.cos(al)], [Math.cos(al), 0, -sg * Math.sin(al)], sz2))];
+      }
+      if (s.shape === 'round' && sh2 === 'round' && (s.branchAngle ?? 90) !== 90) {
+        const al = ((s.branchAngle ?? 45) * Math.PI) / 180, len = half / Math.sin(al) + Lb, z0 = zb - half / Math.tan(al);
+        return [...main, ep(3, true, [Math.sin(al) * len, 0, z0 + Math.cos(al) * len], [Math.sin(al), 0, Math.cos(al)], [Math.cos(al), 0, -Math.sin(al)], sz2)];
+      }
+      // te, collarín o zapato: boca en la cara +X; en rectangular el lado W2 va a lo largo del eje principal (Z)
+      return [...main, ep(3, true, [half + Lb, 0, zb], [1, 0, 0], [0, 0, 1], sz2)];
     }
   }
   return [];

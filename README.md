@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.39
+## Versión 0.40
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,11 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.40**
+- **Tender conductos** (ensamblaje: HVAC › Tendido › Tender, o clic derecho sobre una boca › *Tender conductos desde aquí*): clic en una boca libre (ePoint) de un conducto o accesorio y, en el panel, **Recto, Codo, Transición/Reducción, Te/derivación, Manguito, Compuerta, Cortafuegos, Silenciador, Flexible y Tapa**. Cada pieza toma la sección de la boca, se coloca encajada (lado W con W) y queda **unida por ePoints con el giro bloqueado** (0 GDL); su boca de salida pasa a ser la activa. Solo se elige el **giro** (Arriba/Abajo/Izquierda/Derecha; en tramos verticales ±X/±Y, y giro extra en circulares), la longitud, el ángulo del codo y las medidas nuevas. En rectangular, los codos y tes hacia el lado H se generan con W y H intercambiados para que las bocas sigan encajando. **Espirotubo**: accesorios EN 12237 con extremos macho; entre tubo y tubo se pone solo un manguito macho y entre accesorio y accesorio un manguito hembra. Te: seguir por el recto o por la derivación (la otra boca queda libre). *Deshacer última* y Esc para terminar. Todos los tipos: rectangular, circular, espirotubo y oval plano (en oval los codos giran hacia el lado ancho).
+- Las bocas de conductos y accesorios HVAC llevan su sección (y las derivaciones y accesorios de espirotubo, ePoints nuevos).
+- **R con una pieza seleccionada**: la primera geometría de *Restringir* es de esa pieza, y las caras tienen prioridad sobre los planos de origen del ensamblaje (antes se iba a los planos de origen).
 
 **Novedades 0.39.1**
 - Ensamblaje: **R** abre **Restringir** (también sigue J). *Rotar* pasa a **Mayús+R**. Teclas cambiables en Herramientas › Atajos de teclado.

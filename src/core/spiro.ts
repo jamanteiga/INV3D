@@ -2,6 +2,7 @@
 // Convención comercial: el tubo se designa por su diámetro interior nominal y los accesorios por el
 // exterior de su extremo macho (Ø − 1 mm), que entra en el tubo. El eje es Z y la boca 1 está en z = 0.
 import { newDoc, type PartDoc, type SkEntity, type V3 } from './doc';
+import type { EPoint } from './epoints';
 import { B, XY, XZ, YZ, custom, circ, poly, rect, f1, id, resetIds, makeHvacPart, spiralPitch } from './hvac';
 
 /** Diámetros nominales comerciales (serie EN 1506 más los habituales de catálogo en España) */
@@ -276,6 +277,47 @@ function makeRoofcap(s: SpiroSpec, t: number): PartDoc {
 export function spiroThickness(s: SpiroSpec) { return s.t && s.t > 0 ? s.t : s.kind === 'tube' ? tubeT(s.D) : fitT(s.D); }
 
 export function makeSpiroPart(s: SpiroSpec): PartDoc {
+  const d = makeSpiroPart0(s);
+  if (!d.epoints?.length) d.epoints = spiroEnds(s, spiroThickness(s));
+  return d;
+}
+/** ePoints de las bocas de los accesorios de espirotubo. En los extremos macho el ePoint va en el cordón de tope
+ *  (lo que entra en el tubo), así que unido al extremo del tubo queda encajado. */
+function spiroEnds(s: SpiroSpec, t: number): EPoint[] {
+  const r3 = (x: number) => Math.round(x * 1000) / 1000, rv = (v: V3) => v.map(r3) as V3;
+  const ep = (n: number, D: number, point: V3, dir: V3, male: boolean): EPoint => ({ id: `ep${n}`, name: `Espirotubo Ø${D}`, kind: 'insert', point: rv(point), dir: rv(dir), radius: D / 2,
+    mouth: { shape: 'round', W: D, H: D, D, xdir: Math.abs(dir[0]) > 0.9 ? [0, 0, 1] : [1, 0, 0], male, spiral: true } });
+  const D = s.D, Lm = spigotL(D), ins = Lm - 4;
+  switch (s.kind) {
+    case 'elbow': {
+      const ang = s.angle ?? 90, th = (ang * Math.PI) / 180, Rc = (s.rd ?? 1) * D;
+      const C: V3 = [Rc * (1 - Math.cos(th)), 0, Lm + Rc * Math.sin(th)], n: V3 = [Math.sin(th), 0, Math.cos(th)];
+      return [ep(1, D, [0, 0, ins], [0, 0, -1], true),
+        ep(2, D, [C[0] + n[0] * (Lm - ins), 0, C[2] + n[2] * (Lm - ins)], n, true)];
+    }
+    case 'tee': case 'tee45': case 'cross': {
+      const D2 = Math.min(s.D2 ?? D, D), dO = D - 1, Lm2 = spigotL(D2), a45 = s.kind === 'tee45', half = dO / 2;
+      const L = s.L && s.L > 0 ? s.L : a45 ? Math.round(D2 * Math.SQRT2 + 2 * Lm + 100) : D2 + 2 * Lm + 100, zb = L / 2;
+      const out = [ep(1, D, [0, 0, ins], [0, 0, -1], true), ep(2, D, [0, 0, L - ins], [0, 0, 1], true)];
+      if (a45) { const al = Math.PI / 4, n: V3 = [Math.sin(al), 0, Math.cos(al)], len = half / Math.sin(al) + 50 + Lm2, o: V3 = [0, 0, zb - half / Math.tan(al)]; out.push(ep(3, D2, [o[0] + n[0] * (len - (Lm2 - 4)), 0, o[2] + n[2] * (len - (Lm2 - 4))], n, true)); }
+      else { const arm = half + 50 + Lm2; for (const [i, sg] of (s.kind === 'cross' ? [1, -1] : [1]).entries()) out.push(ep(3 + i, D2, [sg * (arm - (Lm2 - 4)), 0, zb], [sg, 0, 0], true)); }
+      return out;
+    }
+    case 'reducer': case 'reducerEcc': {
+      const D2 = Math.min(s.D2 ?? D, D), dO = D - 1, d2O = D2 - 1, Lm2 = spigotL(D2), Lc = s.L && s.L > 0 ? s.L : Math.max(60, Math.round(D - D2));
+      const e = s.kind === 'reducerEcc' ? (dO - d2O) / 2 : 0, z2 = Lm + Lc;
+      return [ep(1, D, [0, 0, ins], [0, 0, -1], true), ep(2, D2, [0, -e, z2 + 4], [0, 0, 1], true)];
+    }
+    case 'nipple': { const L = 2 * Lm + 10; return [ep(1, D, [0, 0, ins], [0, 0, -1], true), ep(2, D, [0, 0, L - ins], [0, 0, 1], true)]; }
+    case 'sleeve': { const L = 2 * Lm + 10; return [ep(1, D, [0, 0, 0], [0, 0, -1], false), ep(2, D, [0, 0, L], [0, 0, 1], false)]; }
+    case 'capM': return [ep(1, D, [0, 0, ins], [0, 0, 1], true)];
+    case 'capF': return [ep(1, D, [0, 0, Lm + 10], [0, 0, 1], false)];
+    case 'damper': { const L = s.L && s.L > 0 ? s.L : Math.max(2 * Lm + 100, Math.round(D * 0.6) + 2 * Lm); return [ep(1, D, [0, 0, ins], [0, 0, -1], true), ep(2, D, [0, 0, L - ins], [0, 0, 1], true)]; }
+    case 'roofcap': return [ep(1, D, [0, 0, ins], [0, 0, -1], true)];
+  }
+  return [];
+}
+function makeSpiroPart0(s: SpiroSpec): PartDoc {
   resetIds();
   if (!(s.D >= 50)) throw new Error('Diámetro no válido');
   const t = spiroThickness(s);

@@ -83,7 +83,7 @@ export type Tool = null
   | 'meshPick' | 'pmiPick' | 'regionPick' | 'limitPick' | 'cloudPick'
   | 'line' | 'rect' | 'circle' | 'npoly' | 'arc' | 'slot' | 'point'
   | 'arc3' | 'arctan' | 'rect3' | 'rectc' | 'circle3' | 'spline' | 'ellipse' | 'text'
-  | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure' | 'asmCreatePick'
+  | 'skdim' | 'constrain' | 'trim' | 'extend' | 'fillet2d' | 'chamfer2d' | 'projectGeom' | 'skpick' | 'pickWorkBase' | 'measure' | 'asmCreatePick' | 'hvacRoute'
   | 'pickPlane' | 'pickEdges' | 'pickFaces' | 'pickFlangeEdge' | 'femFace' | 'epPick' | 'epEdge' | 'holeFace' | 'holeEdge1' | 'holeEdge2' | 'projFace' | 'projSurf' | 'fastHole'
   | 'asmFace' | 'frameLine' | 'skelPoint' | 'weldFace' | 'boltFace' | 'move' | 'pickMember' | 'place'
   | 'drwDim' | 'drwNote' | 'drwDimD' | 'drwDimR' | 'drwDimA' | 'drwBalloon' | 'drwLeader' | 'drwHole' | 'drwSurface' | 'drwWeld' | 'drwCenterline' | 'drwCenterMark' | 'drwSection' | 'drwDetail' | 'drwAux' | 'drwBreak' | 'drwCrop' | 'drwOrd' | 'drwBaseline' | 'drwFcf' | 'drwDatum' | 'drwSectionPath' | 'drwBreakout';

@@ -20,3 +20,5 @@ import './ui/rules';
 import { loadUserProfiles, registerUserContent } from './ui/Panels2';
 loadUserProfiles(); registerUserContent();
 import('./core/fdp').then((m) => { const r = m.recallProject(); if (r) m.activateProject(r.p, r.fileName); });
+// utilidades de prueba
+void Promise.all([import('./ui/hvacroute'), import('./core/hvac'), import('./core/spiro')]).then(([r, h, sp]) => { (window as unknown as { __route: unknown }).__route = { ...r, makeHvacPart: h.makeHvacPart, makeSpiroPart: sp.makeSpiroPart }; });

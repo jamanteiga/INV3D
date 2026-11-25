@@ -2,6 +2,7 @@ import HeadsUp from './HeadsUp';
 import { updateCog } from './cog';
 import ClipBar from './ClipBar';
 import MeasurePanel from './MeasurePanel';
+import { RoutePanel, useRoute, mouthWorld, routeStart, mouthOf } from './hvacroute';
 import { useMeasure, measureOverlay, measureCompute, measureAdd, measureReset, edgeEnt, faceEnt, vertexEnt, nearestVertex, type MEnt } from './measure';
 import { insertPoint, partEPoints, activeEPoints, epRef, epJoint, type EPoint } from '../core/epoints';
 import { setJointEPoint } from './jointep';
@@ -103,7 +104,7 @@ export default function AsmViewport() {
     /** Planos y ejes de origen del ensamblaje (al restringir) y planos de trabajo: visibles y seleccionables */
     const buildRefs = (s: State) => {
       V.clearGroup(refGroup); refHover = null;
-      const joint = s.dialog?.kind === 'joint' || s.dialog?.kind === 'asmwp' || s.tool === 'asmCreatePick';
+      const joint = s.dialog?.kind === 'joint' || s.dialog?.kind === 'asmwp' || s.tool === 'asmCreatePick' || s.tool === 'hvacRoute';
       const box = V.viewBox(), size = Math.max(100, box.getSize(new THREE.Vector3()).length() * 0.45);
       const plane = (ref: FaceRef, label: string, color: string) => {
         const n = tv(ref.normal).normalize(), x = tv(ref.xdir ?? [1, 0, 0]).normalize(), y = n.clone().cross(x);
@@ -135,6 +136,7 @@ export default function AsmViewport() {
         const X = occX(o.id); if (!X) continue;
         for (const e of partEPoints(pd)) {
           if (e.inactive || e.hidden || e.kind === 'composite') continue;
+          if (s.tool === 'hvacRoute' && !mouthOf(e, pd.iProperties?.designer)) continue; // al tender, solo las bocas de conducto
           let pW = xfPoint(X, e.point), dW = rotD(X, e.dir);
           const tr = tempRot.get(findOcc(s, o.id)?.sub ?? o.id);
           if (tr) { pW = vArr(new THREE.Vector3(...pW).applyMatrix4(tr), 4); dW = vArr(new THREE.Vector3(...dW).transformDirection(tr), 6); }
@@ -438,7 +440,9 @@ export default function AsmViewport() {
       const h = hitAt(ev), r = refAt(ev);
       // los ePoints se dibujan por encima de todo: tienen prioridad
       if (r?.object.userData.ep) { const e = r.object.userData.ep; return { ref: r.object.userData.ref, pW: e.pW, label: r.object.userData.label, ep: { occ: e.occ, id: e.id } }; }
-      const useRef = r && (!h || r.object.userData.ref.kind === 'axis' || r.distance < h.distance - 1e-6);
+      // las caras de las piezas tienen prioridad sobre los planos de origen (que las atraviesan); los ejes, si están delante
+      const rk = r?.object.userData.ref.kind;
+      const useRef = r && (!h || (rk === 'axis' && r.distance < h.distance + 1e-6));
       if (useRef) return { ref: r!.object.userData.ref, pW: vArr(r!.point), label: r!.object.userData.label };
       if (!h) return null;
       const f = faceFromHit(h);
@@ -721,6 +725,9 @@ export default function AsmViewport() {
           return;
         }
         const ref = pk.ref, step = dlg.step ?? 0;
+        // pieza seleccionada antes de R: la primera geometría es de esa pieza
+        const pre = (d as { pre?: string }).pre;
+        if (step === 0 && pre && ref.occ !== pre && topOf(s, ref.occ) !== pre) { s.notify(`Primera geometría: una cara, eje o ePoint de ${findOcc(s, pre)?.name ?? 'la pieza seleccionada'}`, 'error'); return; }
         if (step === 0) useStore.setState({ dialog: { ...dlg, draft: { ...d, a: ref, aW: pk.pW, aL: pk.label }, step: 1 } });
         else if (step === 1) useStore.setState({ dialog: { ...dlg, draft: { ...d, b: ref, bW: pk.pW, bL: pk.label, aligned: d.a?.kind === 'axis' && ref.kind === 'axis' ? d.a.convex !== ref.convex : d.aligned }, step: d.type === 'sym' ? 2 : 0 } });
         else {
@@ -781,6 +788,12 @@ export default function AsmViewport() {
         useStore.setState({ tool: null, dialog: { ...fdl, fx: { ...fdl.fx, ...patch, holes, grip: String(holes[0].grip) } } });
         s.notify(fl ? `Brida ${fl.label} · ${holes.length} taladro(s) · espesor ${holes[0].grip} mm${noGap ? ` + junta ${fl.gasketT} mm` : ` (incluye ${holes[0].gap} mm de junta/hueco)`}`
           : `${holes.length} taladro(s) Ø${Math.round(2 * r * 10) / 10} · espesor a abarcar ${holes[0].grip} mm${size ? ` · ${size}` : ''}`);
+        return;
+      }
+      if (s.tool === 'hvacRoute') {
+        const r = refAt(ev); const ep = r?.object.userData.ep as { occ: string; id: string } | undefined;
+        if (ep) { useRoute.setState({ active: { occ: ep.occ, ep: ep.id } }); const A = mouthWorld({ occ: ep.occ, ep: ep.id }); if (!A) s.notify('Ese ePoint no es una boca de conducto', 'error'); }
+        else s.notify('Haz clic en una boca libre (ePoint) de un conducto o accesorio', 'error');
         return;
       }
       if (s.tool === 'asmCreatePick') {
@@ -917,6 +930,22 @@ export default function AsmViewport() {
       measureGroup.add(measureOverlay(ms.sel, r, (p, c, w) => V.segs(p, V.lineMat(c, w, false, false)), css('--accent'), '#d94f8a')); V.request();
     };
     const unsubM = useMeasure.subscribe(drawMeasure);
+    // Tender conductos: anillo y flecha en la boca activa
+    const routeGroup = new THREE.Group(); scene.add(routeGroup);
+    const drawRoute = () => {
+      V.clearGroup(routeGroup); const s = useStore.getState(); const a = useRoute.getState().active;
+      if (s.tool !== 'hvacRoute' || !a) { V.request(); return; }
+      const A = mouthWorld(a); if (!A) { V.request(); return; }
+      const r = A.m.shape === 'round' ? A.m.D / 2 : 0, pts: number[] = [];
+      const ring = (k: number) => { if (A.m.shape === 'round') { const t = (k / 48) * Math.PI * 2; return A.P.clone().addScaledVector(A.X, Math.cos(t) * r).addScaledVector(A.Y, Math.sin(t) * r); } const c = [[1, 1], [-1, 1], [-1, -1], [1, -1]][k % 4]; return A.P.clone().addScaledVector(A.X, (c[0] * A.m.W) / 2).addScaledVector(A.Y, (c[1] * A.m.H) / 2); };
+      const n = A.m.shape === 'round' ? 48 : 4;
+      for (let k = 0; k < n; k++) { const p0 = ring(k), p1 = ring(k + 1); pts.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z); }
+      const L = Math.max(A.m.W, A.m.H, A.m.D) * 0.6, tip = A.P.clone().addScaledVector(A.D, L);
+      pts.push(A.P.x, A.P.y, A.P.z, tip.x, tip.y, tip.z);
+      routeGroup.add(V.segs(pts, V.lineMat('#1f8fb3', 4, false, false)));
+      V.request();
+    };
+    const unsubR = useRoute.subscribe(drawRoute);
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
       if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud) {
@@ -928,6 +957,7 @@ export default function AsmViewport() {
       if (s.epConnect !== p.epConnect) setHint(s.epConnect ? `${s.epConnect.label}: elige el ePoint de otro componente para conectarlos (Esc cancela)` : '');
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
+      if (s.tool !== p.tool || s.asmResult !== p.asmResult) drawRoute();
       if (p.dialog && !s.dialog && s.createTarget) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.createTarget) useStore.setState({ createTarget: null }); }, 0);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); if (p.tool === 'measure') measureReset(); drawMeasure(); }
       if (s.view !== p.view) V.setView(s.view.name);
@@ -935,7 +965,7 @@ export default function AsmViewport() {
       if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; buildRefs(s); } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
     });
     V.setView('home');
-    return () => { unsub(); unsubM(); tc.dispose(); V.dispose(); };
+    return () => { unsub(); unsubM(); unsubR(); tc.dispose(); V.dispose(); };
   }, []);
 
   const tool = useStore((s) => s.tool);
@@ -945,6 +975,7 @@ export default function AsmViewport() {
   const hints: Record<string, string> = {
     frameLine: 'Selecciona líneas de esqueleto o de boceto · clic de nuevo para quitar',
     skelPoint: step === 0 ? 'Punto inicial: vértice, extremo de línea o punto de una cara' : 'Punto final',
+    hvacRoute: 'Tender conductos: clic en una boca libre (ePoint) · elige las piezas en el panel · Esc para terminar',
     asmCreatePick: 'Crear componente: clic en un ePoint o en una cara de un componente · Esc: sin referencia',
     asmFace: dialog?.kind === 'asmwp' ? 'Cara plana o plano de base para el plano de trabajo' : (dialog as { draft?: { epMode?: boolean } } | null)?.draft?.epMode ? (step === 0 ? 'Primer ePoint: clic en un ePoint de un componente' : 'Segundo ePoint: clic en un ePoint de otro componente') : step === 0 ? 'Primera geometría: cara, eje o plano de origen' : step === 1 ? 'Segunda geometría (se moverá el componente libre)' : 'Plano de simetría',
     weldFace: step === 0 ? 'Primera cara a soldar' : 'Segunda cara a soldar',
@@ -961,6 +992,7 @@ export default function AsmViewport() {
       <HeadsUp kind="asm" />
       <ClipBar />
       <MeasurePanel />
+      <RoutePanel />
       <button className="vp-home" title="Vista de inicio (F6)" onClick={() => useStore.getState().setView('home')}>
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </button>
@@ -1013,6 +1045,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
     <div className="ctx" style={{ left: ctx.x, top: ctx.y, position: 'fixed' }} onContextMenu={(e) => e.preventDefault()}>
       <div className="ctx-title">{ctx.label}</div>
       <button title="Este ePoint es el origen; después haz clic en el ePoint destino de otro componente" onClick={() => epEp(ctx.ep)}>Restringir ePoint origen → ePoint destino…</button>
+      <button title="Encadenar rectos, codos, transiciones, tes… desde esta boca, restringidos por ePoints" onClick={() => { close(); routeStart(ctx.ep ? { occ: ctx.ep.occ, ep: ctx.ep.id } : undefined); }}>Tender conductos desde aquí…</button>
     </div>
   );
   return (

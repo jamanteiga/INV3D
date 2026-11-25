@@ -612,7 +612,11 @@ export const asmActions = {
     catch (e) { s.notify((e as Error).message, 'error'); }
   },
   toggleGround: () => { const s = S(); s.commitAsm((a) => { const o = a.occurrences.find((x) => x.id === s.selItem); if (o) o.grounded = !o.grounded; }); },
-  openJoint: () => S().openAsmDialog('joint', { id: uid('j'), name: `Unión${S().asm.joints.length + 1}`, type: 'mate', offset: '0 mm', angle: '0 deg' }, undefined, 'asmFace'),
+  openJoint: () => {
+    const s = S(); const pre = s.selItem && s.asm.occurrences.some((o) => o.id === s.selItem) ? s.selItem : undefined;
+    s.openAsmDialog('joint', { id: uid('j'), name: `Unión${s.asm.joints.length + 1}`, type: 'mate', offset: '0 mm', angle: '0 deg', ...(pre ? { pre } : {}) }, undefined, 'asmFace');
+    if (pre) s.notify(`Restringir ${s.asm.occurrences.find((o) => o.id === pre)?.name}: elige su cara, eje o ePoint y después la geometría de la otra pieza`);
+  },
   openWorkPlane: () => S().openAsmDialog('asmwp', { id: uid('wp'), name: auxName('P', S().asm.workPlanes ?? []), base: 'XY', offset: '0 mm', angle: '0 deg' }, undefined, 'asmFace'),
   openSkel: () => S().openAsmDialog('skel', { id: uid('k') }, undefined, 'skelPoint'),
   openFrame: () => S().openAsmDialog('frame', { family: 'SHS', size: '40x4', material: 'Acero S275JR', rot: '0 deg', offX: '0 mm', offY: '0 mm', lines: [], autoMiter: true }, undefined, 'frameLine'),
