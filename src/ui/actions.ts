@@ -1200,7 +1200,7 @@ function foranJoin(occ: string, pd: PartDoc, ne: EPoint, toOcc: string, F: NonNu
   });
 }
 /** Boca libre a la que se une la pieza nueva en modo Foran: la de la pieza seleccionada; si no, la de la última insertada */
-function foranTarget(sel: string | null): NonNullable<ReturnType<typeof S>['createTarget']> | null {
+export function foranTarget(sel: string | null): NonNullable<ReturnType<typeof S>['createTarget']> | null {
   const s = S();
   const occs = s.asm.occurrences.filter((o) => !o.suppressed);
   const order = [...(sel ? occs.filter((o) => o.id === sel) : []), ...[...occs].reverse().filter((o) => o.id !== sel)];

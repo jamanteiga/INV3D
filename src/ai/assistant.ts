@@ -4,6 +4,7 @@ import { uid, MATERIALS, type PartDoc, type Feature } from '../core/doc';
 type Param = PartDoc['parameters'][number];
 import { COMMANDS, ctxNow } from '../ui/commands';
 import { generate, type GContent, type GTool, type GPart } from './gemini';
+import { ASM_TOOLS, ASM_MODIFY, execAsmTool, portsContext } from './asmtools';
 
 const S = () => useStore.getState();
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + `… [recortado, ${s.length} caracteres]` : s);
@@ -38,6 +39,8 @@ export function buildContext(s: State = S()): string {
     const errs = s.asmResult && Object.entries(s.asmResult.parts).filter(([, v]) => !v.ok);
     if (errs?.length) L.push(`Piezas con error: ${errs.map(([k, v]) => `${k}: ${v.error}`).join('; ')}`);
     if (s.selItem) L.push(`Seleccionado: ${s.selItem}`);
+    const pc = portsContext(); if (pc) L.push(pc);
+    L.push(`Modo de inserción: ${(s.settings.insertMode ?? 'foran') === 'foran' ? 'Foran (las piezas nuevas se unen por ePoints a la boca libre)' : 'Inventor'}`);
   }
   if (s.kind === 'drawing') {
     const w = s.drw;
@@ -63,7 +66,14 @@ FORMATO DE OPERACIONES DE PIEZA (JSON; todas las cotas son cadenas con expresion
 - Vaciado: {"type":"shell","thickness":"2","faces":[[x,y,z] caras a quitar]}
 - Patrón: {"type":"pattern","ptype":"circ","features":["h1"],"axis":"Z","count":"6","angle":"360","dir1":"X","n1":"1","d1":"0","dir2":"","n2":"1","d2":"0"} o "ptype":"rect" con dir1/n1/d1 y dir2/n2/d2.
 - Simetría: {"type":"mirror","features":["e1"],"plane":"XY"|"XZ"|"YZ"}
-Usa ids nuevos y únicos (no repitas los existentes). Para piezas nuevas, empieza por un boceto y una extrusión «new» o «join».`;
+Usa ids nuevos y únicos (no repitas los existentes). Para piezas nuevas, empieza por un boceto y una extrusión «new» o «join».
+
+ENSAMBLAJES (HVAC y tubería): NO modeles conductos, codos, tubos ni bridas con operaciones: usa insert_hvac / insert_pipe, que generan la pieza normalizada y la colocan unida por ePoints (bocas) a la anterior con 0 GDL.
+- Un tendido se hace pieza a pieza: cada pieza nueva se une por defecto a la boca libre del componente seleccionado o del último insertado (la pieza nueva queda seleccionada), o a la boca que indiques con at {occ, ep}.
+- En codos y tes indica «towards» (+X, -X, +Y, -Y, +Z, -Z): dirección mundial de la salida. Los rectangulares hacia el lado H se generan con W y H cambiados solos; no pases W/H en codos si quieres que tomen la sección de la boca.
+- Para llegar a un punto, calcula las longitudes de los tramos rectos restando lo que ocupan los codos (usa los puntos de las bocas libres que se devuelven tras cada inserción).
+- Ensamblaje vacío: el primer componente se coloca con first {ep, pos, face, roll}.
+- Para corregir: spin_component (giro sobre la unión), offset_component, reconnect_component, delete_components. Al terminar, check_assembly y comenta el resultado.`;
 
 /** Declaraciones de herramientas para Gemini */
 export const TOOLS: GTool[] = [
@@ -77,9 +87,10 @@ export const TOOLS: GTool[] = [
   { name: 'set_iproperties', description: 'Cambia iPropiedades de la pieza activa (partNumber, description, designer, material, revision). Materiales válidos: ' + MATERIALS.map((m) => m.name).join(', '), parameters: { type: 'OBJECT', properties: { props: { type: 'STRING', description: 'Objeto JSON con los campos' }, summary: { type: 'STRING' } }, required: ['props', 'summary'] } },
   { name: 'new_part', description: 'Crea una pieza nueva (documento nuevo) con sus operaciones y parámetros, y la abre.', parameters: { type: 'OBJECT', properties: { fileName: { type: 'STRING', description: 'Nombre sin extensión' }, features: { type: 'STRING', description: 'Array JSON de operaciones' }, parameters: { type: 'STRING', description: 'Array JSON [{name,expr,comment}] (opcional)' }, material: { type: 'STRING' }, summary: { type: 'STRING' } }, required: ['fileName', 'features', 'summary'] } },
   { name: 'undo', description: 'Deshace el último cambio del documento activo.' },
+  ...ASM_TOOLS,
 ];
 
-const MODIFY = new Set(['add_features', 'update_feature', 'delete_features', 'set_parameters', 'set_iproperties', 'new_part', 'undo']);
+const MODIFY = new Set(['add_features', 'update_feature', 'delete_features', 'set_parameters', 'set_iproperties', 'new_part', 'undo', ...ASM_MODIFY]);
 
 /** Espera a que termine la regeneración y devuelve los errores de la pieza activa */
 async function regenStatus(): Promise<{ ok: boolean; errors: string[]; volume?: number }> {
@@ -116,6 +127,7 @@ export async function execTool(name: string, args: Record<string, unknown>, conf
     case 'run_command': { const c = COMMANDS.find((x) => x.id === args.id); if (!c) return { error: 'Orden no encontrada' }; c.run(s); return { ok: true }; }
     case 'undo': s.undo(); return regenStatus();
   }
+  if (ASM_TOOLS.some((t) => t.name === name)) return execAsmTool(name, args);
   if (name === 'new_part') {
     const feats = parseJ<Feature[]>(args.features, 'features'), params = args.parameters ? parseJ<Param[]>(args.parameters, 'parameters') : [];
     const doc: PartDoc = { format: 'inv3d.part', version: 1, units: 'mm', iProperties: { partNumber: String(args.fileName), description: '', designer: s.settings.userName || '', material: String(args.material || s.settings.defaultMaterial || 'Acero S275JR'), revision: 'A' }, parameters: params.map((p) => ({ name: p.name, expr: p.expr, comment: p.comment ?? '' })), features: [] };
@@ -145,7 +157,7 @@ export async function runTurn(opts: {
   const parts: GPart[] = [{ text: `ESTADO ACTUAL:\n${buildContext()}\n\nPREGUNTA:\n${opts.question}` }];
   if (opts.image) parts.push({ inlineData: opts.image });
   hist.push({ role: 'user', parts });
-  for (let step = 0; step < 8; step++) {
+  for (let step = 0; step < 24; step++) {
     const r = await generate(opts.key, opts.model, SYSTEM, hist, TOOLS, opts.signal);
     if (r.promptFeedback?.blockReason) throw new Error(`Gemini bloqueó la consulta (${r.promptFeedback.blockReason})`);
     const c = r.candidates?.[0]?.content;

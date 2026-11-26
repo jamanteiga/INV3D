@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.46.1
+## Versión 0.47
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,15 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.47**
+- **Asistente IA en ensamblajes** (IA o F1): ahora tiende conductos y tuberías con los **generadores normalizados** en lugar de modelar a mano. Herramientas nuevas:
+  - *insert_hvac*: conducto, codo, transición, derivación, compuerta, terminal, equipo… unido por ePoints a la boca libre (la seleccionada, la última o la que se indique), tomando la sección de la boca; en codos y tes se da la **dirección mundial de salida** (+X…−Z) y los rectangulares hacia el lado H se generan con W y H cambiados.
+  - *insert_pipe*: tubo, brida, codo, te, reducción… ASME/EN tomando norma, tamaño, schedule y material del extremo de destino.
+  - *insert_open_part*, *spin_component*, *offset_component*, *reconnect_component*, *delete_components*.
+  - *list_free_ports* y *check_assembly*: bocas libres con su sección, punto y dirección; uniones cuyas secciones no casan (también W contra H), bocas separadas, componentes con GDL y restricciones con error.
+  - El primer componente de un ensamblaje vacío se coloca con su ePoint, punto, orientación y giro. Ejemplo: «tiende un conducto 600×400 de 2 m en X, codo hacia arriba, 1,5 m, codo hacia +Y y 1 m».
+  - El contexto que recibe la IA incluye las bocas libres del ensamblaje; cada cambio se confirma y se deshace con Ctrl+Z.
 
 **Novedades 0.46.1**
 - **Primer componente de un ensamblaje** (desde cualquier sitio: Colocar, HVAC › Conducto…, Mecánica › Tubo…, Crear): se abre *Colocar primer componente* con 1) el **ePoint de la pieza** que se conecta (primero sus bocas ep1, ep2…, después el de inserción y el origen), 2) el **punto de destino** (X, Y, Z; botones *Origen* y puntos de trabajo del ensamblaje), 3) la **orientación**: hacia dónde mira ese ePoint (como en la pieza, ±X, ±Y, ±Z) y **giro sobre su eje** (0/90/180/270° o un ángulo), y si queda fijo. En modo Foran no siguen copias al cursor: las piezas siguientes se conectan por sus ePoints a las bocas libres de esta.
