@@ -77,8 +77,15 @@ const jref = (e: EPoint, occ: string, insert: boolean): FaceRef => (insert ? ref
 
 /** Conecta automáticamente los ePoints del mismo nombre y tipo entre componentes.
  *  `only`: ocurrencias recién colocadas (si se omite, todas). Devuelve las uniones nuevas. */
-export function autoEPointJoints(asm: AsmDoc, getPart: (id: string) => PartDoc | null, only?: string[], uid: (p: string) => string = (p) => p + Math.random().toString(36).slice(2, 8)): Joint[] {
+export function autoEPointJoints(asm: AsmDoc, getPart: (id: string) => PartDoc | null, only?: string[], uid: (p: string) => string = (p) => p + Math.random().toString(36).slice(2, 8),
+  /** si se da: solo se conectan ePoints que coinciden en el espacio (a menos de `tol` mm) */
+  at?: { pos: (occ: string, p: [number, number, number]) => [number, number, number]; tol: number }): Joint[] {
   const out: Joint[] = [];
+  // nunca dos uniones automáticas entre el mismo par de componentes (p. ej. un codo con sus dos bocas del mismo nombre que el conducto)
+  const pairs = new Set<string>();
+  const pk = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
+  for (const j of asm.joints) pairs.add(pk(j.a.occ, j.b.occ));
+  const near = (oA: string, eA: EPoint, oB: string, eB: EPoint) => { if (!at) return true; const a = at.pos(oA, eA.point), b = at.pos(oB, eB.point); return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) <= at.tol; };
   const used = new Set<string>(); // «occ:ePoint» ya conectados
   for (const j of asm.joints) { if (j.ep) { used.add(`${j.a.occ}:${j.ep.a}`); used.add(`${j.b.occ}:${j.ep.b}`); } }
   const occs = asm.occurrences.filter((o) => !o.suppressed);
@@ -101,8 +108,10 @@ export function autoEPointJoints(asm: AsmDoc, getPart: (id: string) => PartDoc |
       // otro componente con un ePoint libre del mismo nombre y tipo
       for (const p of occs) {
         if (p.id === o.id || (only && only.includes(p.id) && occs.indexOf(p) > occs.indexOf(o))) continue;
-        const f = (eps.get(p.id) ?? []).find((x) => x.name === e.name && x.kind === e.kind && !used.has(`${p.id}:${x.id}`));
+        if (pairs.has(pk(o.id, p.id))) continue;
+        const f = (eps.get(p.id) ?? []).find((x) => x.name === e.name && x.kind === e.kind && !used.has(`${p.id}:${x.id}`) && (e.kind === 'composite' || near(o.id, e, p.id, x)));
         if (!f) continue;
+        pairs.add(pk(o.id, p.id));
         if (e.kind === 'composite') {
           const mine = (e.members ?? []).map((id) => (eps.get(o.id) ?? []).find((x) => x.id === id)).filter(Boolean) as EPoint[];
           const theirs = (f.members ?? []).map((id) => (eps.get(p.id) ?? []).find((x) => x.id === id)).filter(Boolean) as EPoint[];

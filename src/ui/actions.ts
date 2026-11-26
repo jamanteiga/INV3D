@@ -449,7 +449,9 @@ export const asmActions = {
       }
       for (const x of p.extras ?? []) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { pos: [...xf.pos], quat: [...xf.quat] } });
       // ePoints del mismo nombre: se conectan solos al soltar la pieza
-      const js = autoEPointJoints(a, (id) => partOf(S(), id), [p.occ], uid); a.joints.push(...js); nj += js.length;
+      // (solo los que han quedado en el mismo sitio)
+      const X = (id: string) => (id === p.occ ? xf : S().asmResult?.xf[id] ?? a.occurrences.find((x) => x.id === id)?.xf ?? IDENTITY);
+      const js = autoEPointJoints(a, (id) => partOf(S(), id), [p.occ], uid, { pos: (id, pt) => xfPoint(X(id), pt), tol: 1 }); a.joints.push(...js); nj += js.length;
       let k = 1; while (a.occurrences.some((x) => x.name === `${base}:${k}`)) k++;
       a.occurrences.push({ id: occ, name: `${base}:${k}`, part: p.part, xf: { pos: [...xf.pos], quat: [...p.quat] } });
     });

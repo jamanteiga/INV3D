@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.43
+## Versión 0.43.1
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.43.1**
+- Corregido: al colocar un codo (o cualquier pieza con dos bocas del mismo nombre) con el **imán** sobre la boca de un conducto, además de la unión buena se creaba otra entre la otra boca del codo y la otra boca del conducto; las dos quedaban «no satisfechas» y el codo no quedaba fijado. Ahora la conexión automática por nombre solo une ePoints que **quedan en el mismo sitio** y nunca crea dos uniones entre los mismos dos componentes. *Ensamblar › Conectar ePoints* tampoco duplica uniones entre dos componentes ya unidos.
 
 **Novedades 0.43**
 - **Añadir** (antes *Tender*) en **HVAC › Tendido › Añadir** y nuevo en **Mecánica › Tendido › Añadir** (ensamblaje): clic en un extremo libre (ePoint) de un tubo, accesorio o brida y se abre el centro de contenido de Mecánica. La pieza nueva toma la **norma, el tamaño del extremo elegido** (también el pequeño de reducciones y tes reducidas), **schedule/espesor y material**, y en bridas la norma, clase y tipo; se encaja por el extremo del mismo nombre (tubo con tubo, cara de brida con cara de brida), queda restringida por ePoints **con el giro bloqueado** y, con *Recursivo*, se sigue desde su extremo libre. Giro de codos y tes con los botones de dirección y *giro extra*. Clic derecho sobre un ePoint › *Añadir desde aquí…*.
