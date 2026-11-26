@@ -336,7 +336,7 @@ export const asmActions = {
   /** Crear componente: 1) geometría de un componente (ePoint o cara), 2) centro de contenido HVAC / Mecánica o pieza modelada, 3) restricción automática */
   createComponent: (cat: 'hvac' | 'mech' | null = null) => {
     const s = S(); if (s.kind !== 'assembly') return;
-    useStore.setState({ createCat: cat });
+    useStore.setState({ createCat: cat, reattach: null });
     if (s.placing) s.setTool(null);
     useStore.setState({ createTarget: null });
     if (!s.asm.occurrences.some((o) => !o.suppressed)) { s.open({ kind: 'createcomp' }); return; }
@@ -344,7 +344,7 @@ export const asmActions = {
     s.notify(`Crear componente${cat === 'hvac' ? ' HVAC' : cat === 'mech' ? ' de Mecánica' : ''}: elige la geometría de un componente donde irá la pieza (ePoint o cara) · Esc: sin referencia`);
   },
   /** Coloca la pieza del centro de contenido restringida a la geometría elegida en «Crear componente» */
-  placeAtTarget: (partId: string, extras: string[] = []): boolean => {
+  placeAtTarget: (partId: string, extras: string[] = [], opts: { noRecurse?: boolean } = {}): boolean => {
     const s = S(); const T = s.createTarget; if (!T || s.kind !== 'assembly') return false;
     const e = s.docs.find((d) => d.id === partId); if (!e) return false;
     useStore.setState({ createTarget: null });
@@ -395,7 +395,7 @@ export const asmActions = {
     });
     useStore.setState({ selItem: occ, dialog: null, tool: null });
     // recursivo: la siguiente boca libre de la pieza nueva pasa a ser la referencia y se vuelve a abrir el centro de contenido
-    const nx = ne && S().createRecursive ? R.nextPort(pd, ne) : undefined;
+    const nx = ne && S().createRecursive && !opts.noRecurse ? R.nextPort(pd, ne) : undefined;
     if (nx) {
       const F2 = R.epFrame(occ, nx.id);
       if (F2) {
@@ -414,6 +414,15 @@ export const asmActions = {
     const e = s.docs.find((d) => d.id === partId); if (!e) return;
     void import('../core/fdp').then((m) => { for (const x of [partId, ...extras]) void m.saveContentPart(x); });
     if (s.createTarget && asmActions.placeAtTarget(partId, extras)) return;
+    // Filosofía Foran: la pieza entra ya unida por ePoints a la boca libre de la pieza seleccionada (o de la última)
+    if ((s.settings.insertMode ?? 'foran') === 'foran' && s.asm.occurrences.length) {
+      const T = foranTarget(s.selItem);
+      if (T) {
+        if (s.placing) s.setTool(null);
+        useStore.setState({ createTarget: T });
+        if (asmActions.placeAtTarget(partId, extras, { noRecurse: true })) return;
+      } else s.notify('Modo Foran: no hay ninguna boca (ePoint) libre a la que unir la pieza; se coloca con el cursor', 'error');
+    }
     if (s.placing) s.setTool(null);
     const base = e.fileName.replace(/\.[^.]+$/, '');
     const nextName = (a: { occurrences: { name: string }[] }) => { let k = 1; while (a.occurrences.some((o) => o.name === `${base}:${k}`)) k++; return `${base}:${k}`; };
@@ -637,6 +646,84 @@ export const asmActions = {
     const ids = [...new Set(A.occurrences.map((o) => o.part))];
     try { const r = await cad.interference(A, s.partsMap(ids)); S().set({ interf: r }); }
     catch (e) { s.notify((e as Error).message, 'error'); }
+  },
+  /** Foran: gira la pieza (y lo que cuelga de ella) sobre el eje de su unión por ePoints; queda fija en el nuevo ángulo */
+  foranSpin: (occ: string, deg: number) => {
+    const s = S(); const j = foranJoint(occ); if (!j) return;
+    const side = j.a.occ === occ ? 'a' : 'b', other = side === 'a' ? j.b : j.a, me = j[side];
+    const X = xfOf(occ); const u = v3.norm(xfDirW(X, me.normal)), P = xfPoint(X, me.point);
+    const th = (deg * Math.PI) / 180;
+    const jj = ensureLock(j);
+    const mine = jj[side];
+    const xd = rodr(mine.xdir!, v3.norm(mine.normal), -th);
+    const sub = subtree(occ, j);
+    const rq = axisQuat(u, th);
+    s.commitAsm((a) => {
+      for (const id of sub) { const o = a.occurrences.find((x) => x.id === id); if (!o) continue; const X0 = xfOf(id); o.xf = { pos: v3.add(P, qq.rotate(rq, v3.sub(X0.pos, P))) as V3, quat: qq.mul(rq, X0.quat) as Xform['quat'] }; }
+      const k = a.joints.findIndex((x) => x.id === j.id); if (k >= 0) a.joints[k] = { ...jj, [side]: { ...mine, xdir: xd }, ...(side === 'a' ? { b: other } : { a: other }) } as Joint;
+    });
+    const Fm = R.epFrame(other.occ, j.ep![side === 'a' ? 'b' : 'a'])?.m;
+    const odd = Math.abs(((deg % 180) + 180) % 180) > 1e-6;
+    if (odd && Fm && Fm.shape !== 'round' && Math.abs(Fm.W - Fm.H) > 0.5) s.notify(`Girada ${deg > 0 ? '+' : ''}${deg}°: la boca ${Fm.W}×${Fm.H} ya no coincide (W contra H). Para girar hacia el lado H usa una pieza con W y H cambiados (Añadir lo hace solo)`, 'error');
+    else s.notify(`Girada ${deg > 0 ? '+' : ''}${deg}° sobre su unión`);
+  },
+  /** Foran: separa la pieza a lo largo del eje de su unión (desfase de la unión) */
+  foranOffset: (occ: string, d: number) => {
+    const s = S(); const j = foranJoint(occ); if (!j) return;
+    const side = j.a.occ === occ ? 'a' : 'b';
+    const ev = (x: string) => { try { return makeEval([])(x); } catch { return 0; } };
+    const old = ev(j.offset || '0') || 0, dd = d - old;
+    const XA = xfOf(j.a.occ); const na = v3.norm(xfDirW(XA, j.a.normal));
+    const dir = side === 'a' ? v3.mul(na, -1) : na;
+    const sub = subtree(occ, j);
+    s.commitAsm((a) => {
+      for (const id of sub) { const o = a.occurrences.find((x) => x.id === id); if (!o) continue; const X0 = xfOf(id); o.xf = { pos: v3.add(X0.pos, v3.mul(dir, dd)) as V3, quat: [...X0.quat] as Xform['quat'] }; }
+      const t = a.joints.find((x) => x.id === j.id); if (t) t.offset = `${d} mm`;
+    });
+    s.notify(d ? `Desplazada ${d} mm a lo largo de su unión` : 'Desfase quitado: vuelve a estar encajada');
+  },
+  /** Foran: une la pieza por otra de sus bocas libres a la misma boca de destino */
+  foranOtherPort: (occ: string) => {
+    const s = S(); const j = foranJoint(occ); if (!j) return;
+    const side = j.a.occ === occ ? 'a' : 'b', other = side === 'a' ? j.b : j.a, cur = j.ep?.[side];
+    const o = s.asm.occurrences.find((x) => x.id === occ); const pd = o && partOf(s, o.part); if (!pd) return;
+    const used = usedEps(occ, j.id);
+    const ports = R.portsOf(pd).filter((e) => !e.isDefault);
+    const i = ports.findIndex((e) => e.id === cur);
+    const nx = [...ports.slice(i + 1), ...ports.slice(0, i + 1)].find((e) => e.id !== cur && !used.has(e.id));
+    if (!nx) { s.notify('La pieza no tiene otra boca libre', 'error'); return; }
+    const F = R.epFrame(other.occ, j.ep![side === 'a' ? 'b' : 'a']); if (!F) return;
+    foranJoin(occ, pd, nx, other.occ, F, j.id);
+    s.notify(`Unida por su boca «${nx.name}»`);
+  },
+  /** Foran: elegir en pantalla otra boca de destino para la pieza */
+  foranReattach: (occ: string) => {
+    const s = S(); if (s.placing) s.setTool(null);
+    useStore.setState({ reattach: occ, createTarget: null });
+    s.setTool('asmCreatePick');
+    s.notify('Cambiar boca: haz clic en la boca (ePoint) libre donde quieres unir la pieza · Esc cancela');
+  },
+  /** (lo llama el visor al elegir la boca) */
+  foranReattachTo: (occ: string, toOcc: string, toEp: string) => {
+    const s = S(); useStore.setState({ reattach: null, tool: null });
+    if (toOcc === occ) { s.notify('Elige una boca de otro componente', 'error'); return; }
+    const o = s.asm.occurrences.find((x) => x.id === occ); const pd = o && partOf(s, o.part); if (!pd) return;
+    const F = R.epFrame(toOcc, toEp); if (!F) return;
+    const j = foranJoint(occ);
+    const cur = j?.ep?.[j.a.occ === occ ? 'a' : 'b'];
+    const used = usedEps(occ, j?.id);
+    const ne = (cur && !used.has(cur) ? R.portsOf(pd).find((e) => e.id === cur) : undefined) ?? R.inletFor(pd, F);
+    if (!ne) return;
+    foranJoin(occ, pd, ne, toOcc, F, j?.id);
+    s.notify(`Unida a ${F.name}`);
+  },
+  /** Foran: quita la unión y deja la pieza libre para moverla o girarla con el gizmo */
+  foranFree: (occ: string) => {
+    const s = S(); const j = foranJoint(occ);
+    if (j) s.commitAsm((a) => { a.joints = a.joints.filter((x) => x.id !== j.id); });
+    useStore.setState({ selItem: occ });
+    s.setTool('move');
+    s.notify('Pieza libre: muévela o gírala con el gizmo (o G para giro libre). Para volver a unirla: clic derecho › Cambiar boca de destino');
   },
   toggleGround: () => { const s = S(); s.commitAsm((a) => { const o = a.occurrences.find((x) => x.id === s.selItem); if (o) o.grounded = !o.grounded; }); },
   openJoint: () => {
@@ -1037,3 +1124,87 @@ export const drwActions = {
     await saveText(new XMLSerializer().serializeToString(clone), s.fileName.replace(/\.[^.]+$/, '.svg'), 'SVG', '.svg', 'image/svg+xml');
   },
 };
+
+// ---------- Filosofía Foran: piezas unidas por ePoints ----------
+const xfOf = (id: string): Xform => { const s = S(); return s.asmResult?.xf[id] ?? s.asm.occurrences.find((o) => o.id === id)?.xf ?? IDENTITY; };
+const xfDirW = (X: Xform, d: V3): V3 => qq.rotate(X.quat, d) as V3;
+const axisQuat = (u: V3, th: number): Xform['quat'] => { const h = Math.sin(th / 2); return [u[0] * h, u[1] * h, u[2] * h, Math.cos(th / 2)]; };
+/** Rodrigues: gira v sobre el eje unitario k */
+const rodr = (v: V3, k: V3, th: number): V3 => { const c = Math.cos(th), sn = Math.sin(th), kv = v3.cross(k, v), kd = v3.dot(k, v); return v3.norm(v3.add(v3.add(v3.mul(v, c), v3.mul(kv, sn)), v3.mul(k, kd * (1 - c)))) as V3; };
+/** ePoints de la pieza ya usados por uniones (salvo la indicada) */
+function usedEps(occ: string, except?: string) {
+  const u = new Set<string>();
+  for (const j of S().asm.joints) { if (j.id === except || !j.ep) continue; if (j.a.occ === occ) u.add(j.ep.a); if (j.b.occ === occ) u.add(j.ep.b); }
+  return u;
+}
+/** Unión por ePoints que «sujeta» la pieza: la que la une a su pieza anterior */
+export function foranJoint(occ: string): Joint | undefined {
+  const js = S().asm.joints.filter((j) => j.ep && !j.suppressed && (j.a.occ === occ || j.b.occ === occ));
+  return js.find((j) => j.a.occ === occ) ?? js[0];
+}
+/** Bloqueo de giro con xdir en los dos lados (si la unión no lo tenía, con la orientación actual) */
+function ensureLock(j: Joint): Joint {
+  if (j.lock && j.a.xdir && j.b.xdir) return j;
+  const XA = xfOf(j.a.occ), XB = xfOf(j.b.occ);
+  const n = v3.norm(xfDirW(XA, j.a.normal));
+  let W = v3.cross(n, Math.abs(n[0]) > 0.9 ? [0, 1, 0] : [1, 0, 0]); W = v3.norm(W);
+  const loc = (X: Xform) => v3.norm(qq.rotate([-X.quat[0], -X.quat[1], -X.quat[2], X.quat[3]], W)) as V3;
+  return { ...j, lock: true, a: { ...j.a, xdir: loc(XA) }, b: { ...j.b, xdir: loc(XB) } };
+}
+/** Piezas que se mueven con «occ» al girarla o desplazarla: ella y lo que cuelga de ella (sin cruzar la unión j ni componentes fijos) */
+function subtree(occ: string, j: Joint): string[] {
+  const s = S(); const other = j.a.occ === occ ? j.b.occ : j.a.occ;
+  const fixed = new Set(s.asm.occurrences.filter((o) => o.grounded).map((o) => o.id));
+  const seen = new Set([occ]); const q2 = [occ];
+  while (q2.length) {
+    const c = q2.shift()!;
+    for (const x of s.asm.joints) {
+      if (x.id === j.id || x.suppressed) continue;
+      const n = x.a.occ === c ? x.b.occ : x.b.occ === c ? x.a.occ : null;
+      if (!n || seen.has(n) || n === '__asm__' || n.startsWith('__')) continue;
+      if (n === other) return [occ]; // lazo cerrado: solo la pieza
+      if (fixed.has(n)) continue;
+      seen.add(n); q2.push(n);
+    }
+  }
+  return [...seen];
+}
+/** Coloca «occ» con su boca ne contra la boca F (de toOcc) y la une con el giro bloqueado; sustituye la unión `replace` */
+function foranJoin(occ: string, pd: PartDoc, ne: EPoint, toOcc: string, F: NonNullable<ReturnType<typeof R.epFrame>>, replace?: string) {
+  const s = S();
+  const xf = R.placeOnFrame(F, pd, ne, R.turnOf(F));
+  s.commitAsm((a) => {
+    const o = a.occurrences.find((x) => x.id === occ); if (!o) return;
+    o.xf = { pos: [...xf.pos] as V3, quat: [...xf.quat] as Xform['quat'] };
+    if (replace) a.joints = a.joints.filter((x) => x.id !== replace);
+    const ob = a.occurrences.find((x) => x.id === toOcc);
+    const te = ob && partEPoints(partOf(S(), ob.part)).find((x) => x.id === F.e.id); if (!te) return;
+    let j = epJoint(a, occ, ne, toOcc, te, uid);
+    if (j.type === 'insert' && !j.lock) {
+      const W: V3 = [F.X.x, F.X.y, F.X.z];
+      const loc = (q: Xform['quat']) => v3.norm(qq.rotate([-q[0], -q[1], -q[2], q[3]], W)) as V3;
+      const Xt = xfOf(toOcc);
+      j = { ...j, lock: true, a: { ...j.a, xdir: loc(j.a.occ === occ ? xf.quat as Xform['quat'] : Xt.quat) }, b: { ...j.b, xdir: loc(j.b.occ === occ ? xf.quat as Xform['quat'] : Xt.quat) } };
+    }
+    a.joints.push(j);
+  });
+}
+/** Boca libre a la que se une la pieza nueva en modo Foran: la de la pieza seleccionada; si no, la de la última insertada */
+function foranTarget(sel: string | null): NonNullable<ReturnType<typeof S>['createTarget']> | null {
+  const s = S();
+  const occs = s.asm.occurrences.filter((o) => !o.suppressed);
+  const order = [...(sel ? occs.filter((o) => o.id === sel) : []), ...[...occs].reverse().filter((o) => o.id !== sel)];
+  for (const o of order) {
+    const pd = partOf(s, o.part); if (!pd) continue;
+    const used = usedEps(o.id);
+    const ports = R.portsOf(pd).filter((e) => !e.isDefault && !used.has(e.id));
+    if (!ports.length) continue;
+    // la «salida»: la siguiente a la boca por la que está unida (en un conducto, el otro extremo)
+    const inn = R.portsOf(pd).find((e) => used.has(e.id));
+    const nx = inn ? R.nextPort(pd, inn) : undefined;
+    const e = (nx && !used.has(nx.id) ? nx : undefined) ?? ports[ports.length - 1];
+    const F = R.epFrame(o.id, e.id); if (!F) continue;
+    return { occ: o.id, ref: epRef(e, o.id), ep: e.id, epKind: e.kind, label: F.name, pW: [F.P.x, F.P.y, F.P.z], nW: [F.D.x, F.D.y, F.D.z] };
+  }
+  return null;
+}

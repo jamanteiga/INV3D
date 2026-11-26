@@ -271,6 +271,7 @@ export default function Ribbon() {
         {cur === 'hvac' && (() => { const H = (hk: string) => () => s.open({ kind: 'hvac', hk }); return (<>
           {k === 'assembly' && <Group label="Tendido">
             <Big icon="hduct" label="Añadir" active={tool === 'asmCreatePick' && s.createCat === 'hvac'} onClick={() => { s.set({ createRecursive: true } as never); A.createComponent('hvac'); }} title="Añadir conductos y accesorios: clic en una boca libre (o cerca de ella) y elige la pieza en el centro de contenido HVAC; queda encajada y restringida por ePoints y se sigue desde su boca libre (recursivo)" />
+            <Col><Small icon="link" label={(s.settings.insertMode ?? 'foran') === 'foran' ? 'Inserción: Foran' : 'Inserción: Inventor'} active={(s.settings.insertMode ?? 'foran') === 'foran'} onClick={() => s.set({ settings: { ...s.settings, insertMode: (s.settings.insertMode ?? 'foran') === 'foran' ? 'inventor' : 'foran' } })} title="Foran: la pieza nueva entra ya unida por ePoints a la boca libre de la pieza seleccionada (o de la última); después se gira, desplaza o cambia de boca con el clic derecho. Inventor: la pieza sigue al cursor y se restringe después. Clic para cambiar" /></Col>
           </Group>}
           <Group label="Conductos (EN 1505/1506 · SMACNA)">
             <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular, circular, espiral u oval plano" />
@@ -322,6 +323,7 @@ export default function Ribbon() {
         {cur === 'pipe' && (<>
           {k === 'assembly' && <Group label="Tendido">
             <Big icon="pipe" label="Añadir" active={tool === 'asmCreatePick' && s.createCat === 'mech'} onClick={() => { s.set({ createRecursive: true } as never); A.createComponent('mech'); }} title="Añadir tubería: clic en un extremo libre (ePoint) de un tubo, accesorio o brida y elige la pieza (tubo, codo, te, reducción, brida…); toma la norma, el tamaño y el schedule, queda encajada y restringida por ePoints y se sigue desde su extremo libre (recursivo)" />
+            <Col><Small icon="link" label={(s.settings.insertMode ?? 'foran') === 'foran' ? 'Inserción: Foran' : 'Inserción: Inventor'} active={(s.settings.insertMode ?? 'foran') === 'foran'} onClick={() => s.set({ settings: { ...s.settings, insertMode: (s.settings.insertMode ?? 'foran') === 'foran' ? 'inventor' : 'foran' } })} title="Foran: la pieza nueva entra ya unida por ePoints a la boca libre de la pieza seleccionada (o de la última); después se gira, desplaza o cambia de boca con el clic derecho. Inventor: la pieza sigue al cursor y se restringe después. Clic para cambiar" /></Col>
           </Group>}
           {([['ASME', 'Tubería ASME (B36.10 · B16.5 · B16.47 · B16.9 · B16.11)'], ['EN', 'Tubería EN (EN 10220 · EN 1092-1 · EN 10253)']] as const).map(([norm, lbl]) => (
             <Group key={norm} label={lbl}>
@@ -577,6 +579,7 @@ export default function Ribbon() {
         {/* ---------- ENSAMBLAJE ---------- */}
         {k === 'assembly' && cur === 'asm' && (<>
           <Group label="Componente">
+            <Col><Small icon="link" label={(s.settings.insertMode ?? 'foran') === 'foran' ? 'Inserción: Foran' : 'Inserción: Inventor'} active={(s.settings.insertMode ?? 'foran') === 'foran'} onClick={() => s.set({ settings: { ...s.settings, insertMode: (s.settings.insertMode ?? 'foran') === 'foran' ? 'inventor' : 'foran' } })} title="Foran: la pieza nueva entra ya unida por ePoints a la boca libre de la pieza seleccionada (o de la última); después se gira, desplaza o cambia de boca con el clic derecho. Inventor: la pieza sigue al cursor y se restringe después. Clic para cambiar" /></Col>
             <SplitBig onPick={(t) => s.open({ kind: t as 'place' | 'content' })} items={[
               { key: 'place', icon: 'place', label: 'Colocar', title: 'Colocar pieza (P)' }, { key: 'content', icon: 'content', label: 'Centro de contenido', title: 'Tornillería, pasadores, rodamientos y chavetas normalizados' }]} />
             <SplitBig activeKey={tool === 'asmCreatePick' ? (s.createCat ?? 'auto') : null} onPick={(k) => A.createComponent(k === 'auto' ? null : (k as 'hvac' | 'mech'))} items={[

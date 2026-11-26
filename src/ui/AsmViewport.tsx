@@ -13,7 +13,7 @@ import { useStore, type State } from '../core/store';
 import { makeEval } from '../core/expr';
 import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
 import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, workAxisRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
-import { asmActions } from './actions';
+import { asmActions, foranJoint } from './actions';
 import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
 import type { MeshData } from '../core/cadClient';
@@ -803,6 +803,20 @@ export default function AsmViewport() {
         const r = refAt(ev); const ep = r?.object.userData.ep as { occ: string; id: string; kind: string; pW: V3; dW: V3 } | undefined;
         let T: NonNullable<State['createTarget']> | null = null;
         if (ep) T = { occ: ep.occ, ref: r!.object.userData.ref, ep: ep.id, epKind: ep.kind, label: r!.object.userData.label, pW: ep.pW, nW: ep.dW };
+        // Foran · Cambiar boca: el destino es un ePoint (o la boca más cercana al clic)
+        if (s.reattach) {
+          let to = ep ? { occ: ep.occ, id: ep.id } : null;
+          if (!to) {
+            const hit = hitAt(ev); const f = hit ? faceFromHit(hit) : null;
+            const oc = f && f.ownerKind === 'occ' ? s.asm.occurrences.find((o) => o.id === f.owner) : undefined;
+            const pdo = oc ? (s.docData(oc.part) as PartDoc | null) : null;
+            if (oc && pdo && f) { let bd = Infinity; for (const e of portsOf(pdo)) { const Fr = epFrame(oc.id, e.id); if (!Fr) continue; const dd = Fr.P.distanceTo(new THREE.Vector3(...f.pointW)); if (dd < bd) { bd = dd; to = { occ: oc.id, id: e.id }; } } }
+          }
+          if (!to) { s.notify('Haz clic en una boca (ePoint) de otro componente', 'error'); return; }
+          asmActions.foranReattachTo(s.reattach, to.occ, to.id);
+          return;
+        }
+        else if (ep) { /* sigue abajo */ }
         else {
           const hit = hitAt(ev); const f = hit ? faceFromHit(hit) : null;
           if (!f || f.ownerKind !== 'occ') { s.notify('Elige un ePoint o una cara plana o cilíndrica de un componente', 'error'); return; }
@@ -970,6 +984,7 @@ export default function AsmViewport() {
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
       if (s.tool !== p.tool || s.asmResult !== p.asmResult) drawRoute();
+      if (p.tool === 'asmCreatePick' && s.tool !== 'asmCreatePick' && s.reattach) useStore.setState({ reattach: null });
       if (p.dialog && !s.dialog && s.createTarget) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.createTarget) useStore.setState({ createTarget: null }); }, 0);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); if (p.tool === 'measure') measureReset(); drawMeasure(); }
       if (s.view !== p.view) V.setView(s.view.name);
@@ -988,7 +1003,7 @@ export default function AsmViewport() {
     frameLine: 'Selecciona líneas de esqueleto o de boceto · clic de nuevo para quitar',
     skelPoint: step === 0 ? 'Punto inicial: vértice, extremo de línea o punto de una cara' : 'Punto final',
     hvacRoute: 'Tender conductos: clic en una boca libre (ePoint) · elige las piezas en el panel · Esc para terminar',
-    asmCreatePick: 'Crear componente: clic en un ePoint o en una cara de un componente · Esc: sin referencia',
+    asmCreatePick: 'Crear / Añadir: clic en un ePoint (boca o extremo libre) o en una cara de un componente · Esc: sin referencia',
     asmFace: dialog?.kind === 'asmwp' ? 'Cara plana o plano de base para el plano de trabajo' : (dialog as { draft?: { epMode?: boolean } } | null)?.draft?.epMode ? (step === 0 ? 'Primer ePoint: clic en un ePoint de un componente' : 'Segundo ePoint: clic en un ePoint de otro componente') : step === 0 ? 'Primera geometría: cara, eje o plano de origen' : step === 1 ? 'Segunda geometría (se moverá el componente libre)' : 'Plano de simetría',
     weldFace: step === 0 ? 'Primera cara a soldar' : 'Segunda cara a soldar',
     boltFace: 'Cara de inicio: donde apoya la cabeza del tornillo',
@@ -1068,6 +1083,17 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       {orig.map((o) => <button key={o.key} onClick={() => start(isAxis ? 'mate' : 'flush', {}, { ref: o.ref, label: `Ensamblaje · ${o.label}` })}>{isAxis ? 'Coaxial con' : 'Al ras con'} {o.label} del ensamblaje</button>)}
       {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}
       {isAxis && (s.asm.workAxes ?? []).map((w) => <button key={w.id} onClick={() => start('mate', {}, { ref: workAxisRef(w), label: w.name })}>Coaxial con {w.name}</button>)}
+      {occ && foranJoint(occ.id) && (<><hr />
+        <div className="ctx-sub">Unida por ePoints{foranJoint(occ.id)?.offset && parseFloat(foranJoint(occ.id)!.offset) ? ` · desplazada ${foranJoint(occ.id)!.offset}` : ''}</div>
+        <button title="Gira la pieza (y las que cuelgan de ella) 90° sobre el eje de su unión" onClick={() => { close(); asmActions.foranSpin(occ.id, 90); }}>Girar sobre la boca +90°</button>
+        <button onClick={() => { close(); asmActions.foranSpin(occ.id, -90); }}>Girar sobre la boca −90°</button>
+        <button onClick={() => { close(); const v = prompt('Ángulo de giro sobre la boca (grados, + antihorario mirando la boca)', '45'); const d = v ? parseFloat(v.replace(',', '.')) : NaN; if (isFinite(d) && d) asmActions.foranSpin(occ.id, d); }}>Girar sobre la boca…</button>
+        <button title="Separa la pieza a lo largo del eje de la unión (0 = encajada)" onClick={() => { close(); const v = prompt('Desplazar a lo largo de la unión (mm; 0 = encajada)', String(parseFloat(foranJoint(occ.id)?.offset ?? '0') || 0)); const d = v != null ? parseFloat(v.replace(',', '.')) : NaN; if (isFinite(d)) asmActions.foranOffset(occ.id, d); }}>Desplazar…</button>
+        <button title="Une la pieza a la misma boca de destino por otra de sus bocas" onClick={() => { close(); asmActions.foranOtherPort(occ.id); }}>Cambiar boca · usar otra boca de la pieza</button>
+        <button title="Elige en pantalla otra boca libre de otro componente" onClick={() => { close(); asmActions.foranReattach(occ.id); }}>Cambiar boca de destino…</button>
+        <button title="Quita la unión y deja la pieza libre para el gizmo (o G)" onClick={() => { close(); asmActions.foranFree(occ.id); }}>Mover / girar libre</button></>)}
+      {occ && !foranJoint(occ.id) && !occ.grounded && (<><hr />
+        <button title="Une la pieza a una boca libre de otro componente (elegida en pantalla)" onClick={() => { close(); asmActions.foranReattach(occ.id); }}>Unir por ePoint a una boca…</button></>)}
       {occ && (<><hr />
         <button onClick={() => { close(); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.grounded = !t.grounded; }); }}>{occ.grounded ? 'Liberar' : 'Fijar'}</button>
         {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); s.open({ kind: 'occprops', occ: vo?.id ?? occ.id }); }}>Propiedades y cotas…</button>}

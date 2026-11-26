@@ -192,6 +192,8 @@ export interface State {
   createRecursive: boolean;
   /** Giro libre (G): componente que gira siguiendo al ratón hasta clic (aceptar) o Esc (cancelar) */
   freeRot: string | null;
+  /** Foran: pieza a la que se busca otra boca de destino (Cambiar boca) */
+  reattach: string | null;
   createTarget: { occ: string; ref: import('./asm').FaceRef; ep?: string; epKind?: string; label: string; pW: V3; nW: V3 } | null;
   /** Ensamblaje › Rotar: arrastrar una pieza la gira sola (temporal si está restringida o fija) */
   asmRotate: boolean;
@@ -367,7 +369,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, createCat: null, createRecursive: (() => { try { return localStorage.getItem('inv3d.recursive') !== '0'; } catch { return true; } })(), freeRot: null, createTarget: null, asmRotate: false, aiOpen: false, flatView: false, meshSel: null, analysis: null, studio: false, picks: [], selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, createCat: null, createRecursive: (() => { try { return localStorage.getItem('inv3d.recursive') !== '0'; } catch { return true; } })(), freeRot: null, createTarget: null, reattach: null, asmRotate: false, aiOpen: false, flatView: false, meshSel: null, analysis: null, studio: false, picks: [], selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',

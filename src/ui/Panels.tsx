@@ -2083,6 +2083,9 @@ function OptionsDialog({ onClose }: { onClose: () => void }) {
       </>)}
       {tab === 'folder' && (<>
         <label className="check"><input type="checkbox" checked={st.restoreSession} onChange={(e) => setS({ restoreSession: e.target.checked })} />Reabrir los documentos de la última sesión al entrar</label>
+        <label className="row-l">Inserción de piezas en ensamblajes <select value={st.insertMode ?? 'foran'} onChange={(e) => setS({ insertMode: e.target.value as 'foran' | 'inventor' })}>
+          <option value="foran">Foran: unida por ePoints a la boca libre de la pieza seleccionada o de la última</option>
+          <option value="inventor">Inventor: sigue al cursor y se restringe después</option></select></label>
         <label className="check"><input type="checkbox" checked={st.autosave} onChange={(e) => setS({ autosave: e.target.checked })} />Autoguardar la sesión en el navegador (cada cambio)</label>
         <label className="check"><input type="checkbox" checked={st.autosaveFolder} onChange={(e) => setS({ autosaveFolder: e.target.checked })} />Autoguardar cada
           <input type="number" min={0.5} step={0.5} value={st.autosaveMin ?? 2} disabled={!st.autosaveFolder} onChange={(e) => setS({ autosaveMin: Math.max(0.5, parseFloat(e.target.value) || 2) })} onKeyDown={(e) => e.stopPropagation()} style={{ width: 56, margin: '0 6px' }} />
