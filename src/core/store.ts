@@ -17,7 +17,7 @@ import { DEFAULT_SETTINGS, type AppSettings, type UserLibs, type RecentItem } fr
 
 export type DocKind = 'part' | 'assembly' | 'drawing';
 export type AnyDoc = PartDoc | AsmDoc | DrawingDoc;
-export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean; /** ruta relativa en la carpeta de trabajo */ path?: string; /** pieza cargada solo como referencia de un ensamblaje (en memoria, sin pestaña), */ hidden?: boolean }
+export interface DocEntry { id: string; kind: DocKind; fileName: string; data: AnyDoc; past: AnyDoc[]; future: AnyDoc[]; dirty: boolean; /** ruta relativa en la carpeta de trabajo */ path?: string; /** pieza cargada solo como referencia de un ensamblaje (en memoria, sin pestaña), */ hidden?: boolean; /** pieza vacía de arranque: se descarta sola al abrir o crear otro documento si no se ha tocado */ blank?: boolean }
 
 export type Mode = 'model' | 'sketch' | 'present';
 export interface FemLoad { faces: number[]; kind: 'force' | 'pressure'; F: [number, number, number]; p: number }
@@ -98,6 +98,7 @@ export type Dialog =
   | null
   | { kind: FeatDialogKind; editId?: string; draft: Feature }
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
+  | { kind: 'newdoc'; start: true }
   | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' | 'ucs' | 'simplify' | 'meshfit' }
   | { kind: 'fem'; shape?: boolean }
   | { kind: 'pmi'; pmiKind: import('./pmi').PmiKind; editId?: string }
@@ -356,7 +357,7 @@ const uniqueName = (docs: DocEntry[], base: string, ext: string) => {
 };
 
 export const useStore = create<State>((set, get) => ({
-  docs: [{ id: FIRST_ID, kind: 'part', fileName: 'Pieza1.i3p', data: firstPart, past: [], future: [], dirty: false }],
+  docs: [{ id: FIRST_ID, kind: 'part', fileName: 'Pieza1.i3p', data: firstPart, past: [], future: [], dirty: false, blank: true }],
   active: FIRST_ID,
   kind: 'part',
   doc: firstPart,
@@ -404,7 +405,7 @@ export const useStore = create<State>((set, get) => ({
     return nid;
   },
   newDocument: (k, sheet) => {
-    const docs = get().docs;
+    const s0 = get(); const docs = s0.docs.filter((d) => !(d.blank && d.id === s0.active && !s0.dirty && !s0.past.length)); // la pieza vacía de arranque no cuenta para el nombre
     if (k === 'part' || k === 'sheet') {
       const d = k === 'sheet' ? newSheetDoc() : newDoc();
       const fn = uniqueName(docs, k === 'sheet' ? 'Chapa' : 'Pieza', '.i3p');
@@ -443,6 +444,9 @@ export const useStore = create<State>((set, get) => ({
       mode: 'model' as Mode, sketchId: null, tool: null, selFeature: null, selEntity: null, selItem: null, dialog: null,
       preview: null, pickBase: null, menuOpen: false, view: { name: 'home', n: s.view.n + 1 },
     };
+    // la pieza vacía de arranque, sin tocar, se descarta al pasar a otro documento
+    const prev = docs.find((d) => d.id === s.active);
+    if (prev?.blank && !s.dirty && !s.past.length) common.docs = docs.filter((d) => d !== prev);
     if (t.kind === 'part') set({ ...common, doc: t.data as PartDoc, result: null });
     else if (t.kind === 'assembly') set({ ...common, asm: t.data as AsmDoc, asmResult: null, explodeT: 0 });
     else set({ ...common, drw: t.data as DrawingDoc });
@@ -471,8 +475,10 @@ export const useStore = create<State>((set, get) => ({
     if (!rest.some((d) => !d.hidden)) rest = rest.map((d) => ({ ...d, hidden: undefined }));
     if (!rest.length) {
       const d = newDoc();
-      set({ docs: [{ id: 'd' + Date.now(), kind: 'part', fileName: 'Pieza1.i3p', data: d, past: [], future: [], dirty: false }] });
+      set({ docs: [{ id: 'd' + Date.now(), kind: 'part', fileName: 'Pieza1.i3p', data: d, past: [], future: [], dirty: false, blank: true }] });
       get().activate(get().docs[0].id);
+      // sin documentos abiertos: se pregunta qué crear o abrir
+      set({ dialog: { kind: 'newdoc', start: true } });
       return;
     }
     if (id === s.active || !rest.some((d) => d.id === s.active)) {

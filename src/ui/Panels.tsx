@@ -3165,8 +3165,10 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function NewDocDialog({ onClose }: { onClose: () => void }) {
+function NewDocDialog({ onClose, start }: { onClose: () => void; start?: boolean }) {
   const s = useStore();
+  const [recentMod, setRecentMod] = useState<typeof import('./session') | null>(null);
+  useEffect(() => { if (start) void import('./session').then(setRecentMod); }, [start]);
   const go = (k: Parameters<typeof s.newDocument>[0], sheet?: SheetSize) => { onClose(); s.newDocument(k, sheet); };
   const T = ({ icon, name, desc, k, sheet }: { icon: string; name: string; desc: string; k: Parameters<typeof s.newDocument>[0]; sheet?: SheetSize }) => (
     <button className="tpl" onClick={() => go(k, sheet)}><Icon name={icon} size={34} /><b>{name}</b><span>{desc}</span></button>
@@ -3188,7 +3190,21 @@ function NewDocDialog({ onClose }: { onClose: () => void }) {
     } catch (e) { s.notify((e as Error).message, 'error'); }
   };
   return (
-    <Modal title="Crear archivo nuevo" onClose={onClose} wide>
+    <Modal title={start ? 'INV3D · ¿Qué quieres hacer?' : 'Crear archivo nuevo'} onClose={onClose} wide>
+      {start && (<>
+        <div className="tpl-sec">Abrir un archivo existente</div>
+        <div className="tpl-row">
+          <button className="tpl" onClick={() => { onClose(); void openFile().catch((e) => s.notify((e as Error).message, 'error')); }}><Icon name="open" size={34} /><b>Abrir…</b><span>.i3p, .i3a, .i3d, STEP, DXF, DWG… (Ctrl+O)</span></button>
+          <button className="tpl" onClick={() => { onClose(); s.open({ kind: 'folder' }); }}><Icon name="folder" size={34} /><b>Carpeta de trabajo</b><span>{s.folder.name ? s.folder.name : 'Elegir carpeta…'}</span></button>
+        </div>
+        {s.recent.length > 0 && (<div className="start-recent">
+          <div className="muted" style={{ fontSize: 11, margin: '2px 0 4px' }}>Recientes</div>
+          {s.recent.slice(0, 8).map((r) => (
+            <button key={r.path ?? r.name} className="fm-recent" title={r.path ?? r.name} onClick={() => { onClose(); void recentMod?.openRecent(r); }}>
+              <Icon name={r.kind === 'i3a' || r.kind === 'assembly' ? 'assembly' : r.kind === 'i3d' || r.kind === 'drawing' ? 'drawing' : 'part'} size={16} />{r.path ?? r.name}</button>))}
+        </div>)}
+        <div className="tpl-sec" style={{ marginTop: 10 }}>O crear un archivo nuevo</div>
+      </>)}
       {tpls.length > 0 && (<>
         <div className="tpl-sec">Plantillas del proyecto {s.project?.name}</div>
         <div className="tpl-row">{tpls.map((t) => { const n = t.split('/').pop()!; return <button key={t} className="tpl" onClick={() => void fromTpl(t)}><Icon name={/\.i3a$/i.test(n) ? 'assembly' : /\.i3d$/i.test(n) ? 'drawing' : 'part'} size={34} /><b>{n}</b><span>{t}</span></button>; })}</div>
@@ -3343,7 +3359,7 @@ export function Modals() {
     case 'share': return <PX.ShareDialog onClose={close} />;
     case 'meshfit': return <MeshFitDialog onClose={close} />;
     case 'flat': return <FlatDialog onClose={close} />;
-    case 'newdoc': return <NewDocDialog onClose={close} />;
+    case 'newdoc': return <NewDocDialog key={(d as { start?: boolean }).start ? 's' : 'n'} start={(d as { start?: boolean }).start} onClose={close} />;
     case 'drwview': return <DrwViewDialog onClose={close} />;
     case 'ilogic': return <ILogicDialog onClose={close} />;
     case 'shortcuts': return <KeysDialog onClose={close} />;

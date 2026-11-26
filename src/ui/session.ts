@@ -38,7 +38,10 @@ export async function initSession() {
   useStore.setState({ folder: { name: folderName(), state: fs } });
   if (fs === 'granted') await syncFolderConfig(cfgAt ?? 0);
 
-  if (S().settings.restoreSession && sess?.docs?.length) restoreSession(sess);
+  const docs0 = (sess?.docs ?? []).filter((d) => !(d as { blank?: boolean }).blank);
+  if (S().settings.restoreSession && docs0.length) restoreSession({ ...sess!, docs: docs0 });
+  // sin documentos de la sesión anterior: se pregunta qué crear o abrir
+  else if (!S().dialog) useStore.setState({ dialog: { kind: 'newdoc', start: true } });
   ready = true;
   watch();
 }
@@ -99,7 +102,7 @@ export async function saveSession() {
     v: 1, active: s.active, at: Date.now(),
     docs: s.docs.map((d) => {
       const on = d.id === s.active;
-      return { id: d.id, kind: d.kind, fileName: on ? s.fileName : d.fileName, path: d.path, dirty: on ? s.dirty : d.dirty, hidden: d.hidden, data: s.docData(d.id)! };
+      return { id: d.id, kind: d.kind, fileName: on ? s.fileName : d.fileName, path: d.path, dirty: on ? s.dirty : d.dirty, hidden: d.hidden, data: s.docData(d.id)!, ...(d.blank && !(on ? s.dirty || s.past.length : d.dirty) ? { blank: true } : {}) };
     }),
   };
   await kvSet('session', data);

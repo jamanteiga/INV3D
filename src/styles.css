@@ -807,3 +807,6 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .envoff-panel { opacity: .35; pointer-events: none; filter: grayscale(1); }
 .env-banner { position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); margin-top: 30px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 10px; box-shadow: var(--shadow); font-size: 12px; display: flex; gap: 8px; align-items: center; }
 .cc-turn { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0; font-size: 12px; } .cc-turn label { display: flex; gap: 4px; align-items: center; } .cc-tabs button:disabled { opacity: .4; cursor: not-allowed; }
+.start-recent { display: flex; flex-direction: column; margin: 4px 0 2px; max-height: 210px; overflow: auto; }
+.start-recent button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 4px 8px; border: 0; background: transparent; border-radius: 4px; cursor: pointer; color: inherit; }
+.start-recent button:hover { background: var(--hover, rgba(0,0,0,.06)); }
