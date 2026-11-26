@@ -3168,7 +3168,8 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
 function NewDocDialog({ onClose, start }: { onClose: () => void; start?: boolean }) {
   const s = useStore();
   const [recentMod, setRecentMod] = useState<typeof import('./session') | null>(null);
-  useEffect(() => { if (start) void import('./session').then(setRecentMod); }, [start]);
+  const [recov, setRecov] = useState<{ path: string; name: string; orig: string; modified: number }[]>([]);
+  useEffect(() => { if (start) void import('./session').then((m) => { setRecentMod(m); void m.listRecovery().then(setRecov); }); }, [start]);
   const go = (k: Parameters<typeof s.newDocument>[0], sheet?: SheetSize) => { onClose(); s.newDocument(k, sheet); };
   const T = ({ icon, name, desc, k, sheet }: { icon: string; name: string; desc: string; k: Parameters<typeof s.newDocument>[0]; sheet?: SheetSize }) => (
     <button className="tpl" onClick={() => go(k, sheet)}><Icon name={icon} size={34} /><b>{name}</b><span>{desc}</span></button>
@@ -3192,6 +3193,13 @@ function NewDocDialog({ onClose, start }: { onClose: () => void; start?: boolean
   return (
     <Modal title={start ? 'INV3D · ¿Qué quieres hacer?' : 'Crear archivo nuevo'} onClose={onClose} wide>
       {start && (<>
+        {recov.length > 0 && (<div className="start-recent start-recov">
+          <div className="tpl-sec">Recuperar documentos de una sesión interrumpida</div>
+          <div className="muted" style={{ fontSize: 11, margin: '2px 0 4px' }}>Copias con los cambios sin guardar que había en pantalla (carpeta {s.folder.name}/_Recuperacion). Al abrirlas, Ctrl+S las guarda en su sitio.</div>
+          {recov.map((r) => (
+            <button key={r.path} title={r.path} onClick={() => { onClose(); void recentMod?.openRecovery(r); }}>
+              <Icon name={/\.i3a$/i.test(r.name) ? 'assembly' : /\.i3d$/i.test(r.name) ? 'drawing' : 'part'} size={16} />{r.orig} <span className="muted" style={{ marginLeft: 'auto', fontSize: 11 }}>{new Date(r.modified).toLocaleString('es-ES')}</span></button>))}
+        </div>)}
         <div className="tpl-sec">Abrir un archivo existente</div>
         <div className="tpl-row">
           <button className="tpl" onClick={() => { onClose(); void openFile().catch((e) => s.notify((e as Error).message, 'error')); }}><Icon name="open" size={34} /><b>Abrir…</b><span>.i3p, .i3a, .i3d, STEP, DXF, DWG… (Ctrl+O)</span></button>

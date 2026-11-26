@@ -72,18 +72,25 @@ async function syncFolderConfig(localAt: number) {
 }
 
 // ---------- Guardado automático ----------
+let tRec: ReturnType<typeof setTimeout> | null = null;
 let tSess: ReturnType<typeof setTimeout> | null = null, tCfg: ReturnType<typeof setTimeout> | null = null;
 function watch() {
   useStore.subscribe((s, prev) => {
     if (!ready) return;
     const docChanged = s.doc !== prev.doc || s.asm !== prev.asm || s.drw !== prev.drw || s.docs !== prev.docs || s.active !== prev.active || s.fileName !== prev.fileName;
-    if (docChanged && s.settings.autosave) { if (tSess) clearTimeout(tSess); tSess = setTimeout(saveSession, 1500); }
+    if (docChanged && s.settings.autosave) { if (tSess) clearTimeout(tSess); tSess = setTimeout(saveSession, 700); }
+    if (docChanged || s.dirty !== prev.dirty) { if (tRec) clearTimeout(tRec); tRec = setTimeout(() => void writeRecovery(), 4000); }
     if (s.settings !== prev.settings || s.libs !== prev.libs) { if (tCfg) clearTimeout(tCfg); tCfg = setTimeout(saveConfig, 600); }
     if (s.project !== prev.project) kvSet('project', s.project);
     if (s.recent !== prev.recent) kvSet('recent', s.recent);
     if (s.showEdges !== prev.showEdges && s.showEdges !== s.settings.showEdges) useStore.setState({ settings: { ...s.settings, showEdges: s.showEdges } });
   });
   window.addEventListener('beforeunload', () => { if (S().settings.autosave) saveSession(); });
+  // cierre brusco: también al ocultar o descargar la página (móvil, cerrar pestaña, apagar)
+  window.addEventListener('pagehide', () => { if (S().settings.autosave) void saveSession(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { if (S().settings.autosave) void saveSession(); void writeRecovery(); } });
+  // que el navegador no borre el almacenamiento local (sesión) por falta de espacio
+  try { void (navigator.storage as { persist?: () => Promise<boolean> })?.persist?.(); } catch { /* */ }
   // Autoguardado periódico (cada «autosaveMin» minutos) de los documentos que ya se guardaron (carpeta o fichero)
   let last = Date.now();
   setInterval(async () => {
@@ -171,4 +178,52 @@ export function importConfig(txt: string) {
   const c = JSON.parse(txt) as Config;
   if (!c || c.v !== 1 || !c.settings) throw new Error('No es un fichero de configuración de INV3D');
   useStore.setState({ settings: { ...DEFAULT_SETTINGS, ...c.settings }, libs: { ...c.libs, materials: c.libs?.materials ?? [] } });
+}
+
+// ---------- Copias de recuperación en la carpeta de trabajo ----------
+/** Carpeta (dentro de la de trabajo) donde se guardan las copias de los documentos con cambios sin guardar */
+export const REC_DIR = '_Recuperacion';
+const recWritten = new Set<string>();
+let recBusy = false;
+/** Escribe en «_Recuperacion/» de la carpeta de trabajo cada documento con cambios sin guardar
+ *  (y borra la copia cuando el documento ya está guardado). Sin carpeta, la copia queda en el navegador (sesión). */
+export async function writeRecovery() {
+  const s = S();
+  if (recBusy || s.folder.state !== 'granted' || !s.settings.autosave) return;
+  recBusy = true;
+  try {
+    const { serializeDoc } = await import('../core/files');
+    const { removeInFolder } = await import('../core/persist');
+    const want = new Set<string>();
+    for (const d of s.docs) {
+      const on = d.id === s.active, dirty = on ? s.dirty : d.dirty;
+      if (d.blank && !(on ? s.dirty || s.past.length : d.dirty)) continue;
+      const rel = `${REC_DIR}/${d.path ?? (on ? s.fileName : d.fileName)}`;
+      if (!dirty) continue;
+      want.add(rel);
+      try { await writeInFolder(rel, serializeDoc(d.id), 'application/json'); recWritten.add(rel); } catch { /* */ }
+    }
+    for (const rel of [...recWritten]) if (!want.has(rel)) { try { await removeInFolder(rel); } catch { /* */ } recWritten.delete(rel); }
+  } finally { recBusy = false; }
+}
+/** Copias de recuperación que hay en la carpeta de trabajo */
+export async function listRecovery(): Promise<{ path: string; name: string; orig: string; modified: number }[]> {
+  if (S().folder.state !== 'granted') return [];
+  try {
+    const { listFolder } = await import('../core/persist');
+    return (await listFolder(6)).filter((e) => e.path.startsWith(REC_DIR + '/') && /\.(i3p|i3a|i3d)$/i.test(e.name))
+      .map((e) => ({ path: e.path, name: e.name, orig: e.path.slice(REC_DIR.length + 1), modified: e.modified }));
+  } catch { return []; }
+}
+/** Abre una copia de recuperación: queda con los cambios pendientes y se guarda en su sitio original */
+export async function openRecovery(r: { path: string; orig: string }) {
+  const s = S();
+  try {
+    const f = await readFromFolder(r.path);
+    recentCtl.skip = true; try { await openFile(f); } finally { recentCtl.skip = false; }
+    const a = S();
+    useStore.setState({ dirty: true, docs: a.docs.map((d) => (d.id === a.active ? { ...d, path: r.orig, dirty: true } : d)) });
+    recWritten.add(r.path);
+    s.notify(`Recuperado ${f.name}: guárdalo (Ctrl+S) para conservar los cambios`);
+  } catch (e) { s.notify(`No se pudo recuperar ${r.path}: ${(e as Error).message}`, 'error'); }
 }
