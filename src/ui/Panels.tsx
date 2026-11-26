@@ -1676,51 +1676,76 @@ function PlaceDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Primer componente de un ensamblaje vacío: punto de la pieza (ePoint de inserción, otro ePoint u origen) y coordenadas de destino. */
-function FirstPlaceStep({ pid, onBack, onClose }: { pid: string; onBack: () => void; onClose: () => void }) {
+/** Primer componente de un ensamblaje vacío: ePoint de la pieza que se conecta al punto de destino, coordenadas,
+ *  orientación (hacia dónde mira ese ePoint) y giro sobre su eje. */
+function FirstPlaceStep({ pid, extras = [], onBack, onClose }: { pid: string; extras?: string[]; onBack?: () => void; onClose: () => void }) {
   const s = useStore();
   const d = s.docs.find((x) => x.id === pid);
   const isPart = d?.kind === 'part';
-  const eps = isPart ? partEPoints(s.docData(pid) as PartDoc).filter((e) => e.kind !== 'composite' && !e.inactive) : [];
-  const opts: { id: string; label: string; p: [number, number, number] }[] = [
-    ...eps.map((e, i) => ({ id: e.id, label: i === 0 ? `${e.name} (ePoint de inserción por defecto)` : `${e.name} · ${EP_KIND_NAMES[e.kind]}`, p: e.point as [number, number, number] })),
-    { id: '__origin', label: 'Origen de la pieza', p: [0, 0, 0] },
+  const all = isPart ? partEPoints(s.docData(pid) as PartDoc).filter((e) => e.kind !== 'composite' && !e.inactive) : [];
+  // primero las bocas propias (ep1, ep2…), después el ePoint de inserción y el origen
+  const eps = [...all.filter((e) => !e.isDefault), ...all.filter((e) => e.isDefault)];
+  const opts: { id: string; label: string; p: V3; dir: V3 }[] = [
+    ...eps.map((e) => ({ id: e.id, label: `${e.isDefault ? '' : `${e.id} · `}${e.name}${e.isDefault ? ' (ePoint de inserción)' : ` · ${EP_KIND_NAMES[e.kind]}`} · en (${e.point.map((v) => +(+v).toFixed(1)).join(', ')})`, p: e.point as V3, dir: v3.norm(e.dir as V3) as V3 })),
+    { id: '__origin', label: 'Origen de la pieza', p: [0, 0, 0], dir: [0, 0, 1] },
   ];
-  const [mode, setMode] = useState<'def' | 'other' | 'origin'>(eps.length ? 'def' : 'origin');
-  const others = opts.slice(1, -1);
-  const [other, setOther] = useState(others[0]?.id ?? '');
+  const [sel, setSel] = useState(opts[0].id);
+  const ref = opts.find((o) => o.id === sel) ?? opts[0];
   const [dest, setDest] = useState<string[]>(['0', '0', '0']);
+  const [face, setFace] = useState<'keep' | '+X' | '-X' | '+Y' | '-Y' | '+Z' | '-Z'>('keep');
+  const [roll, setRoll] = useState('0');
   const [grounded, setGrounded] = useState(true);
-  const ref = mode === 'def' ? opts[0] : mode === 'other' ? (others.find((o) => o.id === other) ?? opts[0]) : opts[opts.length - 1];
-  const D = dest.map((v) => parseFloat(v.replace(',', '.')) || 0) as [number, number, number];
+  const wps = (s.asm.workPoints ?? []) as { id: string; name: string; p?: V3; point?: V3 }[];
+  const D = dest.map((v) => parseFloat(v.replace(',', '.')) || 0) as V3;
+  const AX: Record<string, V3> = { '+X': [1, 0, 0], '-X': [-1, 0, 0], '+Y': [0, 1, 0], '-Y': [0, -1, 0], '+Z': [0, 0, 1], '-Z': [0, 0, -1] };
+  const quat = (): [number, number, number, number] => {
+    // 1) el ePoint mira hacia la dirección elegida; 2) giro sobre esa dirección
+    const from = ref.dir, to = face === 'keep' ? from : AX[face];
+    const c = v3.cross(from, to), dt = v3.dot(from, to);
+    let q1: [number, number, number, number];
+    if (dt < -0.999999) { const ax = v3.norm(v3.cross(from, Math.abs(from[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0])); q1 = [ax[0], ax[1], ax[2], 0]; }
+    else { const w = 1 + dt, n = Math.hypot(c[0], c[1], c[2], w); q1 = [c[0] / n, c[1] / n, c[2] / n, w / n]; }
+    const th = ((parseFloat(roll.replace(',', '.')) || 0) * Math.PI) / 180, h = Math.sin(th / 2);
+    const qr: [number, number, number, number] = [to[0] * h, to[1] * h, to[2] * h, Math.cos(th / 2)];
+    return q.mul(qr, q1) as [number, number, number, number];
+  };
   const ok = () => {
-    const pos = D.map((v, i) => Math.round((v - ref.p[i]) * 1e6) / 1e6) as [number, number, number];
+    const qq = quat();
+    const pr = q.rotate(qq, ref.p);
+    const pos = D.map((v, i) => Math.round((v - pr[i]) * 1e6) / 1e6) as V3;
     const where = `en (${D.map((v) => +v.toFixed(3)).join(', ')})`;
     onClose();
-    asmActions.startPlace(pid, [], { pos, grounded, label: `${mode === 'origin' ? 'por su origen' : `por «${ref.label.replace(/ \(.*\)$/, '').replace(/ · .*$/, '')}»`} ${where}${grounded ? ', fijo' : ''}` });
+    asmActions.startPlace(pid, extras, { pos, quat: qq, grounded, label: `${ref.id === '__origin' ? 'por su origen' : `por «${ref.label.replace(/ \(.*\)$/, '').replace(/ · .*$/, '')}»`} ${where}${face !== 'keep' ? `, mirando a ${face}` : ''}${parseFloat(roll) ? `, girada ${roll}°` : ''}${grounded ? ', fijo' : ''}` });
   };
+  const enter = (e: React.KeyboardEvent) => { e.stopPropagation(); if (e.key === 'Enter') ok(); };
   return (
     <Modal title="Colocar primer componente" onClose={onClose}>
-      <p className="phelp"><b>{d?.fileName}</b> es el primer componente del ensamblaje: elige qué punto de la pieza se lleva a las coordenadas de destino.</p>
-      <div className="plabel">Punto de inserción de la pieza</div>
-      <div className="fp-opts">
-        <label className="fp-r"><input type="radio" name="fp" disabled={!eps.length} checked={mode === 'def'} onChange={() => setMode('def')} /> ePoint de inserción de la pieza <span className="muted">(por defecto{eps[0] && eps[0].name !== 'ePoint de inserción' ? ` · ${eps[0].name}` : ''})</span></label>
-        <label className="fp-r"><input type="radio" name="fp" disabled={!others.length} checked={mode === 'other'} onChange={() => setMode('other')} /> Otro ePoint
-          <select value={other} disabled={mode !== 'other' || !others.length} onChange={(e) => setOther(e.target.value)}>
-            {others.length ? others.map((o) => <option key={o.id} value={o.id}>{o.label}</option>) : <option value="">La pieza no tiene más ePoints</option>}
-          </select>
-        </label>
-        <label className="fp-r"><input type="radio" name="fp" checked={mode === 'origin'} onChange={() => setMode('origin')} /> Origen de la pieza</label>
-      </div>
-      <div className="plabel">Coordenadas de destino en el ensamblaje (mm)</div>
+      <p className="phelp"><b>{d?.fileName}</b> es el primer componente del ensamblaje. Elige qué <b>ePoint</b> de la pieza se conecta al <b>punto de destino</b> y cómo se orienta. Las piezas siguientes se conectan por sus ePoints a los de esta.</p>
+      <div className="plabel">1 · ePoint de la pieza que se conecta</div>
+      <select value={sel} onChange={(e) => setSel(e.target.value)} style={{ width: '100%' }}>
+        {opts.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+      <div className="plabel">2 · Punto de destino en el ensamblaje (mm)</div>
       <div className="fp-xyz">
         {(['X', 'Y', 'Z'] as const).map((L, i) => (
-          <label key={L}>{L} <input value={dest[i]} onChange={(e) => { const v = [...dest]; v[i] = e.target.value; setDest(v); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') ok(); }} /></label>
+          <label key={L}>{L} <input value={dest[i]} onChange={(e) => { const v = [...dest]; v[i] = e.target.value; setDest(v); }} onKeyDown={enter} /></label>
         ))}
       </div>
-      <p className="phelp">Punto de la pieza: ({ref.p.map((v) => +(+v).toFixed(3)).join(', ')}) → destino ({D.map((v) => +v.toFixed(3)).join(', ')}).</p>
+      <div className="modal-btns" style={{ marginTop: 4, justifyContent: 'flex-start' }}>
+        <button className="btn sm" onClick={() => setDest(['0', '0', '0'])}>Origen 0, 0, 0</button>
+        {wps.map((w) => { const P = (w.p ?? w.point) as V3 | undefined; return P ? <button key={w.id} className="btn sm" onClick={() => setDest(P.map((v) => String(+v.toFixed(3))))}>{w.name}</button> : null; })}
+      </div>
+      <div className="plabel">3 · Orientación</div>
+      <Row label="El ePoint mira hacia"><select value={face} onChange={(e) => setFace(e.target.value as typeof face)}>
+        <option value="keep">Como en la pieza ({ref.dir.map((v) => +v.toFixed(2)).join(', ')})</option>
+        {Object.keys(AX).map((k) => <option key={k} value={k}>{k}</option>)}
+      </select></Row>
+      <Row label="Giro sobre su eje (°)"><span style={{ display: 'flex', gap: 4 }}>
+        <input value={roll} onChange={(e) => setRoll(e.target.value)} onKeyDown={enter} style={{ width: 70 }} />
+        {['0', '90', '180', '270'].map((r) => <button key={r} className={`btn sm ${roll === r ? 'primary' : ''}`} onClick={() => setRoll(r)}>{r}°</button>)}
+      </span></Row>
       <label className="fp-r"><input type="checkbox" checked={grounded} onChange={(e) => setGrounded(e.target.checked)} /> Fijo (anclado en esa posición)</label>
-      <div className="modal-btns"><button className="btn" onClick={onBack}>← Volver</button><span className="grow" />
+      <div className="modal-btns">{onBack && <button className="btn" onClick={onBack}>← Volver</button>}<span className="grow" />
         <button className="btn" onClick={onClose}>Cancelar</button>
         <button className="btn primary" onClick={ok}>Aceptar</button></div>
     </Modal>
@@ -3370,6 +3395,7 @@ export function Modals() {
     case 'share': return <PX.ShareDialog onClose={close} />;
     case 'meshfit': return <MeshFitDialog onClose={close} />;
     case 'flat': return <FlatDialog onClose={close} />;
+    case 'firstplace': return <FirstPlaceStep key={(d as { pid: string }).pid} pid={(d as { pid: string }).pid} extras={(d as { extras?: string[] }).extras} onClose={close} />;
     case 'newdoc': return <NewDocDialog key={(d as { start?: boolean }).start ? 's' : 'n'} start={(d as { start?: boolean }).start} onClose={close} />;
     case 'drwview': return <DrwViewDialog onClose={close} />;
     case 'ilogic': return <ILogicDialog onClose={close} />;

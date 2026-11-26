@@ -408,7 +408,7 @@ export const asmActions = {
     s.notify(jn ? `${base} colocada y restringida a ${T.label} · ${jn}. Ajusta o añade restricciones con Restringir (R)` : `${base} colocada en ${T.label} (sin ePoint propio: restríngela con Restringir)`);
     return true;
   },
-  startPlace: (partId: string, extras: string[] = [], firstAt?: { pos: [number, number, number]; grounded: boolean; label?: string }) => {
+  startPlace: (partId: string, extras: string[] = [], firstAt?: { pos: [number, number, number]; quat?: [number, number, number, number]; grounded: boolean; label?: string }) => {
     const s = S();
     if (s.kind !== 'assembly') return;
     const e = s.docs.find((d) => d.id === partId); if (!e) return;
@@ -427,17 +427,27 @@ export const asmActions = {
     const base = e.fileName.replace(/\.[^.]+$/, '');
     const nextName = (a: { occurrences: { name: string }[] }) => { let k = 1; while (a.occurrences.some((o) => o.name === `${base}:${k}`)) k++; return `${base}:${k}`; };
     const first = !s.asm.occurrences.length;
+    // primer componente: se pregunta el ePoint, el punto de destino y la orientación
+    if (first && !firstAt) { if (s.placing) s.setTool(null); useStore.setState({ dialog: { kind: 'firstplace', pid: partId, extras } }); return; }
     const occ = uid('o');
     s.commitAsm((a) => {
       if (first) {
         // primer componente: por su ePoint (u origen) en las coordenadas indicadas (por defecto 0,0,0)
-        const xf0 = firstAt ? { pos: [...firstAt.pos] as [number, number, number], quat: [0, 0, 0, 1] as [number, number, number, number] } : { ...IDENTITY };
+        const xf0 = firstAt ? { pos: [...firstAt.pos] as [number, number, number], quat: [...(firstAt.quat ?? [0, 0, 0, 1])] as [number, number, number, number] } : { ...IDENTITY };
         const g = firstAt ? firstAt.grounded : true;
         a.occurrences.push({ id: uid('o'), name: nextName(a), part: partId, xf: xf0, grounded: g });
         for (const x of extras) a.occurrences.push({ id: uid('o'), name: occName(a, x), part: x, xf: { pos: [...xf0.pos], quat: [...xf0.quat] }, grounded: g });
       }
       a.occurrences.push({ id: occ, name: nextName(a), part: partId, xf: { pos: [0, 0, 0], quat: [0, 0, 0, 1] } });
     });
+    if (first && (s.settings.insertMode ?? 'foran') === 'foran') {
+      // Foran: solo el primer componente; las piezas siguientes se conectan a sus ePoints
+      s.commitAsm((a) => { a.occurrences = a.occurrences.filter((o) => o.id !== occ); });
+      const f0 = S().asm.occurrences[0];
+      useStore.setState({ placing: null, tool: null, dialog: null, selItem: f0?.id ?? null });
+      s.notify(`${base}: primer componente ${firstAt?.label ?? 'fijo en el origen'}. Las piezas siguientes se conectarán a sus bocas libres`);
+      return;
+    }
     useStore.setState({ placing: { part: partId, occ, quat: [0, 0, 0, 1], extras }, tool: 'place', selItem: null, dialog: null });
     s.notify(first ? `${base}: primer componente ${firstAt?.label ?? 'fijo en el origen'}. Clic para colocar más copias · Esc para terminar` : `${base}: clic para colocar · X/Y/Z gira 90° · Esc o clic derecho para terminar`);
   },

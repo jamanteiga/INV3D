@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.46
+## Versión 0.46.1
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.46.1**
+- **Primer componente de un ensamblaje** (desde cualquier sitio: Colocar, HVAC › Conducto…, Mecánica › Tubo…, Crear): se abre *Colocar primer componente* con 1) el **ePoint de la pieza** que se conecta (primero sus bocas ep1, ep2…, después el de inserción y el origen), 2) el **punto de destino** (X, Y, Z; botones *Origen* y puntos de trabajo del ensamblaje), 3) la **orientación**: hacia dónde mira ese ePoint (como en la pieza, ±X, ±Y, ±Z) y **giro sobre su eje** (0/90/180/270° o un ángulo), y si queda fijo. En modo Foran no siguen copias al cursor: las piezas siguientes se conectan por sus ePoints a las bocas libres de esta.
 
 **Novedades 0.46**
 - **Filosofía Foran o Inventor al insertar piezas en un ensamblaje** (botón **Inserción: Foran / Inventor** en Ensamblar › Componente, HVAC › Tendido y Mecánica › Tendido; también en Archivo › Opciones de la aplicación; por defecto **Foran**).
