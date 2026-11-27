@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.49
+## Versión 0.49.1
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,12 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.49.1**
+- **Girar como se quiera, siempre desde el ePoint**:
+  - *Clic derecho › Girar ▸*: elige el **eje** (*ePoint* = eje de su unión, o **X, Y, Z** globales por el ePoint) y el ángulo (±15…±90° o personalizado).
+  - *Clic derecho › Mover / girar con la tríada…*: la tríada lleva ahora **tres anillos** (X rojo, Y verde, Z azul). **Arrastra un anillo** para girar viendo la pieza en directo (pasos de 5°; **Mayús**: libre; Esc cancela) o **doble clic en el anillo** para escribir el ángulo exacto. Las flechas siguen moviendo (doble clic y mm).
+  - Siempre gira lo que arrastra detrás. Sobre el eje de su unión la pieza sigue unida (giro guardado en la unión); sobre otro eje se suelta de la pieza anterior y queda fija en la nueva orientación.
 
 **Novedades 0.49**
 - **Componentes fijos de verdad**: un componente totalmente restringido (0 GDL) o fijo ya no se puede arrastrar (antes se movía y volvía a su sitio al soltar). Se mueve solo con el clic derecho.

@@ -686,6 +686,24 @@ export const asmActions = {
     s.commitAsm((a) => { for (const id of sub) { const o = a.occurrences.find((x) => x.id === id); if (!o) continue; const X0 = xfOf(id); o.xf = { pos: v3.add(P, qq.rotate(rq, v3.sub(X0.pos, P))) as V3, quat: qq.mul(rq, X0.quat) as Xform['quat'] }; } });
     s.notify(`Girado ${deg > 0 ? '+' : ''}${deg}° sobre «${F.name}»${sub.length > 1 ? ` con ${sub.length - 1} componente(s) unidos` : ''}`);
   },
+  /** Gira el componente (y lo que arrastra detrás) sobre cualquier eje (mundial) que pasa por su ePoint.
+   *  Sobre el eje de su unión es un giro de la unión; sobre otro eje se suelta de la pieza anterior y queda fijo. */
+  epRotateAxis: (occ: string, axis: V3, deg: number) => {
+    const s = S(); const F = epOfOcc(occ); if (!F || !deg) return;
+    const u = v3.norm(axis); const P: V3 = [F.P.x, F.P.y, F.P.z];
+    const j = foranJoint(occ);
+    const dj = v3.dot(u, [F.D.x, F.D.y, F.D.z]);
+    if (j && Math.abs(Math.abs(dj) - 1) < 1e-6) { asmActions.foranSpin(occ, dj > 0 ? deg : -deg); return; }
+    if (!j && Math.abs(Math.abs(dj) - 1) < 1e-6) { asmActions.epRotate(occ, dj > 0 ? deg : -deg); return; }
+    const sub = j ? subtree(occ, j) : linked(occ);
+    const rq = axisQuat(u, (deg * Math.PI) / 180);
+    s.commitAsm((a) => {
+      if (j) a.joints = a.joints.filter((x) => x.id !== j.id);
+      for (const id of sub) { const o = a.occurrences.find((x) => x.id === id); if (!o) continue; const X0 = xfOf(id); o.xf = { pos: v3.add(P, qq.rotate(rq, v3.sub(X0.pos, P))) as V3, quat: qq.mul(rq, X0.quat) as Xform['quat'] }; if (j && id === occ) o.grounded = true; }
+    });
+    const ax = Math.abs(u[0]) > 0.999 ? 'X' : Math.abs(u[1]) > 0.999 ? 'Y' : Math.abs(u[2]) > 0.999 ? 'Z' : 'eje';
+    s.notify(`Girado ${deg > 0 ? '+' : ''}${deg}° sobre ${ax} por «${F.name}»${sub.length > 1 ? ` con ${sub.length - 1} componente(s) detrás` : ''}${j ? '. Se ha soltado de la pieza anterior y queda fijo (para volver a unirlo: clic derecho › Cambiar boca de destino)' : ''}`);
+  },
   /** Mueve el componente (y lo que arrastra detrás) un vector desde su ePoint. Unido: a lo largo de la unión es un desfase;
    *  en otra dirección se suelta de la pieza anterior y queda fijo en la nueva posición. */
   epMove: (occ: string, d: V3) => {
@@ -1274,3 +1292,6 @@ function linked(occ: string): string[] {
   while (q2.length) { const c = q2.shift()!; for (const x of s.asm.joints) { if (x.suppressed) continue; const n = x.a.occ === c ? x.b.occ : x.b.occ === c ? x.a.occ : null; if (!n || seen.has(n) || n.startsWith('__') || fixed.has(n)) continue; seen.add(n); q2.push(n); } }
   return [...seen];
 }
+
+/** Componentes que se mueven con «occ» al girarlo o moverlo desde su ePoint (él y lo que arrastra detrás) */
+export function epGroup(occ: string): string[] { const j = foranJoint(occ); return j ? subtree(occ, j) : linked(occ); }

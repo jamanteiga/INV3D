@@ -13,7 +13,7 @@ import { useStore, type State } from '../core/store';
 import { makeEval } from '../core/expr';
 import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
 import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, workAxisRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
-import { asmActions, foranJoint, epOfOcc } from './actions';
+import { asmActions, foranJoint, epOfOcc, epGroup } from './actions';
 import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
 import type { MeshData } from '../core/cadClient';
@@ -86,7 +86,7 @@ export default function AsmViewport() {
   const host = useRef<HTMLDivElement>(null);
   const cubeHost = useRef<HTMLDivElement>(null);
   const [hint, setHint] = useState('');
-  const [axisIn, setAxisIn] = useState<{ x: number; y: number; axis: 'X' | 'Y' | 'Z' } | null>(null);
+  const [axisIn, setAxisIn] = useState<{ x: number; y: number; axis: 'X' | 'Y' | 'Z'; rot?: boolean } | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; ref: FaceRef; pW: V3; label: string; ep?: { occ: string; id: string } } | null>(null);
 
   useEffect(() => {
@@ -116,10 +116,22 @@ export default function AsmViewport() {
         const cv = document.createElement('canvas'); cv.width = cv.height = 64; const g = cv.getContext('2d')!; g.fillStyle = '#' + col.toString(16).padStart(6, '0'); g.font = 'bold 44px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(name, 32, 34);
         const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false })); sp.scale.setScalar(L * 0.22); sp.position.copy(d.clone().multiplyScalar(L * 1.13)); sp.renderOrder = 999; sp.userData = { axis: name }; triad.add(sp);
       }
+      // anillos de giro (uno por eje)
+      for (const [name, col, d] of ax) {
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(L * 0.62, r * 0.9, 8, 64), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.75 })); ring.quaternion.copy(q);
+        const rhit = new THREE.Mesh(new THREE.TorusGeometry(L * 0.62, r * 4.5, 6, 48), new THREE.MeshBasicMaterial({ visible: false })); rhit.quaternion.copy(q);
+        for (const m of [ring, rhit]) { m.renderOrder = 998; m.userData = { axis: name, ring: true }; triad.add(m); }
+      }
       const dot = new THREE.Mesh(new THREE.SphereGeometry(r * 3, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffb224, depthTest: false })); dot.renderOrder = 999; triad.add(dot);
       triad.position.copy(F.P); triad.visible = true; V.request();
     };
-    const triadAxis = (ev: MouseEvent): 'X' | 'Y' | 'Z' | null => { if (!triad.visible) return null; const h = V.ray(ev).intersectObjects(triad.children, false).find((x) => x.object.userData.axis); return (h?.object.userData.axis as 'X' | 'Y' | 'Z') ?? null; };
+    const triadAxis = (ev: MouseEvent): { axis: 'X' | 'Y' | 'Z'; ring: boolean } | null => {
+      if (!triad.visible) return null;
+      const hs = V.ray(ev).intersectObjects(triad.children, false).filter((x) => x.object.userData.axis);
+      const h = hs.find((x) => !x.object.userData.ring) ?? hs[0]; // las flechas tienen prioridad sobre los anillos
+      return h ? { axis: h.object.userData.axis, ring: !!h.object.userData.ring } : null;
+    };
     const measureGroup = new THREE.Group(); scene.add(measureGroup);
     const refGroup = new THREE.Group(); scene.add(refGroup);
     let refHover: THREE.Object3D | null = null;
@@ -625,6 +637,40 @@ export default function AsmViewport() {
       return true;
     };
     let rotWarned = false;
+    // Giro arrastrando un anillo de la tríada (pasos de 5°; Mayús: libre)
+    let ringDrag: { axis: THREE.Vector3; name: string; P: THREE.Vector3; c: { x: number; y: number }; a0: number; sign: number; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; deg: number } | null = null;
+    host.current!.addEventListener('pointerdown', (ev) => {
+      const s = useStore.getState();
+      if (ev.button !== 0 || s.tool !== 'epMove' || !s.epMove) return;
+      const a = triadAxis(ev); if (!a || !a.ring) return;
+      const F = epOfOcc(s.epMove); if (!F) return;
+      ev.stopPropagation(); V.controls.enabled = false;
+      const axis = new THREE.Vector3(...(a.axis === 'X' ? [1, 0, 0] : a.axis === 'Y' ? [0, 1, 0] : [0, 0, 1]) as V3);
+      const q = V.project([F.P.x, F.P.y, F.P.z]); const r = cvs.getBoundingClientRect(); const c = { x: r.left + q.x, y: r.top + q.y };
+      const ids = new Set(epGroup(s.epMove));
+      const grps = pickables.filter((m) => m.userData.kind === 'occ' && ids.has(topOf(s, m.userData.id))).map((m) => ({ g: m.parent!, m: m.parent!.matrix.clone() }));
+      ringDrag = { axis, name: a.axis, P: F.P.clone(), c, a0: Math.atan2(ev.clientY - c.y, ev.clientX - c.x), sign: axis.dot(V.camDir()) > 0 ? 1 : -1, grps, deg: 0 };
+    }, { capture: true });
+    window.addEventListener('pointermove', (ev) => {
+      if (!ringDrag) return;
+      const d = ringDrag; let a = (Math.atan2(ev.clientY - d.c.y, ev.clientX - d.c.x) - d.a0) * 180 / Math.PI;
+      a = ((a + 540) % 360) - 180; a *= d.sign;
+      d.deg = ev.shiftKey ? Math.round(a * 10) / 10 : Math.round(a / 5) * 5;
+      const M = new THREE.Matrix4().makeTranslation(d.P.x, d.P.y, d.P.z).multiply(new THREE.Matrix4().makeRotationAxis(d.axis, (d.deg * Math.PI) / 180)).multiply(new THREE.Matrix4().makeTranslation(-d.P.x, -d.P.y, -d.P.z));
+      for (const { g, m } of d.grps) { g.matrix.copy(m).premultiply(M); g.matrixWorldNeedsUpdate = true; }
+      setHint(`Girando sobre ${d.name}: ${d.deg > 0 ? '+' : ''}${d.deg}° (pasos de 5°; Mayús: libre) · suelta para aplicar · Esc cancela`);
+      cvs.style.cursor = 'grabbing'; V.request();
+    });
+    window.addEventListener('pointerup', () => {
+      const d = ringDrag; if (!d) return; ringDrag = null; V.controls.enabled = true; cvs.style.cursor = 'default'; setHint('');
+      for (const { g, m } of d.grps) { g.matrix.copy(m); g.matrixWorldNeedsUpdate = true; } V.request();
+      const s = useStore.getState(); if (d.deg && s.epMove) asmActions.epRotateAxis(s.epMove, [d.axis.x, d.axis.y, d.axis.z], d.deg);
+    }, true);
+    window.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape' || !ringDrag) return;
+      const d = ringDrag; ringDrag = null; V.controls.enabled = true; setHint(''); ev.stopPropagation();
+      for (const { g, m } of d.grps) { g.matrix.copy(m); g.matrixWorldNeedsUpdate = true; } V.request();
+    }, true);
     // Arrastre libre: clic izquierdo mantenido sobre un componente no fijo lo mueve en el plano de la vista;
     // al soltar se vuelven a resolver las restricciones (se mueve solo en sus grados de libertad libres).
     let drag: { id: string; grp: THREE.Object3D; grps: { g: THREE.Object3D; m: THREE.Matrix4 }[]; plane: THREE.Plane; start: THREE.Vector3; xf: Xform; moved: boolean } | null = null;
@@ -907,8 +953,8 @@ export default function AsmViewport() {
     cvs.addEventListener('dblclick', (ev) => {
       const s = useStore.getState();
       if (s.tool === 'epMove') {
-        const a = triadAxis(ev); if (!a) { s.notify('Doble clic sobre el eje X, Y o Z de la tríada', 'error'); return; }
-        const r = host.current!.getBoundingClientRect(); setAxisIn({ x: ev.clientX - r.left, y: ev.clientY - r.top, axis: a }); return;
+        const a = triadAxis(ev); if (!a) { s.notify('Doble clic sobre una flecha (mover) o un anillo (girar) de la tríada', 'error'); return; }
+        const r = host.current!.getBoundingClientRect(); setAxisIn({ x: ev.clientX - r.left, y: ev.clientY - r.top, axis: a.axis, rot: a.ring }); return;
       }
       if (s.tool) return;
       const hit = hitAt(ev);
@@ -1035,7 +1081,7 @@ export default function AsmViewport() {
     frameLine: 'Selecciona líneas de esqueleto o de boceto · clic de nuevo para quitar',
     skelPoint: step === 0 ? 'Punto inicial: vértice, extremo de línea o punto de una cara' : 'Punto final',
     hvacRoute: 'Tender conductos: clic en una boca libre (ePoint) · elige las piezas en el panel · Esc para terminar',
-    epMove: 'Mover desde el ePoint: doble clic en el eje X, Y o Z de la tríada y escribe los mm (con − en sentido contrario) · Esc o clic derecho: terminar',
+    epMove: 'Tríada del ePoint: arrastra un anillo para girar (pasos de 5°, Mayús libre) · doble clic en un anillo = ángulo exacto · doble clic en una flecha = mover (mm) · − = sentido contrario · Esc o clic derecho: terminar',
     asmCreatePick: 'Crear / Añadir: clic en un ePoint (boca o extremo libre) o en una cara de un componente · Esc: sin referencia',
     asmFace: dialog?.kind === 'asmwp' ? 'Cara plana o plano de base para el plano de trabajo' : (dialog as { draft?: { epMode?: boolean } } | null)?.draft?.epMode ? (step === 0 ? 'Primer ePoint: clic en un ePoint de un componente' : 'Segundo ePoint: clic en un ePoint de otro componente') : step === 0 ? 'Primera geometría: cara, eje o plano de origen' : step === 1 ? 'Segunda geometría (se moverá el componente libre)' : 'Plano de simetría',
     weldFace: step === 0 ? 'Primera cara a soldar' : 'Segunda cara a soldar',
@@ -1063,19 +1109,21 @@ export default function AsmViewport() {
 }
 
 /** Caja flotante de «Mover desde el ePoint»: mm a lo largo del eje pulsado (negativo: sentido contrario) */
-function AxisInput({ x, y, axis, close }: { x: number; y: number; axis: 'X' | 'Y' | 'Z'; close: () => void }) {
+function AxisInput({ x, y, axis, rot, close }: { x: number; y: number; axis: 'X' | 'Y' | 'Z'; rot?: boolean; close: () => void }) {
   const [v, setV] = useState('');
   const ok = () => {
     const d = parseFloat(v.replace(',', '.').replace('−', '-'));
     const s = useStore.getState();
     if (!isFinite(d) || !d || !s.epMove) { close(); return; }
-    const vec: V3 = axis === 'X' ? [d, 0, 0] : axis === 'Y' ? [0, d, 0] : [0, 0, d];
-    asmActions.epMove(s.epMove, vec); close();
+    const u: V3 = axis === 'X' ? [1, 0, 0] : axis === 'Y' ? [0, 1, 0] : [0, 0, 1];
+    if (rot) asmActions.epRotateAxis(s.epMove, u, d);
+    else asmActions.epMove(s.epMove, [u[0] * d, u[1] * d, u[2] * d]);
+    close();
   };
   return (
     <div className="axis-in" style={{ left: x + 12, top: y - 14 }} onPointerDown={(e) => e.stopPropagation()}>
-      <b className={`ax-${axis}`}>{axis}</b>
-      <input autoFocus value={v} placeholder="mm (−: al revés)" onChange={(e) => setV(e.target.value)}
+      <b className={`ax-${axis}`}>{rot ? `↻ ${axis}` : axis}</b>
+      <input autoFocus value={v} placeholder={rot ? 'grados (−: al revés)' : 'mm (−: al revés)'} onChange={(e) => setV(e.target.value)}
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') ok(); if (e.key === 'Escape') close(); }} />
       <button className="btn sm primary" onClick={ok}>OK</button>
     </div>
@@ -1085,6 +1133,9 @@ function AxisInput({ x, y, axis, close }: { x: number; y: number; axis: 'X' | 'Y
 /** Menú contextual del visor de ensamblaje: restringir la geometría pulsada. */
 function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef; pW: V3; label: string; ep?: { occ: string; id: string } }; close: () => void }) {
   const [rotOpen, setRotOpen] = useState(false);
+  const [rotAx, setRotAx] = useState<'ep' | 'X' | 'Y' | 'Z'>('ep');
+  const occRef = useRef<string | null>(null);
+  const rot = (deg: number) => { const id = occRef.current; if (!id) return; if (rotAx === 'ep') asmActions.epRotate(id, deg); else asmActions.epRotateAxis(id, rotAx === 'X' ? [1, 0, 0] : rotAx === 'Y' ? [0, 1, 0] : [0, 0, 1], deg); };
   const s = useStore.getState();
   useEffect(() => {
     const off = (e: Event) => { if (!(e.target as HTMLElement).closest?.('.ctx')) close(); };
@@ -1094,6 +1145,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
   }, [close]);
   const vo = (s.asmResult?.view?.occurrences as FlatOcc[] | undefined)?.find((o) => o.id === ctx.ref.occ);
   const occ = s.asm.occurrences.find((o) => o.id === (vo?.sub ?? ctx.ref.occ));
+  occRef.current = occ?.id ?? null;
   const openPart = vo?.part ?? occ?.part;
   const isAxis = ctx.ref.kind === 'axis';
   const start = (type: JointType, extra: Record<string, unknown> = {}, b?: { ref: FaceRef; label: string }) => {
@@ -1142,11 +1194,12 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
         <div className="ctx-sub">Desde el ePoint «{epOfOcc(occ.id)!.name}»{foranJoint(occ.id) ? ' (unión)' : ''}{foranJoint(occ.id)?.offset && parseFloat(foranJoint(occ.id)!.offset) ? ` · desplazada ${foranJoint(occ.id)!.offset}` : ''}</div>
         <button className={rotOpen ? 'on' : ''} title="Gira el componente y todo lo que arrastra detrás sobre el eje de su ePoint" onClick={() => setRotOpen(!rotOpen)}>Girar {rotOpen ? '▾' : '▸'}</button>
         {rotOpen && (<div className="ctx-angles">
-          {[15, 30, 45, 60, 75, 90].map((a) => <button key={a} onClick={() => { close(); asmActions.epRotate(occ.id, a); }}>+{a}°</button>)}
-          {[15, 30, 45, 60, 75, 90].map((a) => <button key={-a} onClick={() => { close(); asmActions.epRotate(occ.id, -a); }}>−{a}°</button>)}
-          <button className="wide" onClick={() => { close(); const v = prompt('Ángulo de giro desde el ePoint (grados; negativo = sentido contrario)', '20'); const d = v ? parseFloat(v.replace(',', '.')) : NaN; if (isFinite(d) && d) asmActions.epRotate(occ.id, d); }}>Ángulo personalizado…</button>
+          <div className="ctx-axes">Eje {(['ep', 'X', 'Y', 'Z'] as const).map((k) => <button key={k} className={rotAx === k ? 'on' : ''} title={k === 'ep' ? 'Eje del ePoint (el de su unión)' : `Eje ${k} global por el ePoint`} onClick={() => setRotAx(k)}>{k === 'ep' ? 'ePoint' : k}</button>)}</div>
+          {[15, 30, 45, 60, 75, 90].map((a) => <button key={a} onClick={() => { close(); rot(a); }}>+{a}°</button>)}
+          {[15, 30, 45, 60, 75, 90].map((a) => <button key={-a} onClick={() => { close(); rot(-a); }}>−{a}°</button>)}
+          <button className="wide" onClick={() => { close(); const v = prompt(`Ángulo de giro sobre ${rotAx === 'ep' ? 'el eje del ePoint' : `el eje ${rotAx}`} (grados; negativo = sentido contrario)`, '20'); const d = v ? parseFloat(v.replace(',', '.').replace('−', '-')) : NaN; if (isFinite(d) && d) rot(d); }}>Ángulo personalizado…</button>
         </div>)}
-        <button title="Muestra la tríada X, Y, Z en el ePoint: doble clic en un eje y escribe los mm (negativo = sentido contrario)" onClick={() => { close(); useStore.setState({ selItem: occ.id, epMove: occ.id }); s.setTool('epMove'); }}>Mover desde el ePoint (tríada)…</button>
+        <button title="Tríada X, Y, Z en el ePoint: doble clic en una flecha = mover (mm), doble clic en un anillo = girar (°); negativo = sentido contrario" onClick={() => { close(); useStore.setState({ selItem: occ.id, epMove: occ.id }); s.setTool('epMove'); }}>Mover / girar con la tríada…</button>
         {foranJoint(occ.id) && (<>
           <button title="Separa la pieza a lo largo del eje de la unión (0 = encajada)" onClick={() => { close(); const v = prompt('Desplazar a lo largo de la unión (mm; 0 = encajada)', String(parseFloat(foranJoint(occ.id)?.offset ?? '0') || 0)); const d = v != null ? parseFloat(v.replace(',', '.')) : NaN; if (isFinite(d)) asmActions.foranOffset(occ.id, d); }}>Desplazar a lo largo de la unión…</button>
           <button title="Une la pieza a la misma boca de destino por otra de sus bocas" onClick={() => { close(); asmActions.foranOtherPort(occ.id); }}>Cambiar boca · usar otra boca de la pieza</button>
