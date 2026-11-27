@@ -7,7 +7,7 @@ import type { EPoint } from './epoints';
 export type HvacKind =
   | 'duct' | 'elbow' | 'transition' | 'branch' | 'coupling' | 'cap' | 'plenum'
   | 'grille' | 'diffuser' | 'damper' | 'firedamper' | 'silencer' | 'flex' | 'ahu' | 'fancoil'
-  | 'flange' | 'support' | 'insulation';
+  | 'flange' | 'support' | 'insulation' | 'gasket';
 
 /** Sección: rectangular, circular u oval plana (dos semicírculos unidos por tramos rectos: anchura = eje mayor) */
 export type DuctShape = 'rect' | 'round' | 'oval';
@@ -28,6 +28,8 @@ export interface HvacSpec {
   branch?: 'tee' | 'shoe' | 'y' | 'collar'; branchAngle?: number;
   /** Uniones en los extremos */
   ends?: 'none' | 'tdc' | 'angle' | 'socket';
+  /** Extremos con unión (bridas): los dos, solo el inicial (z=0) o solo el final (z=L). Al cortar un conducto solo se embrida el corte */
+  endsAt?: 'both' | 'start' | 'end';
   /** Terminales y equipos */
   blades?: number; bladeAngle?: number; neck?: number; splitter?: number; plate?: number; spigot?: 'top' | 'side';
   /** Aislamiento / soporte */
@@ -104,8 +106,9 @@ function endJoints(b: B, s: HvacSpec, t: number, L: number, shape = s.shape, W =
   const e = s.ends ?? 'none';
   if (e === 'none' || e === 'socket') return;
   const fh = e === 'tdc' ? (Math.max(W, H, D) > 1000 ? 40 : 30) : 30, ft = e === 'tdc' ? Math.max(t, 0.8) * 1.5 : 3, coll = e === 'angle' ? 30 : 0;
-  for (const z of [0, L - ft]) b.ext(shape === 'rect' ? (e === 'tdc' ? 'Brida TDC' : 'Marco angular') : e === 'tdc' ? 'Brida de perfil' : 'Aro angular', XY(z), [secE(shape, W, H, D, 2 * t + 2 * fh), secE(shape, W, H, D, 2 * t)], ft);
-  if (coll) for (const z of [0, L - coll]) b.ext(shape === 'rect' ? 'Ala del angular' : 'Ala del aro', XY(z), [secE(shape, W, H, D, 2 * t + 2 * ft), secE(shape, W, H, D, 2 * t)], coll);
+  const at = s.endsAt ?? 'both', S0 = at !== 'end', S1 = at !== 'start';
+  for (const z of [...(S0 ? [0] : []), ...(S1 ? [L - ft] : [])]) b.ext(shape === 'rect' ? (e === 'tdc' ? 'Brida TDC' : 'Marco angular') : e === 'tdc' ? 'Brida de perfil' : 'Aro angular', XY(z), [secE(shape, W, H, D, 2 * t + 2 * fh), secE(shape, W, H, D, 2 * t)], ft);
+  if (coll) for (const z of [...(S0 ? [0] : []), ...(S1 ? [L - coll] : [])]) b.ext(shape === 'rect' ? 'Ala del angular' : 'Ala del aro', XY(z), [secE(shape, W, H, D, 2 * t + 2 * ft), secE(shape, W, H, D, 2 * t)], coll);
 }
 const endsLabel = (s: HvacSpec) => ({ none: '', tdc: ' · bridas TDC', angle: ' · marco angular', socket: ' · unión enchufe' }[s.ends ?? 'none']);
 
@@ -465,6 +468,14 @@ function makeFlangeFrame(s: HvacSpec): PartDoc {
   const d = doc(s, `${e === 'tdc' ? 'Brida TDC' : 'Marco angular'} ${sizeLabel(s)}`, `${e === 'tdc' ? (s.shape === 'rect' ? 'Marco de brida TDC' : 'Brida de perfil') : s.shape === 'rect' ? 'Marco de angular L30×3' : 'Aro de angular L30×3'}${s.shape === 'oval' ? ' oval' : ''} para conducto ${sizeLabel(s)}`);
   d.features = b.f; return d;
 }
+/** Junta entre bridas: anillo plano del ancho de la brida (EPDM/neopreno), espesor s.L (4 mm por defecto) */
+function makeGasket(s: HvacSpec): PartDoc {
+  const t = autoT(s), b = new B(), g = s.L > 0 && s.L < 20 ? s.L : 4, e = s.ends && s.ends !== 'none' && s.ends !== 'socket' ? s.ends : 'tdc';
+  const fh = e === 'tdc' ? (Math.max(s.W, s.H, s.D) > 1000 ? 40 : 30) : 30;
+  b.ext('Junta', XY(), [secE(s.shape, s.W, s.H, s.D, 2 * t + 2 * fh), secE(s.shape, s.W, s.H, s.D, 2 * t)], g);
+  const d = doc({ ...s, material: s.material.startsWith('Junta') ? s.material : 'Junta EPDM' }, `Junta ${sizeLabel(s)} e=${g}${e === 'angle' ? ' AL' : ''}`, `Junta de brida ${e === 'tdc' ? 'TDC' : 'de marco angular'} ${sizeLabel(s)} · EPDM ${g} mm`, [['g', g, 'Espesor de la junta']]);
+  d.features = b.f; return d;
+}
 function makeSupport(s: HvacSpec): PartDoc {
   const t = autoT(s), b = new B();
   const tr = s.shape !== 'round'; // rectangular y oval: trapecio
@@ -521,6 +532,7 @@ function hvacEnds(s: HvacSpec): EPoint[] {
     case 'damper': return two(s.L || 150);
     case 'firedamper': return two(s.L || 350);
     case 'flex': return two(Math.max(2, Math.round(s.L / 25)) * 25);
+    case 'gasket': return two(s.L > 0 && s.L < 20 ? s.L : 4);
     case 'coupling': return two(s.L > 0 && s.L < 600 ? s.L : (s.shape === 'round' ? s.D : s.W) <= 315 ? 100 : 150);
     case 'cap': return [ep(1, false, [0, 0, t], [0, 0, 1])];
     // terminales y equipos: bocas para unirlos (rejilla: el cuello entra en el conducto y el marco apoya en su boca) a un conducto (antes solo tenían el ePoint de origen)
@@ -598,6 +610,7 @@ function makeHvacPart0(s: HvacSpec): PartDoc {
     case 'flange': return makeFlangeFrame(s);
     case 'support': return makeSupport(s);
     case 'insulation': return makeInsulation(s);
+    case 'gasket': return makeGasket(s);
   }
 }
 
@@ -605,10 +618,10 @@ export const HVAC_KINDS: Record<HvacKind, string> = {
   duct: 'Conducto recto', elbow: 'Codo', transition: 'Transición / reducción / desvío', branch: 'Derivación', coupling: 'Manguito de unión (espiral)', cap: 'Tapa final', plenum: 'Plenum',
   grille: 'Rejilla', diffuser: 'Difusor', damper: 'Compuerta de regulación', firedamper: 'Compuerta cortafuegos', silencer: 'Silenciador', flex: 'Conducto flexible',
   ahu: 'UTA (climatizadora)', fancoil: 'Fancoil de conductos',
-  flange: 'Brida / marco', support: 'Soporte', insulation: 'Aislamiento',
+  flange: 'Brida / marco', support: 'Soporte', insulation: 'Aislamiento', gasket: 'Junta de brida',
 };
 export const HVAC_GROUPS: [string, HvacKind[]][] = [
   ['Conductos', ['duct', 'elbow', 'transition', 'branch', 'coupling', 'cap', 'plenum']],
   ['Terminales y equipos', ['grille', 'diffuser', 'damper', 'firedamper', 'silencer', 'flex', 'ahu', 'fancoil']],
-  ['Uniones, soportes y aislamiento', ['flange', 'support', 'insulation']],
+  ['Uniones, soportes y aislamiento', ['flange', 'gasket', 'support', 'insulation']],
 ];

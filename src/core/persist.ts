@@ -30,6 +30,8 @@ export interface AppSettings {
   zoomSpeed?: number;
   /** Inserción de piezas en ensamblajes: «foran» (unida a la boca libre de la anterior) o «inventor» (sigue al cursor) */
   insertMode?: 'foran' | 'inventor';
+  /** Tramos rectos de conducto: longitud (mm) y peso (kg) máximos; unión al dividir/cortar; espesor de junta; dividir al insertar */
+  segMaxL?: number; segMaxKg?: number; segJoint?: 'tdc' | 'angle'; segGasket?: number; segAuto?: boolean;
 }
 export const DEFAULT_SETTINGS: AppSettings = {
   userName: '', company: '', defaultMaterial: 'Acero S275JR', restoreSession: true, autosave: true, autosaveFolder: true, autosaveMin: 2,

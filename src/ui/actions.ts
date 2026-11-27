@@ -2,6 +2,7 @@ import { normalizeAsm } from '../core/subasm';
 import { recR, K_DEFAULT } from '../core/sheetrec';
 import { autoEPointJoints, partEPoints, epJoint, epRef, type EPoint } from '../core/epoints';
 import * as R from './hvacroute';
+import { segCfg, isStraightDuct, segmentDuct, insertInline } from './hvacops';
 const partOf = (s: ReturnType<typeof useStore.getState>, id: string): PartDoc | null => { const d = s.docData(id) as PartDoc | null; return d && d.format === 'inv3d.part' ? d : null; };
 import { docGetter } from '../core/store';
 // Acciones de los comandos de la cinta (pieza, ensamblaje y plano).
@@ -395,6 +396,15 @@ export const asmActions = {
     });
     useStore.setState({ selItem: occ, dialog: null, tool: null });
     // recursivo: la siguiente boca libre de la pieza nueva pasa a ser la referencia y se vuelve a abrir el centro de contenido
+    // tramos rectos largos o pesados: se dividen solos (bridas + junta) según Opciones › Tramos
+    let occ2 = occ;
+    if (segCfg().auto && isStraightDuct(occ)) { const ids = segmentDuct(occ, true); if (ids) occ2 = ids[ids.length - 1]; }
+    if (occ2 !== occ) {
+      const nx2 = S().createRecursive && !opts.noRecurse ? 'ep2' : null;
+      const F2 = nx2 ? R.epFrame(occ2, nx2) : null;
+      if (F2) { useStore.setState({ createTarget: { occ: occ2, ref: epRef(F2.e, occ2), ep: 'ep2', epKind: F2.e.kind, label: `${base} · ${F2.e.name}`, pW: [F2.P.x, F2.P.y, F2.P.z], nW: [F2.D.x, F2.D.y, F2.D.z] }, dialog: { kind: 'createcomp' } }); return true; }
+      return true;
+    }
     const nx = ne && S().createRecursive && !opts.noRecurse ? R.nextPort(pd, ne) : undefined;
     if (nx) {
       const F2 = R.epFrame(occ, nx.id);
@@ -413,6 +423,7 @@ export const asmActions = {
     if (s.kind !== 'assembly') return;
     const e = s.docs.find((d) => d.id === partId); if (!e) return;
     void import('../core/fdp').then((m) => { for (const x of [partId, ...extras]) void m.saveContentPart(x); });
+    if (s.inlineAt) { const it = s.inlineAt; useStore.setState({ inlineAt: null, createTarget: null, dialog: null }); if (s.placing) s.setTool(null); insertInline(it.occ, it.d, partId); return; }
     if (s.createTarget && asmActions.placeAtTarget(partId, extras)) return;
     // Filosofía Foran: la pieza entra ya unida por ePoints a la boca libre de la pieza seleccionada (o de la última)
     if ((s.settings.insertMode ?? 'foran') === 'foran' && s.asm.occurrences.length) {
@@ -696,6 +707,17 @@ export const asmActions = {
     const base = fn.replace(/\.i3p$/, '');
     useStore.setState({ docs: s.docs.map((x) => (x.id === pid ? { ...x, fileName: fn } : x)) });
     let n = 0; S().commitAsm((a) => { for (const o of a.occurrences) if (o.part === pid) o.name = `${base}:${++n}`; });
+  },
+  /** Boca «virtual» para Insertar en línea: toma la sección del tramo para el centro de contenido */
+  inlineTarget: (occ: string, _d: number) => {
+    const F = R.epFrame(occ, 'ep2') ?? R.epFrame(occ, 'ep1'); if (!F) return null;
+    return { occ, ref: epRef(F.e, occ), ep: F.e.id, epKind: F.e.kind, label: `en línea · ${F.e.name}`, pW: [F.P.x, F.P.y, F.P.z] as V3, nW: [F.D.x, F.D.y, F.D.z] as V3 };
+  },
+  /** Une dos bocas ya coincidentes (cierra un tendido) con el giro bloqueado en la orientación actual */
+  foranJoinFixed: (occA: string, epA: string, occB: string, epB: string) => {
+    const s = S(); const oa = s.asm.occurrences.find((o) => o.id === occA), ob = s.asm.occurrences.find((o) => o.id === occB); if (!oa || !ob) return;
+    const ea = partEPoints(partOf(s, oa.part)!).find((e) => e.id === epA), eb = partEPoints(partOf(s, ob.part)!).find((e) => e.id === epB); if (!ea || !eb) return;
+    s.commitAsm((a) => { a.joints.push(ensureLock(epJoint(a, occA, ea, occB, eb, uid))); });
   },
   /** ¿La pieza es de chapa (tiene desarrollo)? */
   isSheet: (part: string) => { const pd = S().docData(part) as PartDoc | null; return !!pd && 'features' in pd && pd.features.some((f) => String(f.type).startsWith('sm_')); },
@@ -1210,7 +1232,7 @@ export const drwActions = {
 };
 
 // ---------- Filosofía Foran: piezas unidas por ePoints ----------
-const xfOf = (id: string): Xform => { const s = S(); return s.asmResult?.xf[id] ?? s.asm.occurrences.find((o) => o.id === id)?.xf ?? IDENTITY; };
+export const xfOf = (id: string): Xform => { const s = S(); return s.asmResult?.xf[id] ?? s.asm.occurrences.find((o) => o.id === id)?.xf ?? IDENTITY; };
 const xfDirW = (X: Xform, d: V3): V3 => qq.rotate(X.quat, d) as V3;
 const axisQuat = (u: V3, th: number): Xform['quat'] => { const h = Math.sin(th / 2); return [u[0] * h, u[1] * h, u[2] * h, Math.cos(th / 2)]; };
 /** Rodrigues: gira v sobre el eje unitario k */
@@ -1256,6 +1278,7 @@ function subtree(occ: string, j: Joint): string[] {
   return [...seen];
 }
 /** Coloca «occ» con su boca ne contra la boca F (de toOcc) y la une con el giro bloqueado; sustituye la unión `replace` */
+export function foranJoinExt(occ: string, pd: PartDoc, ne: EPoint, toOcc: string, F: NonNullable<ReturnType<typeof R.epFrame>>, replace?: string) { foranJoin(occ, pd, ne, toOcc, F, replace); }
 function foranJoin(occ: string, pd: PartDoc, ne: EPoint, toOcc: string, F: NonNullable<ReturnType<typeof R.epFrame>>, replace?: string) {
   const s = S();
   const xf = R.placeOnFrame(F, pd, ne, R.turnOf(F));

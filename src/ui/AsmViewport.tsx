@@ -14,6 +14,7 @@ import { makeEval } from '../core/expr';
 import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
 import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, workAxisRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
 import { asmActions, foranJoint, epOfOcc, epGroup } from './actions';
+import { isStraightDuct, distAlong, cutDuct, segmentDuct, setDuctLength, segCfg } from './hvacops';
 import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
 import type { MeshData } from '../core/cadClient';
@@ -346,7 +347,7 @@ export default function AsmViewport() {
       if (r) {
         const add = (kind: string, id: string, m: MeshData | undefined | null, color: string, matrix: THREE.Matrix4 | null) => {
           if (!m || !m.triangles.length) return;
-          const sel = !!s.selItem && (s.selItem === id || (kind === 'occ' && topOf(s, id) === s.selItem));
+          const sel = (!!s.selItem && (s.selItem === id || (kind === 'occ' && topOf(s, id) === s.selItem))) || (kind === 'occ' && !!s.selGroup?.includes(topOf(s, id)));
           const { grp, mesh } = V.meshFromData(m, color, { edges: s.showEdges, emissive: sel ? css('--accent') : undefined });
           if (matrix) { grp.matrixAutoUpdate = false; grp.matrix.copy(matrix); }
           mesh.userData = { kind, id };
@@ -876,6 +877,8 @@ export default function AsmViewport() {
         const r = refAt(ev); const ep = r?.object.userData.ep as { occ: string; id: string; kind: string; pW: V3; dW: V3 } | undefined;
         let T: NonNullable<State['createTarget']> | null = null;
         if (ep) T = { occ: ep.occ, ref: r!.object.userData.ref, ep: ep.id, epKind: ep.kind, label: r!.object.userData.label, pW: ep.pW, nW: ep.dW };
+        // Tender hasta: boca de destino
+        if (s.routePick && ep) { const rp = s.routePick; useStore.setState({ routePick: null, tool: null }); void import('./routeto').then((m) => m.routeTo(rp.occ, rp.ep, { to: { occ: ep.occ, ep: ep.id } })); return; }
         // Foran · Cambiar boca: el destino es un ePoint (o la boca más cercana al clic)
         if (s.reattach) {
           let to = ep ? { occ: ep.occ, id: ep.id } : null;
@@ -1053,7 +1056,7 @@ export default function AsmViewport() {
     const unsubR = useRoute.subscribe(drawRoute);
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
-      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud) {
+      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.selGroup !== p.selGroup || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud) {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }
@@ -1063,8 +1066,10 @@ export default function AsmViewport() {
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
       if (s.tool !== p.tool || s.asmResult !== p.asmResult) drawRoute();
-      if (p.tool === 'asmCreatePick' && s.tool !== 'asmCreatePick' && s.reattach) useStore.setState({ reattach: null });
+      if (s.selItem !== p.selItem && s.selGroup && !(s.selItem && s.selGroup.includes(s.selItem))) setTimeout(() => useStore.setState({ selGroup: null }), 0);
+      if (p.tool === 'asmCreatePick' && s.tool !== 'asmCreatePick' && (s.reattach || s.routePick)) useStore.setState({ reattach: null, routePick: null });
       if (p.dialog && !s.dialog && s.createTarget) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.createTarget) useStore.setState({ createTarget: null }); }, 0);
+      if (p.dialog && !s.dialog && s.inlineAt) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.inlineAt) useStore.setState({ inlineAt: null, createTarget: null }); }, 0);
       if (s.tool !== p.tool) { applyMouse(s); setHint(''); hoverKey = ''; V.clearGroup(overlayGroup); if (p.tool === 'measure') measureReset(); drawMeasure(); }
       if (s.view !== p.view) V.setView(s.view.name);
       if (s.freeRot !== p.freeRot) { stopFreeRot(); if (s.freeRot) startFreeRot(s, s.freeRot); }
@@ -1136,6 +1141,7 @@ function AxisInput({ x, y, axis, rot, close }: { x: number; y: number; axis: 'X'
 function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef; pW: V3; label: string; ep?: { occ: string; id: string } }; close: () => void }) {
   const [rotOpen, setRotOpen] = useState(false);
   const [rotAx, setRotAx] = useState<'ep' | 'X' | 'Y' | 'Z'>('ep');
+  const [brOpen, setBrOpen] = useState(false);
   const occRef = useRef<string | null>(null);
   const rot = (deg: number) => { const id = occRef.current; if (!id) return; if (rotAx === 'ep') asmActions.epRotate(id, deg); else asmActions.epRotateAxis(id, rotAx === 'X' ? [1, 0, 0] : rotAx === 'Y' ? [0, 1, 0] : [0, 0, 1], deg); };
   const s = useStore.getState();
@@ -1181,6 +1187,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       <div className="ctx-title">{ctx.label}</div>
       <button title="Este ePoint es el origen; después haz clic en el ePoint destino de otro componente" onClick={() => epEp(ctx.ep)}>Restringir ePoint origen → ePoint destino…</button>
       <button title="Encadenar tubos, conductos, codos, tes… desde esta boca, restringidos por ePoints" onClick={() => { close(); const F = ctx.ep && epFrame(ctx.ep.occ, ctx.ep.id); if (!F) return; useStore.setState({ createRecursive: true, createCat: /^(Tubo|Cara brida|Cara portabridas)/.test(F.e.name) ? 'mech' : 'hvac', createTarget: { occ: F.o.id, ref: epRef(F.e, F.o.id), ep: F.e.id, epKind: F.e.kind, label: F.name, pW: [F.P.x, F.P.y, F.P.z], nW: [F.D.x, F.D.y, F.D.z] }, dialog: { kind: 'createcomp' } }); }}>Añadir desde aquí…</button>
+      <button title="Tramos rectos y codos de 90° hasta un punto (X, Y, Z) o hasta otra boca, con las longitudes calculadas" onClick={() => { close(); if (ctx.ep) s.open({ kind: 'routeto', occ: ctx.ep.occ, ep: ctx.ep.id } as never); }}>Tender hasta…</button>
     </div>
   );
   return (
@@ -1192,6 +1199,14 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       {orig.map((o) => <button key={o.key} onClick={() => start(isAxis ? 'mate' : 'flush', {}, { ref: o.ref, label: `Ensamblaje · ${o.label}` })}>{isAxis ? 'Coaxial con' : 'Al ras con'} {o.label} del ensamblaje</button>)}
       {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}
       {isAxis && (s.asm.workAxes ?? []).map((w) => <button key={w.id} onClick={() => start('mate', {}, { ref: workAxisRef(w), label: w.name })}>Coaxial con {w.name}</button>)}
+      {occ && isStraightDuct(occ.id) && (() => { const d0 = Math.round(distAlong(occ.id, ctx.pW)); const cf = segCfg(); return (<><hr />
+        <div className="ctx-sub">Tramo recto · punto a {d0} mm de su entrada</div>
+        <button title={`Corta el conducto en el punto pulsado: dos tramos con bridas ${cf.joint === 'tdc' ? 'TDC' : 'de marco angular'} en el corte y junta de ${cf.g} mm`} onClick={() => { close(); cutDuct(occ.id, d0); }}>Cortar aquí (bridas + junta)</button>
+        <button onClick={() => { close(); const v = prompt('Cortar a (mm desde la entrada del tramo)', String(d0)); const d = v ? parseFloat(v.replace(',', '.')) : NaN; if (isFinite(d)) cutDuct(occ.id, d); }}>Cortar a…</button>
+        <button title="Parte el tramo en el punto pulsado e inserta una compuerta, silenciador, cortafuegos, transición… elegida en el centro de contenido" onClick={() => { close(); const T = asmActions.inlineTarget(occ.id, d0); if (T) { useStore.setState({ inlineAt: { occ: occ.id, d: d0 }, createTarget: T, createCat: 'hvac' }); s.open({ kind: 'createcomp' }); } }}>Insertar en línea aquí…</button>
+        <button title={`Partes iguales de ≤ ${cf.maxL} mm y ≤ ${cf.maxKg} kg con bridas y juntas (Archivo › Opciones › Tramos)`} onClick={() => { close(); segmentDuct(occ.id); }}>Dividir en tramos (≤ {cf.maxL} mm / {cf.maxKg} kg)</button>
+        <button onClick={() => { close(); const sp = (s.docData(occ.part) as { hvacSpec?: { L: number } }).hvacSpec; const v = prompt('Longitud del tramo (mm); lo de detrás se recoloca', String(sp?.L ?? '')); const L = v ? parseFloat(v.replace(',', '.')) : NaN; if (isFinite(L)) setDuctLength(occ.id, L); }}>Longitud del tramo…</button>
+      </>); })()}
       {occ && s.docs.find((d) => d.id === occ.part)?.kind === 'part' && (<><hr />
         <button title="Doble clic" onClick={() => { close(); asmActions.editComponent(occ.id); }}>Editar componente…</button>
         {asmActions.isSheet(occ.part) && <button title="Desarrollo de la chapa con líneas de pliegue, cotas y DXF para corte" onClick={() => { close(); s.open({ kind: 'flat', pid: occ.part } as never); }}>Desarrollo de chapa…</button>}</>)}
@@ -1203,6 +1218,13 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
           {[15, 30, 45, 60, 75, 90].map((a) => <button key={a} onClick={() => { close(); rot(a); }}>+{a}°</button>)}
           {[15, 30, 45, 60, 75, 90].map((a) => <button key={-a} onClick={() => { close(); rot(-a); }}>−{a}°</button>)}
           <button className="wide" onClick={() => { close(); const v = prompt(`Ángulo de giro sobre ${rotAx === 'ep' ? 'el eje del ePoint' : `el eje ${rotAx}`} (grados; negativo = sentido contrario)`, '20'); const d = v ? parseFloat(v.replace(',', '.').replace('−', '-')) : NaN; if (isFinite(d) && d) rot(d); }}>Ángulo personalizado…</button>
+        </div>)}
+        <button className={brOpen ? 'on' : ''} title="El componente y todo lo que arrastra detrás" onClick={() => setBrOpen(!brOpen)}>Ramal {brOpen ? '▾' : '▸'}</button>
+        {brOpen && (<div className="ctx-indent">
+          <button onClick={() => { close(); const g = epGroup(occ.id); useStore.setState({ selItem: occ.id, selGroup: g }); s.notify(`Ramal: ${g.length} componente(s) resaltados`); }}>Seleccionar ramal</button>
+          <button onClick={() => { close(); void import('./hvacops').then((m) => m.changeSectionPrompt(occ.id)); }}>Cambiar sección del ramal…</button>
+          <button onClick={() => { close(); const v = prompt('Copiar el ramal desplazado (mm): dx, dy, dz', '0, 1000, 0'); if (v) { const d = v.split(/[;,\s]+/).map((x) => parseFloat(x.replace(',', '.')) || 0); void import('./hvacops').then((m) => m.copyBranch(occ.id, [d[0] ?? 0, d[1] ?? 0, d[2] ?? 0])); } }}>Copiar ramal…</button>
+          <button onClick={() => { close(); const g = epGroup(occ.id); if (confirm(`¿Borrar el ramal (${g.length} componentes)?`)) void import('./hvacops').then((m) => m.deleteBranch(occ.id)); }}>Borrar ramal</button>
         </div>)}
         <button title="Tríada X, Y, Z en el ePoint: doble clic en una flecha = mover (mm), doble clic en un anillo = girar (°); negativo = sentido contrario" onClick={() => { close(); useStore.setState({ selItem: occ.id, epMove: occ.id }); s.setTool('epMove'); }}>Mover / girar con la tríada…</button>
         {foranJoint(occ.id) && (<>

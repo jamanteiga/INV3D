@@ -8,6 +8,10 @@ export const IDENTITY: Xform = { pos: [0, 0, 0], quat: [0, 0, 0, 1] };
 
 export interface Occurrence {
   id: string; name: string;
+  /** Sistema (impulsión, retorno, línea de tubería…) para colores, listas y cálculo */
+  system?: string;
+  /** Caudal de diseño (m³/h) en terminales HVAC */
+  flow?: number;
   /** id del documento de pieza (en el espacio de trabajo / embebido) */
   part: string;
   xf: Xform;

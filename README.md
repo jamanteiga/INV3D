@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.50
+## Versión 0.51
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,14 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.51** — tendido de conductos
+- **Cortar ducto** (clic derecho sobre un tramo recto › *Cortar aquí (bridas + junta)* en el punto pulsado, o *Cortar a…* con la distancia desde su entrada): dos tramos con **bridas TDC** (o marco angular) **solo en el corte** y una **junta** EPDM (4 mm) entre ellas; lo de detrás no se mueve. Nueva pieza *Junta de brida* en el centro de contenido HVAC.
+- **Tramos de longitud o peso máximos** (por defecto **1500 mm / 80 kg**; Archivo › Opciones de la aplicación › *Tramos rectos de conducto*: longitudes, unión TDC o marco angular, espesor de junta): al insertar un recto más largo o pesado se **divide solo** en partes iguales con bridas y juntas; *Dividir en tramos* en el clic derecho de un tramo y **HVAC › Tendido › Dividir tramos** para todo el ensamblaje.
+- **Insertar en línea** (clic derecho sobre un tramo › *Insertar en línea aquí…*): se elige compuerta, cortafuegos, silenciador, manguito, transición… en el centro de contenido (con la sección del tramo) y el tramo se parte solo a ambos lados, todo unido.
+- **Tender hasta…** (clic derecho sobre una boca libre): tramos rectos y **codos de 90° ortogonales** hasta un punto X, Y, Z o hasta **otra boca** (*Elegir boca de destino…*, se une a ella); las longitudes descuentan lo que ocupa cada codo y los rectos largos se dividen según los máximos.
+- **Longitud del tramo…** (clic derecho): cambia la longitud de un recto y lo de detrás se recoloca.
+- **Ramal** (clic derecho › *Ramal ▸*: el componente y lo que arrastra detrás): *Seleccionar ramal* (resaltado), **Cambiar sección del ramal…** (todas las piezas con esa sección, codos con W/H cambiados incluidos, y **reducción de 300 mm** automática en la unión con la pieza anterior), *Copiar ramal…* desplazado y *Borrar ramal*.
 
 **Novedades 0.50**
 - **Doble clic sobre un componente = editarlo**: los conductos y accesorios HVAC y la tubería ASME/EN vuelven a abrir **su generador con sus valores** (sección, longitud, ángulo, chapa, uniones, norma, tamaño, schedule…); *Actualizar pieza* la regenera en su sitio, manteniendo sus uniones por ePoints (lo que cuelga detrás se recoloca) y cambia el nombre del componente según la nueva designación. Las demás piezas abren sus propiedades y cotas editables. También en el clic derecho › *Editar componente…*.

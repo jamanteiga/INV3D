@@ -100,6 +100,7 @@ export type Dialog =
   | { kind: AsmDialogKind; editId?: string; draft: any; step?: number }
   | { kind: 'newdoc'; start: true }
   | { kind: 'firstplace'; pid: string; extras?: string[] }
+  | { kind: 'routeto'; occ: string; ep: string }
   | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' | 'ucs' | 'simplify' | 'meshfit' }
   | { kind: 'fem'; shape?: boolean }
   | { kind: 'pmi'; pmiKind: import('./pmi').PmiKind; editId?: string }
@@ -196,6 +197,12 @@ export interface State {
   freeRot: string | null;
   /** Foran: pieza a la que se busca otra boca de destino (Cambiar boca) */
   reattach: string | null;
+  /** Insertar en línea: tramo y distancia desde su entrada */
+  inlineAt: { occ: string; d: number } | null;
+  /** Tender hasta: boca de salida, mientras se elige la de destino */
+  routePick: { occ: string; ep: string } | null;
+  /** Ramal seleccionado (componentes resaltados) */
+  selGroup: string[] | null;
   /** Mover desde el ePoint: componente con la tríada */
   epMove: string | null;
   createTarget: { occ: string; ref: import('./asm').FaceRef; ep?: string; epKind?: string; label: string; pW: V3; nW: V3 } | null;
@@ -373,7 +380,7 @@ export const useStore = create<State>((set, get) => ({
   fileName: 'Pieza1.i3p',
   dirty: false,
   mode: 'model', sketchId: null, tool: null,
-  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, createCat: null, createRecursive: (() => { try { return localStorage.getItem('inv3d.recursive') !== '0'; } catch { return true; } })(), freeRot: null, createTarget: null, reattach: null, epMove: null, asmRotate: false, aiOpen: false, flatView: false, meshSel: null, analysis: null, studio: false, picks: [], selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
+  selFeature: null, selEntity: null, selItem: null, selEntities: [], selCon: null, conType: 'coincident', showCons: true, skStyle: 'normal', skInfo: null, asmDof: null, interf: null, toolParam: '', placing: null, asmOrigins: [], epConnect: null, createCat: null, createRecursive: (() => { try { return localStorage.getItem('inv3d.recursive') !== '0'; } catch { return true; } })(), freeRot: null, createTarget: null, reattach: null, inlineAt: null, routePick: null, selGroup: null, epMove: null, asmRotate: false, aiOpen: false, flatView: false, meshSel: null, analysis: null, studio: false, picks: [], selFacePlane: null, pendingFeature: null, ctxEdit: null, collide: false, memberUtil: null, fem: null, epPick: null, projSrc: null, epMode: 'facec', epEdges: [],
   dialog: null,
   result: null, preview: null, pickBase: null, asmResult: null, explodeT: 0, busy: false,
   oc: 'loading', ocProgress: 0, ocError: '',

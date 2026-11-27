@@ -1,4 +1,5 @@
 import { restoreDlg } from './dragdlg';
+import { epFrame as epFrameOf } from './hvacroute';
 import FemPanel from './FemPanel';
 import * as PX from './Panels2';
 import TbTplDialog, { SheetTplDialog } from './TbDialog';
@@ -1676,6 +1677,26 @@ function PlaceDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Tender hasta un punto o una boca */
+function RouteToDialog({ occ, ep, onClose }: { occ: string; ep: string; onClose: () => void }) {
+  const s = useStore();
+  const F = epFrameOf(occ, ep);
+  const def = F ? [F.P.x + F.D.x * 2000, F.P.y + F.D.y * 2000, F.P.z + F.D.z * 2000].map((v) => String(Math.round(v))) : ['0', '0', '0'];
+  const [xyz, setXyz] = useState<string[]>(def);
+  const go = () => { const p = xyz.map((v) => parseFloat(v.replace(',', '.')) || 0) as [number, number, number]; onClose(); void import('./routeto').then((m) => m.routeTo(occ, ep, { point: p })); };
+  return (
+    <Modal title="Tender hasta…" onClose={onClose}>
+      <p className="phelp">Desde <b>{F?.name ?? ep}</b> en ({F ? [F.P.x, F.P.y, F.P.z].map((v) => Math.round(v)).join(', ') : '?'}) mirando a {F ? ['X', 'Y', 'Z'][[Math.abs(F.D.x), Math.abs(F.D.y), Math.abs(F.D.z)].indexOf(Math.max(Math.abs(F.D.x), Math.abs(F.D.y), Math.abs(F.D.z)))] : '?'}. Se generan tramos rectos y codos de 90° ortogonales; las longitudes descuentan lo que ocupa cada codo y los tramos largos se dividen según Opciones (máx. {s.settings.segMaxL ?? 1500} mm / {s.settings.segMaxKg ?? 80} kg).</p>
+      <div className="plabel">Punto de destino (mm)</div>
+      <div className="fp-xyz">{(['X', 'Y', 'Z'] as const).map((L, i) => <label key={L}>{L} <input value={xyz[i]} onChange={(e) => { const v = [...xyz]; v[i] = e.target.value; setXyz(v); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') go(); }} /></label>)}</div>
+      <div className="modal-btns">
+        <button className="btn" title="Haz clic en una boca libre de otro componente: el tendido llega a ella y se une" onClick={() => { onClose(); useStore.setState({ routePick: { occ, ep }, createTarget: null }); s.setTool('asmCreatePick'); s.notify('Tender hasta: haz clic en la boca (ePoint) de destino · Esc cancela'); }}>Elegir boca de destino…</button>
+        <span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" onClick={go}>Tender</button>
+      </div>
+    </Modal>
+  );
+}
+
 /** Primer componente de un ensamblaje vacío: ePoint de la pieza que se conecta al punto de destino, coordenadas,
  *  orientación (hacia dónde mira ese ePoint) y giro sobre su eje. */
 function FirstPlaceStep({ pid, extras = [], onBack, onClose }: { pid: string; extras?: string[]; onBack?: () => void; onClose: () => void }) {
@@ -2111,6 +2132,12 @@ function OptionsDialog({ onClose }: { onClose: () => void }) {
         <label className="row-l">Inserción de piezas en ensamblajes <select value={st.insertMode ?? 'foran'} onChange={(e) => setS({ insertMode: e.target.value as 'foran' | 'inventor' })}>
           <option value="foran">Espacial: unida por ePoints a la boca libre de la pieza seleccionada o de la última</option>
           <option value="inventor">Paramétrica: sigue al cursor y se restringe después</option></select></label>
+        <div className="plabel">Tramos rectos de conducto</div>
+        <label className="row-l">Longitud máxima (mm) <input type="number" min={200} step={50} value={st.segMaxL ?? 1500} onChange={(e) => setS({ segMaxL: Number(e.target.value) || 1500 })} style={{ width: 90 }} />
+          Peso máximo (kg) <input type="number" min={5} step={5} value={st.segMaxKg ?? 80} onChange={(e) => setS({ segMaxKg: Number(e.target.value) || 80 })} style={{ width: 70 }} /></label>
+        <label className="row-l">Unión al cortar o dividir <select value={st.segJoint ?? 'tdc'} onChange={(e) => setS({ segJoint: e.target.value as 'tdc' | 'angle' })}><option value="tdc">Brida TDC</option><option value="angle">Marco angular L30×3</option></select>
+          Junta (mm) <input type="number" min={1} max={15} step={1} value={st.segGasket ?? 4} onChange={(e) => setS({ segGasket: Number(e.target.value) || 4 })} style={{ width: 55 }} /></label>
+        <label className="check"><input type="checkbox" checked={st.segAuto ?? true} onChange={(e) => setS({ segAuto: e.target.checked })} />Dividir solos los tramos que pasen de esos máximos al insertarlos</label>
         <label className="check"><input type="checkbox" checked={st.autosave} onChange={(e) => setS({ autosave: e.target.checked })} />Autoguardar la sesión en el navegador (cada cambio)</label>
         <label className="check"><input type="checkbox" checked={st.autosaveFolder} onChange={(e) => setS({ autosaveFolder: e.target.checked })} />Autoguardar cada
           <input type="number" min={0.5} step={0.5} value={st.autosaveMin ?? 2} disabled={!st.autosaveFolder} onChange={(e) => setS({ autosaveMin: Math.max(0.5, parseFloat(e.target.value) || 2) })} onKeyDown={(e) => e.stopPropagation()} style={{ width: 56, margin: '0 6px' }} />
@@ -3403,6 +3430,7 @@ export function Modals() {
     case 'share': return <PX.ShareDialog onClose={close} />;
     case 'meshfit': return <MeshFitDialog onClose={close} />;
     case 'flat': return <FlatDialog key={(d as { pid?: string }).pid ?? ''} pid={(d as { pid?: string }).pid} onClose={close} />;
+    case 'routeto': return <RouteToDialog key={(d as { occ: string }).occ + (d as { ep: string }).ep} occ={(d as { occ: string }).occ} ep={(d as { ep: string }).ep} onClose={close} />;
     case 'firstplace': return <FirstPlaceStep key={(d as { pid: string }).pid} pid={(d as { pid: string }).pid} extras={(d as { extras?: string[] }).extras} onClose={close} />;
     case 'newdoc': return <NewDocDialog key={(d as { start?: boolean }).start ? 's' : 'n'} start={(d as { start?: boolean }).start} onClose={close} />;
     case 'drwview': return <DrwViewDialog onClose={close} />;

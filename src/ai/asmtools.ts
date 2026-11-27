@@ -133,23 +133,13 @@ export async function execAsmTool(name: string, args: Record<string, unknown>): 
     if (name === 'insert_open_part') {
       const d = s.docs.find((x) => x.fileName === args.fileName || x.fileName === `${args.fileName}.i3p`); if (!d) return { error: `No está abierta: ${args.fileName}` }; pid = d.id;
     } else if (name === 'insert_hvac') {
-      const sp = parseJ<Partial<HvacSpec>>(args.spec);
-      const m = F?.m;
-      const spec: HvacSpec = { std: 'EN', ends: 'none', material: 'Acero galvanizado DX51D+Z275', L: 1200, angle: 90, elbowType: 'radius', W: m?.W ?? 600, H: m?.H ?? 400, D: m?.D ?? 400, shape: m?.shape ?? 'rect', ...sp } as HvacSpec;
-      if (!sp.shape && m) spec.shape = m.shape;
-      // codos y derivaciones rectangulares hacia el lado H: W y H cambiados para que las bocas casen
-      if (F && (spec.kind === 'elbow' || spec.kind === 'branch') && spec.shape !== 'round' && R.turnNeedsSwap(F, R.turnOf(F)) && sp.W == null) { const w = spec.W; spec.W = spec.H; spec.H = w; }
-      const doc = makeHvacPart(spec);
+      const doc = hvacDocFor(parseJ<Partial<HvacSpec>>(args.spec), F);
+
       if (!asm) { s.addDocument('part', doc, fileOf(doc)); return { ok: true, part: doc.iProperties.description }; }
       pid = addPart(doc);
     } else {
-      const sp = parseJ<Partial<PipeSpec>>(args.spec);
-      const tp = F ? ((S().docData(S().asm.occurrences.find((o) => o.id === F.o.id)!.part) as PartDoc & { pipeSpec?: PipeSpec }).pipeSpec) : undefined;
-      const norm = sp.norm ?? tp?.norm ?? 'ASME';
-      const use = sp.kind === 'pipe' ? 'pipe' : sp.kind === 'flange' ? 'flange' : 'fitting';
-      const defMat = PIPE_MATERIALS.find((x) => x.std === norm && (x.use as string[]).includes(use))?.name ?? (norm === 'ASME' ? 'SA-106 Gr. B' : 'P235GH (EN 10216-2)');
-      const spec = { norm, size: tp?.size ?? (norm === 'ASME' ? '4' : '100'), sch: tp?.sch, wall: tp?.wall, length: 1000, angle: 90, elbow: 'LR', ...(sp.kind === 'flange' && tp?.kind === 'flange' ? { flStd: tp.flStd, rating: tp.rating, flType: tp.flType } : {}), ...(sp.kind === 'flange' && !sp.flStd && !tp?.flStd ? { flStd: norm === 'ASME' ? 'B16.5' : 'EN1092', rating: norm === 'ASME' ? 150 : 16, flType: norm === 'ASME' ? 'WN' : '11' } : {}), ...sp, material: sp.material ?? (tp?.kind === sp.kind ? tp?.material : undefined) ?? defMat } as PipeSpec;
-      const doc = makePipePart(spec);
+      const doc = pipeDocFor(parseJ<Partial<PipeSpec>>(args.spec), F);
+
       if (!asm) { s.addDocument('part', doc, fileOf(doc)); return { ok: true, part: doc.iProperties.description }; }
       pid = addPart(doc);
     }
@@ -166,6 +156,26 @@ export async function execAsmTool(name: string, args: Record<string, unknown>): 
   }
   return { error: `Herramienta desconocida: ${name}` };
 }
+
+type Frame = NonNullable<ReturnType<typeof R.epFrame>>;
+/** Pieza HVAC con los valores por defecto y la sección de la boca de destino (codos/derivaciones al lado H: W y H cambiados) */
+export function hvacDocFor(sp: Partial<HvacSpec>, F: Frame | null) {
+  const m = F?.m;
+  const spec: HvacSpec = { std: 'EN', ends: 'none', material: 'Acero galvanizado DX51D+Z275', L: 1200, angle: 90, elbowType: 'radius', W: m?.W ?? 600, H: m?.H ?? 400, D: m?.D ?? 400, shape: m?.shape ?? 'rect', ...sp } as HvacSpec;
+  if (!sp.shape && m) spec.shape = m.shape;
+  if (F && (spec.kind === 'elbow' || spec.kind === 'branch') && spec.shape !== 'round' && R.turnNeedsSwap(F, R.turnOf(F)) && sp.W == null) { const w = spec.W; spec.W = spec.H; spec.H = w; }
+  return makeHvacPart(spec);
+}
+/** Pieza de tubería con norma, tamaño, schedule y material de la pieza de destino si no se indican */
+export function pipeDocFor(sp: Partial<PipeSpec>, F: Frame | null) {
+  const tp = F ? ((S().docData(S().asm.occurrences.find((o) => o.id === F.o.id)!.part) as PartDoc & { pipeSpec?: PipeSpec }).pipeSpec) : undefined;
+  const norm = sp.norm ?? tp?.norm ?? 'ASME';
+  const use = sp.kind === 'pipe' ? 'pipe' : sp.kind === 'flange' ? 'flange' : 'fitting';
+  const defMat = PIPE_MATERIALS.find((x) => x.std === norm && (x.use as string[]).includes(use))?.name ?? (norm === 'ASME' ? 'SA-106 Gr. B' : 'P235GH (EN 10216-2)');
+  const spec = { norm, size: tp?.size ?? (norm === 'ASME' ? '4' : '100'), sch: tp?.sch, wall: tp?.wall, length: 1000, angle: 90, elbow: 'LR', ...(sp.kind === 'flange' && tp?.kind === 'flange' ? { flStd: tp.flStd, rating: tp.rating, flType: tp.flType } : {}), ...(sp.kind === 'flange' && !sp.flStd && !tp?.flStd ? { flStd: norm === 'ASME' ? 'B16.5' : 'EN1092', rating: norm === 'ASME' ? 150 : 16, flType: norm === 'ASME' ? 'WN' : '11' } : {}), ...sp, material: sp.material ?? (tp?.kind === sp.kind ? tp?.material : undefined) ?? defMat } as PipeSpec;
+  return makePipePart(spec);
+}
+export { setTurn };
 
 /** Revisión rápida del ensamblaje */
 export function checkAssembly() {
