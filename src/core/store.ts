@@ -101,7 +101,7 @@ export type Dialog =
   | { kind: 'newdoc'; start: true }
   | { kind: 'firstplace'; pid: string; extras?: string[] }
   | { kind: 'routeto'; occ: string; ep: string }
-  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' | 'ucs' | 'simplify' | 'meshfit' }
+  | { kind: 'params' | 'iprops' | 'project' | 'about' | 'shortcuts' | 'place' | 'bom' | 'sheetstyle' | 'flat' | 'asmcalc' | 'newdoc' | 'ilogic' | 'drwview' | 'content' | 'cpattern' | 'interf' | 'spacemouse' | 'drive' | 'replace' | 'viewreps' | 'mstates' | 'ductnet' | 'pipenet' | 'pressure' | 'vessel' | 'framecalc' | 'jointcalc' | 'gen' | 'tbtpl' | 'ifc' | 'epoint' | 'drwsection' | 'drwdetail' | 'options' | 'folder' | 'drwstyle' | 'retrieve' | 'motion' | 'ipart' | 'ifeature' | 'osnap' | 'projsk' | 'sheettpl' | 'ucs' | 'simplify' | 'meshfit' }
   | { kind: 'fem'; shape?: boolean }
   | { kind: 'pmi'; pmiKind: import('./pmi').PmiKind; editId?: string }
   | { kind: 'tolstack' | 'toladvisor' | 'promote' | 'drf' | 'analysis' | 'region' | 'limits' | 'material' | 'appearance' | 'docset' | 'news' | 'links' | 'addins' | 'macros' | 'find' | 'purge' | 'insertobj' | 'exportobj' | 'structshape' | 'cloud' | 'rules' | 'publish' | 'studio' | 'mold' | 'bim' | 'print3d' | 'share' }

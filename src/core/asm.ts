@@ -12,6 +12,8 @@ export interface Occurrence {
   system?: string;
   /** Caudal de diseño (m³/h) en terminales HVAC */
   flow?: number;
+  /** Generado automáticamente (soportes, aislamiento): se rehace al repetir la orden */
+  tag?: 'support' | 'insulation';
   /** id del documento de pieza (en el espacio de trabajo / embebido) */
   part: string;
   xf: Xform;

@@ -396,6 +396,11 @@ export const asmActions = {
     });
     useStore.setState({ selItem: occ, dialog: null, tool: null });
     // recursivo: la siguiente boca libre de la pieza nueva pasa a ser la referencia y se vuelve a abrir el centro de contenido
+    // el sistema (impulsión, retorno…) pasa de la pieza anterior a la nueva
+    const sysUp = S().asm.occurrences.find((o) => o.id === T.occ)?.system;
+    if (sysUp) S().commitAsm((a) => { const o = a.occurrences.find((x) => x.id === occ); if (o) o.system = sysUp; });
+    // holguras: aviso si la pieza nueva queda demasiado cerca de otra no unida a ella
+    if (S().settings.clearCheck ?? true) setTimeout(() => void import('./asmcalc').then((m) => { const c = m.clearanceCheck(occ, S().settings.clearMin ?? 25); if (c.length) S().notify(`Holgura: ${c.slice(0, 4).map((x) => `${x.name} (${x.gap < 0.5 ? 'colisión' : `${x.gap.toFixed(0)} mm`})`).join(', ')}${c.length > 4 ? '…' : ''} · mínimo ${S().settings.clearMin ?? 25} mm`, 'error'); }), 300);
     // tramos rectos largos o pesados: se dividen solos (bridas + junta) según Opciones › Tramos
     let occ2 = occ;
     if (segCfg().auto && isStraightDuct(occ)) { const ids = segmentDuct(occ, true); if (ids) occ2 = ids[ids.length - 1]; }

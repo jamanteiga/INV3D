@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.51
+## Versión 0.52
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,13 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.52** — ingeniería sobre el ensamblaje (HVAC › Ingeniería)
+- **Calcular**: caudales desde los terminales (clic derecho › *Caudal de diseño…*) sumados hasta el origen (UTA/fancoil o el componente fijo), **velocidad, pérdida por fricción (Darcy-Weisbach + Colebrook) y singular por pieza**, **circuito índice**, equilibrado de terminales y **ventilador** (+10 %), con avisos de velocidad y pérdida unitaria máximas (8 m/s y 1,5 Pa/m por defecto) y exportación CSV. Se recalcula al cambiar el ensamblaje. **Colores en el 3D**: por material, **por velocidad** o **por sistema**.
+- **Soportes** automáticos cada X mm (2500 por defecto) en los tramos rectos horizontales: trapecio con carril 41×41 y 2 varillas (rectangular/oval) o abrazadera (circular). **Aislamiento** de los tramos rectos con el espesor elegido (mínimos RITE IT 1.2.4.2.1 indicados: 30/20 mm interior, 50/30 mm exterior para frío/calor). Ambos se rehacen al repetir la orden; también por ramal (clic derecho › *Ramal ▸ Soportes / Aislar ramal*).
+- **Holguras al insertar** (botón *Holguras* y Archivo › Opciones): aviso si la pieza nueva queda a menos de 25 mm, o choca, con otra que no esté unida a ella.
+- **Sistemas** (clic derecho › *Ramal ▸ Asignar sistema…*: impulsión, retorno, extracción…): las piezas nuevas heredan el sistema de la anterior; colores por sistema y **lista de materiales por sistema** (Lista de materiales › Vista › *Por sistema*).
+- Materiales nuevos con su densidad: lana mineral 40 y 70 kg/m³, espuma elastomérica y junta EPDM.
 
 **Novedades 0.51** — tendido de conductos
 - **Cortar ducto** (clic derecho sobre un tramo recto › *Cortar aquí (bridas + junta)* en el punto pulsado, o *Cortar a…* con la distancia desde su entrada): dos tramos con **bridas TDC** (o marco angular) **solo en el corte** y una **junta** EPDM (4 mm) entre ellas; lo de detrás no se mueve. Nueva pieza *Junta de brida* en el centro de contenido HVAC.

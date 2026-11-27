@@ -326,6 +326,10 @@ export function docParams(doc: PartDoc): Param[] {
 
 export const MATERIALS: { name: string; density: number; color: string }[] = [
   { name: 'Acero S275JR', density: 7850, color: '#b9bec6' },
+  { name: 'Lana mineral 40 kg/m³', density: 40, color: '#e9d98c' },
+  { name: 'Lana mineral 70 kg/m³ (panel)', density: 70, color: '#e3cf72' },
+  { name: 'Espuma elastomérica', density: 60, color: '#3a3d42' },
+  { name: 'Junta EPDM', density: 1200, color: '#222428' },
   { name: 'Acero S355J2', density: 7850, color: '#b4b9c1' },
   { name: 'Acero inoxidable AISI 316L', density: 8000, color: '#d3d7dc' },
   { name: 'Aluminio 6061-T6', density: 2700, color: '#d9dde2' },

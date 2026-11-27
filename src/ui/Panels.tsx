@@ -17,7 +17,8 @@ import { PipeNetDialog, PressureDialog, VesselDialog } from './PipeDialogs';
 import { DuctNetDialog } from './DuctNetDialog';
 import { normalizeAsm } from '../core/subasm';
 import { docGetter, surfaceIds } from '../core/store';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense, type ReactNode } from 'react';
+const AsmCalcDialog = lazy(() => import('./AsmCalcDialog'));
 import { useStore, activeSketch } from '../core/store';
 import { evaluate, resolveParams, makeEval, fmt, isValidName } from '../core/expr';
 import {
@@ -3046,9 +3047,22 @@ function ModelStateDialog({ onClose }: { onClose: () => void }) {
 
 function BomDialog({ onClose }: { onClose: () => void }) {
   const s = useStore();
-  const [view, setView] = useState<'struct' | 'parts'>('struct');
+  const [view, setView] = useState<'struct' | 'parts' | 'system'>('struct');
   const all = bomRows(s, s.asm);
-  const rows = view === 'parts' ? bomPartsOnly(all) : all;
+  const hasSys = s.asm.occurrences.some((o) => o.system);
+  // por sistema: cabecera por sistema y, debajo, sus piezas con su cantidad
+  const bySystem = (): BomRow[] => {
+    const parts = bomPartsOnly(all).filter((r) => r.kind === 'part');
+    const pnOf = (pid: string) => { const d = s.docData(pid) as PartDoc | null; return d?.iProperties.partNumber || s.docs.find((x) => x.id === pid)?.fileName || 'Pieza'; };
+    const out: BomRow[] = []; const sys = [...new Set(s.asm.occurrences.map((o) => o.system ?? ''))].sort((a, b) => (a ? a.localeCompare(b) : 1));
+    for (const name of sys) {
+      const cnt = new Map<string, number>(); for (const o of s.asm.occurrences) if (!o.suppressed && (o.system ?? '') === name) cnt.set(pnOf(o.part), (cnt.get(pnOf(o.part)) ?? 0) + 1);
+      const items = [...cnt].map(([pn, q]) => { const r = parts.find((x) => x.pn === pn); return { kind: 'part' as const, qty: q, pn, desc: r?.desc ?? '', material: r?.material ?? '', mass: r ? r.mass / Math.max(1, r.qty) : 0, level: 1 }; });
+      out.push({ kind: 'asm', qty: 1, pn: name || 'Sin sistema', desc: `${items.reduce((a, r) => a + r.qty, 0)} componentes`, material: '', mass: items.reduce((a, r) => a + r.mass * r.qty, 0), level: 0 }, ...items);
+    }
+    return out;
+  };
+  const rows = view === 'parts' ? bomPartsOnly(all) : view === 'system' ? bySystem() : all;
   const total = bomTotal(all);
   const cut = rows.filter((r) => r.kind === 'member');
   const unitMass = (r: BomRow) => (r.kind === 'part' || r.kind === 'asm' ? r.mass : r.qty ? r.mass / r.qty : r.mass);
@@ -3057,17 +3071,17 @@ function BomDialog({ onClose }: { onClose: () => void }) {
   const toXls = () => {
     const head = ['Pos.', 'Nivel', 'Cant.', 'Nº de pieza / designación', 'Descripción', 'Material', 'Masa unit. (kg)', 'Masa total (kg)', 'Longitud (mm)'];
     const data = rows.map((r, i) => [posOf(r, i), r.level ?? '', r.qty, `${'   '.repeat(r.level ?? 0)}${r.pn}`, r.desc, r.material, r.mass ? +unitMass(r).toFixed(3) : '', r.mass ? +totMass(r).toFixed(3) : '', r.length ? +r.length.toFixed(1) : '']);
-    const sheets: Sheet[] = [{ name: view === 'parts' ? 'Solo piezas' : 'Estructurada', rows: [head, ...data, ['', '', '', 'TOTAL', '', '', '', +total.toFixed(2), '']], bold: [0, data.length + 1] }];
+    const sheets: Sheet[] = [{ name: view === 'parts' ? 'Solo piezas' : view === 'system' ? 'Por sistema' : 'Estructurada', rows: [head, ...data, ['', '', '', 'TOTAL', '', '', '', +total.toFixed(2), '']], bold: [0, data.length + 1] }];
     if (cut.length) sheets.push({ name: 'Lista de corte', rows: [['Perfil', 'Cant.', 'Longitud (mm)', 'Corte', 'Material', 'Masa (kg)'], ...cut.map((r) => [r.pn, r.qty, r.length ?? '', r.desc.replace(/^L = [^·]*·?\s*/, ''), r.material, +r.mass.toFixed(2)])] });
     downloadXlsx(sheets, `${s.asm.iProperties.partNumber}-LM`);
   };
   return (
     <Modal title={`Lista de materiales — ${s.asm.iProperties.partNumber}`} onClose={onClose} xwide>
-      <Row label="Vista"><Seg value={view} onChange={setView} options={[['struct', 'Estructurada (por niveles)'], ['parts', 'Solo piezas']]} /></Row>
+      <Row label="Vista"><Seg value={view} onChange={setView} options={hasSys ? [['struct', 'Estructurada (por niveles)'], ['parts', 'Solo piezas'], ['system', 'Por sistema']] : [['struct', 'Estructurada (por niveles)'], ['parts', 'Solo piezas']]} /></Row>
       <table className="ptable bom">
         <thead><tr><th>Pos.</th><th>Cant.</th><th>Nº de pieza / designación</th><th>Descripción</th><th>Material</th><th className="num">Masa (kg)</th></tr></thead>
         <tbody>{rows.map((r, i) => (
-          <tr key={i} className={`k-${r.kind}`}><td>{posOf(r, i)}</td><td>{r.qty}</td><td style={{ paddingLeft: 6 + 16 * (view === 'struct' ? r.level ?? 0 : 0) }}>{r.kind === 'asm' ? <b>{r.pn}</b> : r.pn}</td><td>{r.desc}</td><td>{r.material}</td><td className="num">{r.mass ? fmt(totMass(r), 2) : ''}</td></tr>
+          <tr key={i} className={`k-${r.kind}`}><td>{posOf(r, i)}</td><td>{r.qty}</td><td style={{ paddingLeft: 6 + 16 * (view !== 'parts' ? r.level ?? 0 : 0) }}>{r.kind === 'asm' ? <b>{r.pn}</b> : r.pn}</td><td>{r.desc}</td><td>{r.material}</td><td className="num">{r.mass ? fmt(totMass(r), 2) : ''}</td></tr>
         ))}</tbody>
         <tfoot><tr><td colSpan={5}>Total</td><td className="num"><b>{fmt(total, 2)}</b></td></tr></tfoot>
       </table>
@@ -3430,6 +3444,7 @@ export function Modals() {
     case 'share': return <PX.ShareDialog onClose={close} />;
     case 'meshfit': return <MeshFitDialog onClose={close} />;
     case 'flat': return <FlatDialog key={(d as { pid?: string }).pid ?? ''} pid={(d as { pid?: string }).pid} onClose={close} />;
+    case 'asmcalc': return <Suspense fallback={null}><AsmCalcDialog onClose={close} /></Suspense>;
     case 'routeto': return <RouteToDialog key={(d as { occ: string }).occ + (d as { ep: string }).ep} occ={(d as { occ: string }).occ} ep={(d as { ep: string }).ep} onClose={close} />;
     case 'firstplace': return <FirstPlaceStep key={(d as { pid: string }).pid} pid={(d as { pid: string }).pid} extras={(d as { extras?: string[] }).extras} onClose={close} />;
     case 'newdoc': return <NewDocDialog key={(d as { start?: boolean }).start ? 's' : 'n'} start={(d as { start?: boolean }).start} onClose={close} />;

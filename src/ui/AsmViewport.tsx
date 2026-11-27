@@ -15,6 +15,7 @@ import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolv
 import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, workAxisRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
 import { asmActions, foranJoint, epOfOcc, epGroup } from './actions';
 import { isStraightDuct, distAlong, cutDuct, segmentDuct, setDuctLength, segCfg } from './hvacops';
+import { calcColor, useAsmCalc, setSystem, addSupports, addInsulation, riteMin } from './asmcalc';
 import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
 import type { MeshData } from '../core/cadClient';
@@ -361,7 +362,7 @@ export default function AsmViewport() {
         for (const o of occs(s)) {
           if (o.suppressed || o.hidden) continue;
           const doc = s.docData(o.part) as PartDoc | null;
-          const color = MATERIALS.find((x) => x.name === doc?.iProperties.material)?.color ?? '#c3c8cf';
+          const color = calcColor(o.sub ?? o.id) ?? MATERIALS.find((x) => x.name === doc?.iProperties.material)?.color ?? '#c3c8cf';
           const xf = r.xf[o.id] ?? o.xf;
           if (s.placing && s.placing.occ === (o.sub ?? o.id)) {
             // copia pendiente (pieza o todas las piezas del subensamblaje) en un grupo que sigue al cursor
@@ -1054,6 +1055,7 @@ export default function AsmViewport() {
       V.request();
     };
     const unsubR = useRoute.subscribe(drawRoute);
+    const unsubCalc = useAsmCalc.subscribe((a, b) => { if (a.colorBy !== b.colorBy || (a.colorBy !== 'none' && a.calc !== b.calc)) build(useStore.getState()); });
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
       if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.selGroup !== p.selGroup || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud) {
@@ -1077,7 +1079,7 @@ export default function AsmViewport() {
       if (s.asmRotate !== p.asmRotate) { if (!s.asmRotate) { tempRot.clear(); rotWarned = false; buildRefs(s); } cvs.style.cursor = s.asmRotate ? 'grab' : 'default'; build(s); }
     });
     V.setView('home');
-    return () => { unsub(); unsubM(); unsubR(); tc.dispose(); V.dispose(); };
+    return () => { unsub(); unsubM(); unsubR(); unsubCalc(); tc.dispose(); V.dispose(); };
   }, []);
 
   const tool = useStore((s) => s.tool);
@@ -1209,6 +1211,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       </>); })()}
       {occ && s.docs.find((d) => d.id === occ.part)?.kind === 'part' && (<><hr />
         <button title="Doble clic" onClick={() => { close(); asmActions.editComponent(occ.id); }}>Editar componente…</button>
+        <button title="Caudal de diseño en este componente (terminales: rejillas, difusores…) para el cálculo del tendido" onClick={() => { close(); const v = prompt(`Caudal de diseño de ${occ.name} (m³/h; vacío = sin caudal)`, occ.flow ? String(occ.flow) : ''); if (v == null) return; const q = parseFloat(v.replace(',', '.')); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.flow = q > 0 ? q : undefined; }); }}>Caudal de diseño…{occ.flow ? ` (${occ.flow} m³/h)` : ''}</button>
         {asmActions.isSheet(occ.part) && <button title="Desarrollo de la chapa con líneas de pliegue, cotas y DXF para corte" onClick={() => { close(); s.open({ kind: 'flat', pid: occ.part } as never); }}>Desarrollo de chapa…</button>}</>)}
       {occ && (foranJoint(occ.id) || occ.grounded) && epOfOcc(occ.id) && (<><hr />
         <div className="ctx-sub">Desde el ePoint «{epOfOcc(occ.id)!.name}»{foranJoint(occ.id) ? ' (unión)' : ''}{foranJoint(occ.id)?.offset && parseFloat(foranJoint(occ.id)!.offset) ? ` · desplazada ${foranJoint(occ.id)!.offset}` : ''}</div>
@@ -1224,6 +1227,9 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
           <button onClick={() => { close(); const g = epGroup(occ.id); useStore.setState({ selItem: occ.id, selGroup: g }); s.notify(`Ramal: ${g.length} componente(s) resaltados`); }}>Seleccionar ramal</button>
           <button onClick={() => { close(); void import('./hvacops').then((m) => m.changeSectionPrompt(occ.id)); }}>Cambiar sección del ramal…</button>
           <button onClick={() => { close(); const v = prompt('Copiar el ramal desplazado (mm): dx, dy, dz', '0, 1000, 0'); if (v) { const d = v.split(/[;,\s]+/).map((x) => parseFloat(x.replace(',', '.')) || 0); void import('./hvacops').then((m) => m.copyBranch(occ.id, [d[0] ?? 0, d[1] ?? 0, d[2] ?? 0])); } }}>Copiar ramal…</button>
+          <button onClick={() => { close(); const v = prompt('Sistema del ramal (p. ej. Impulsión, Retorno, Extracción; vacío = quitar)', occ.system ?? 'Impulsión'); if (v != null) setSystem(occ.id, v.trim()); }}>Asignar sistema…</button>
+          <button onClick={() => { close(); const v = prompt('Soportes en el ramal: separación (mm)', '2500'); const d = v ? parseFloat(v.replace(',', '.')) : NaN; if (d > 200) addSupports(d, 500, epGroup(occ.id)); }}>Soportes en el ramal…</button>
+          <button onClick={() => { close(); const v = prompt(`Aislar el ramal: espesor (mm). Mínimo RITE (λ 0,04): interior ${riteMin('int', 'cold')} frío / ${riteMin('int', 'hot')} caliente · exterior ${riteMin('ext', 'cold')} / ${riteMin('ext', 'hot')}`, String(riteMin('int', 'cold'))); const e = v ? parseFloat(v.replace(',', '.')) : NaN; if (e > 0) addInsulation(e, epGroup(occ.id)); }}>Aislar ramal…</button>
           <button onClick={() => { close(); const g = epGroup(occ.id); if (confirm(`¿Borrar el ramal (${g.length} componentes)?`)) void import('./hvacops').then((m) => m.deleteBranch(occ.id)); }}>Borrar ramal</button>
         </div>)}
         <button title="Tríada X, Y, Z en el ePoint: doble clic en una flecha = mover (mm), doble clic en un anillo = girar (°); negativo = sentido contrario" onClick={() => { close(); useStore.setState({ selItem: occ.id, epMove: occ.id }); s.setTool('epMove'); }}>Mover / girar con la tríada…</button>
