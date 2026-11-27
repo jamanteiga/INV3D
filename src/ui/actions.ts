@@ -2,6 +2,7 @@ import { normalizeAsm } from '../core/subasm';
 import { recR, K_DEFAULT } from '../core/sheetrec';
 import { autoEPointJoints, partEPoints, epJoint, epRef, type EPoint } from '../core/epoints';
 import * as R from './hvacroute';
+import { hvacFlatPieces } from '../core/hvacflat';
 import { segCfg, isStraightDuct, segmentDuct, insertInline } from './hvacops';
 const partOf = (s: ReturnType<typeof useStore.getState>, id: string): PartDoc | null => { const d = s.docData(id) as PartDoc | null; return d && d.format === 'inv3d.part' ? d : null; };
 import { docGetter } from '../core/store';
@@ -725,7 +726,11 @@ export const asmActions = {
     s.commitAsm((a) => { a.joints.push(ensureLock(epJoint(a, occA, ea, occB, eb, uid))); });
   },
   /** ¿La pieza es de chapa (tiene desarrollo)? */
-  isSheet: (part: string) => { const pd = S().docData(part) as PartDoc | null; return !!pd && 'features' in pd && pd.features.some((f) => String(f.type).startsWith('sm_')); },
+  isSheet: (part: string) => {
+    const pd = S().docData(part) as (PartDoc & { hvacSpec?: import('../core/hvac').HvacSpec }) | null; if (!pd || !('features' in pd)) return false;
+    if (pd.hvacSpec && hvacFlatPieces(pd.hvacSpec)?.pieces.length) return true;
+    return pd.features.some((f) => String(f.type).startsWith('sm_'));
+  },
   /** Gira el componente y todo lo que arrastra detrás sobre su ePoint: el de su unión o, en el componente raíz (fijo), su ePoint de conexión */
   epRotate: (occ: string, deg: number) => {
     if (foranJoint(occ)) { asmActions.foranSpin(occ, deg); return; }

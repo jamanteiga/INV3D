@@ -1,4 +1,5 @@
 import { restoreDlg } from './dragdlg';
+import { hvacFlatResult } from '../core/hvacflat';
 import { epFrame as epFrameOf } from './hvacroute';
 import FemPanel from './FemPanel';
 import * as PX from './Panels2';
@@ -19,6 +20,7 @@ import { normalizeAsm } from '../core/subasm';
 import { docGetter, surfaceIds } from '../core/store';
 import { useEffect, useMemo, useState, lazy, Suspense, type ReactNode } from 'react';
 const AsmCalcDialog = lazy(() => import('./AsmCalcDialog'));
+const FabDialog = lazy(() => import('./FabDialog'));
 import { useStore, activeSketch } from '../core/store';
 import { evaluate, resolveParams, makeEval, fmt, isValidName } from '../core/expr';
 import {
@@ -3211,7 +3213,14 @@ function FlatDialog({ pid, onClose }: { pid?: string; onClose: () => void }) {
   // pieza activa o, desde un ensamblaje, la del componente elegido
   const src = (pid ? s.docData(pid) : s.doc) as PartDoc;
   const fname = pid ? s.docs.find((d) => d.id === pid)?.fileName ?? 'pieza.i3p' : s.fileName;
-  useEffect(() => { setRes(null); setErr(''); cad.flat(src).then(setRes).catch((e) => setErr((e as Error).message)); }, [src]);
+  useEffect(() => {
+    setRes(null); setErr('');
+    // codos y virolas HVAC: desarrollo propio (tapas, chapas, gajos); el resto, chapa del modelo
+    const hs = (src as PartDoc & { hvacSpec?: import('../core/hvac').HvacSpec }).hvacSpec;
+    const hf = hs ? hvacFlatResult(hs) : null;
+    if (hf) { if (hf.paths.length) setRes(hf); else setErr(hf.notes?.join(' · ') ?? 'No desarrollable'); return; }
+    cad.flat(src).then(setRes).catch((e) => setErr((e as Error).message));
+  }, [src]);
   // toSVGPaths devuelve Y hacia abajo: se invierte para coincidir con las líneas de pliegue
   const polys: P2[][] = res ? res.paths.flatMap((d) => flattenPath(d)).map((pl) => pl.map(([x, y]) => [x, -y] as P2)) : [];
   const bb = bboxOf(polys);
@@ -3445,6 +3454,7 @@ export function Modals() {
     case 'meshfit': return <MeshFitDialog onClose={close} />;
     case 'flat': return <FlatDialog key={(d as { pid?: string }).pid ?? ''} pid={(d as { pid?: string }).pid} onClose={close} />;
     case 'asmcalc': return <Suspense fallback={null}><AsmCalcDialog onClose={close} /></Suspense>;
+    case 'fab': return <Suspense fallback={null}><FabDialog onClose={close} tab={(d as { tab?: 'nest' | 'spools' | 'draw' }).tab} /></Suspense>;
     case 'routeto': return <RouteToDialog key={(d as { occ: string }).occ + (d as { ep: string }).ep} occ={(d as { occ: string }).occ} ep={(d as { ep: string }).ep} onClose={close} />;
     case 'firstplace': return <FirstPlaceStep key={(d as { pid: string }).pid} pid={(d as { pid: string }).pid} extras={(d as { extras?: string[] }).extras} onClose={close} />;
     case 'newdoc': return <NewDocDialog key={(d as { start?: boolean }).start ? 's' : 'n'} start={(d as { start?: boolean }).start} onClose={close} />;

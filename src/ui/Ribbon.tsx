@@ -281,6 +281,7 @@ export default function Ribbon() {
               <Small icon="shell" label="Aislamiento" onClick={() => void import('./asmcalc').then((m) => { const v = prompt(`Aislamiento de todos los tramos rectos: espesor (mm). Mínimo RITE (λ 0,04): interior ${m.riteMin('int', 'cold')} frío / ${m.riteMin('int', 'hot')} caliente · exterior ${m.riteMin('ext', 'cold')} / ${m.riteMin('ext', 'hot')}`, String(m.riteMin('int', 'cold'))); const e = v ? parseFloat(v.replace(',', '.')) : NaN; if (e > 0) m.addInsulation(e); })} title="Aislamiento térmico (RITE IT 1.2.4.2.1) en los tramos rectos; se rehace al repetir la orden" />
               <Small icon="interf" label={(s.settings.clearCheck ?? true) ? 'Holguras: sí' : 'Holguras: no'} active={s.settings.clearCheck ?? true} onClick={() => s.set({ settings: { ...s.settings, clearCheck: !(s.settings.clearCheck ?? true) } })} title={`Al insertar, avisa si la pieza nueva queda a menos de ${s.settings.clearMin ?? 25} mm (o choca) con otra que no esté unida a ella (Archivo › Opciones)`} />
             </Col>
+            <Big icon="dxf" label="Fabricación" onClick={() => s.open({ kind: 'fab' } as never)} title="Anidado de desarrollos en chapas (DXF), spools de tubería con soldaduras e isométricos, planos de taller y de montaje automáticos" />
           </Group>}
           <Group label="Conductos (EN 1505/1506 · SMACNA)">
             <Big icon="hduct" label="Conducto" onClick={H('duct')} title="Conducto recto rectangular, circular, espiral u oval plano" />
@@ -333,6 +334,10 @@ export default function Ribbon() {
           {k === 'assembly' && <Group label="Tendido">
             <Big icon="pipe" label="Añadir" active={tool === 'asmCreatePick' && s.createCat === 'mech'} onClick={() => { s.set({ createRecursive: true } as never); A.createComponent('mech'); }} title="Añadir tubería: clic en un extremo libre (ePoint) de un tubo, accesorio o brida y elige la pieza (tubo, codo, te, reducción, brida…); toma la norma, el tamaño y el schedule, queda encajada y restringida por ePoints y se sigue desde su extremo libre (recursivo)" />
             <Col><Small icon="link" label={(s.settings.insertMode ?? 'foran') === 'foran' ? 'Inserción espacial' : 'Inserción paramétrica'} active={(s.settings.insertMode ?? 'foran') === 'foran'} onClick={() => s.set({ settings: { ...s.settings, insertMode: (s.settings.insertMode ?? 'foran') === 'foran' ? 'inventor' : 'foran' } })} title="Inserción espacial: la pieza nueva entra ya unida por ePoints a la boca libre de la pieza seleccionada (o de la última); después se gira, mueve o cambia de boca con el clic derecho. Inserción paramétrica: la pieza sigue al cursor y se restringe después con restricciones. Clic para cambiar" /></Col>
+          </Group>}
+          {k === 'assembly' && <Group label="Fabricación">
+            <Big icon="dxf" label="Spools" onClick={() => s.open({ kind: 'fab', tab: 'spools' } as never)} title="Spools de tubería: cortes en bridas, numeración S-01…, soldaduras W-001…, isométrico por spool (SVG) y lista CSV" />
+            <Col><Small icon="dxf" label="Planos automáticos" onClick={() => s.open({ kind: 'fab', tab: 'draw' } as never)} title="Plano de montaje con globos y lista de piezas; planos de taller por pieza" /></Col>
           </Group>}
           {([['ASME', 'Tubería ASME (B36.10 · B16.5 · B16.47 · B16.9 · B16.11)'], ['EN', 'Tubería EN (EN 10220 · EN 1092-1 · EN 10253)']] as const).map(([norm, lbl]) => (
             <Group key={norm} label={lbl}>

@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.52
+## Versión 0.53
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,12 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.53** — fabricación desde el ensamblaje
+- **Desarrollo de codos** (clic derecho sobre el codo › *Desarrollo de chapa…*): codo rectangular con radio → **2 tapas** (corona Ri–Re) + **chapa de garganta** y **chapa de talón**; codo recto con álabes → tapas en L y chapas; **codo circular por gajos** → gajos extremos y centrales trazados desde la línea de talón; **virola** circular de costura longitudinal (π·(D+t) × L). Los codos prensados se indican como no desarrollables. Exportación DXF.
+- **Anidado de chapa** (HVAC › Ingeniería › *Fabricación* › Anidado): todos los desarrollos del ensamblaje (codos, virolas y piezas de chapa como los conductos rectangulares) colocados en chapas de **1000×2000, 1250×2500 o 1500×3000** con separación ajustable y giro de 90°, separados por espesor y material; vista previa por chapa, % de aprovechamiento y **DXF** con capas HOJA, CORTE y TEXTO.
+- **Spools de tubería** (Mecánica › Fabricación › *Spools*): la tubería se divide en cada unión embridada; numeración **S-01…**, **soldaduras W-001…** (BW/SW) entre piezas del mismo spool, lista de corte por spool, **isométrico** (Z arriba) con cotas de tubos, soldaduras y bridas, exportación **SVG** y **CSV**.
+- **Planos automáticos** (Fabricación › Planos automáticos): **plano de montaje** (alzado, planta e isométrica del ensamblaje, **globos** y **lista de piezas**) y **planos de taller** por pieza distinta (alzado, perfil, planta, isométrica y hoja con el desarrollo si es de chapa).
 
 **Novedades 0.52** — ingeniería sobre el ensamblaje (HVAC › Ingeniería)
 - **Calcular**: caudales desde los terminales (clic derecho › *Caudal de diseño…*) sumados hasta el origen (UTA/fancoil o el componente fijo), **velocidad, pérdida por fricción (Darcy-Weisbach + Colebrook) y singular por pieza**, **circuito índice**, equilibrado de terminales y **ventilador** (+10 %), con avisos de velocidad y pérdida unitaria máximas (8 m/s y 1,5 Pa/m por defecto) y exportación CSV. Se recalcula al cambiar el ensamblaje. **Colores en el 3D**: por material, **por velocidad** o **por sistema**.
