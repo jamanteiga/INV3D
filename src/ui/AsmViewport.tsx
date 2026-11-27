@@ -978,9 +978,11 @@ export default function AsmViewport() {
       }
       if (hit?.object.userData.kind === 'occ') {
         const o = findOcc(s, hit.object.userData.id);
-        // doble clic: propiedades físicas y cotas editables de la pieza (editar en contexto: menú contextual o Ensamblar › Editar)
-        if (o && s.docs.find((d) => d.id === o.part)?.kind === 'part') s.open({ kind: 'occprops', occ: o.id });
-        else if (o) s.activate(o.part);
+        if (!o) return;
+        // Ctrl + doble clic: editar la pieza en el 3D, con el resto del ensamblaje visible y difuminado
+        if ((ev.ctrlKey || ev.metaKey) && s.docs.find((d) => d.id === o.part)?.kind === 'part') { asmActions.editInPlace(o.id); return; }
+        // doble clic: editar el componente (generador HVAC/tubería con sus valores, o propiedades y cotas editables)
+        asmActions.editComponent(o.id);
       }
     });
     cvs.addEventListener('pointermove', (ev) => {
@@ -1190,6 +1192,9 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       {orig.map((o) => <button key={o.key} onClick={() => start(isAxis ? 'mate' : 'flush', {}, { ref: o.ref, label: `Ensamblaje · ${o.label}` })}>{isAxis ? 'Coaxial con' : 'Al ras con'} {o.label} del ensamblaje</button>)}
       {!isAxis && (s.asm.workPlanes ?? []).map((w) => <button key={w.id} onClick={() => start('flush', {}, { ref: workPlaneRef(w), label: w.name })}>Al ras con {w.name}</button>)}
       {isAxis && (s.asm.workAxes ?? []).map((w) => <button key={w.id} onClick={() => start('mate', {}, { ref: workAxisRef(w), label: w.name })}>Coaxial con {w.name}</button>)}
+      {occ && s.docs.find((d) => d.id === occ.part)?.kind === 'part' && (<><hr />
+        <button title="Doble clic" onClick={() => { close(); asmActions.editComponent(occ.id); }}>Editar componente…</button>
+        {asmActions.isSheet(occ.part) && <button title="Desarrollo de la chapa con líneas de pliegue, cotas y DXF para corte" onClick={() => { close(); s.open({ kind: 'flat', pid: occ.part } as never); }}>Desarrollo de chapa…</button>}</>)}
       {occ && (foranJoint(occ.id) || occ.grounded) && epOfOcc(occ.id) && (<><hr />
         <div className="ctx-sub">Desde el ePoint «{epOfOcc(occ.id)!.name}»{foranJoint(occ.id) ? ' (unión)' : ''}{foranJoint(occ.id)?.offset && parseFloat(foranJoint(occ.id)!.offset) ? ` · desplazada ${foranJoint(occ.id)!.offset}` : ''}</div>
         <button className={rotOpen ? 'on' : ''} title="Gira el componente y todo lo que arrastra detrás sobre el eje de su ePoint" onClick={() => setRotOpen(!rotOpen)}>Girar {rotOpen ? '▾' : '▸'}</button>
@@ -1211,7 +1216,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       {occ && (<><hr />
         <button onClick={() => { close(); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.grounded = !t.grounded; }); }}>{occ.grounded ? 'Liberar' : 'Fijar'}</button>
         {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); s.open({ kind: 'occprops', occ: vo?.id ?? occ.id }); }}>Propiedades y cotas…</button>}
-        {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); asmActions.editInPlace(vo?.id ?? occ.id); }}>Editar en contexto</button>}
+        {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); asmActions.editInPlace(vo?.id ?? occ.id); }} title="La pieza se edita en el 3D con el resto del ensamblaje difuminado">Editar en contexto (Ctrl + doble clic)</button>}
         <button onClick={() => { close(); s.activate(openPart!); }}>{vo?.sub ? 'Abrir pieza del subensamblaje' : s.docs.find((d) => d.id === occ.part)?.kind === 'assembly' ? 'Abrir subensamblaje' : 'Abrir pieza'}</button></>)}
     </div>
   );

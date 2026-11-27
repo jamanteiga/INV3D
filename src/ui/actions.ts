@@ -677,6 +677,28 @@ export const asmActions = {
     if (odd && Fm && Fm.shape !== 'round' && Math.abs(Fm.W - Fm.H) > 0.5) s.notify(`Girada ${deg > 0 ? '+' : ''}${deg}° sobre su unión. Aviso: la boca rectangular ${Fm.W}×${Fm.H} queda girada respecto a la anterior y no encaja${Math.abs(((deg % 180) + 180) % 180 - 90) < 1e-6 ? ' (W contra H: para girar hacia el lado H usa una pieza con W y H cambiados; Añadir lo hace solo)' : ''}`, 'error');
     else s.notify(`Girada ${deg > 0 ? '+' : ''}${deg}° sobre su unión`);
   },
+  /** Editar un componente (doble clic): las piezas generadas (HVAC, tubería) vuelven a abrir su generador con sus valores;
+   *  las demás, sus propiedades y cotas editables. */
+  editComponent: (occ: string) => {
+    const s = S(); const o = s.asm.occurrences.find((x) => x.id === occ); if (!o) return;
+    const d = s.docs.find((x) => x.id === o.part);
+    if (d?.kind !== 'part') { s.activate(o.part); return; }
+    const pd = s.docData(o.part) as PartDoc & { hvacSpec?: { kind: string; shape?: string }; pipeSpec?: { kind: string; norm: 'ASME' | 'EN'; size: string; sch?: string; wall?: number; material: string; flStd?: string; rating?: number; flType?: string } };
+    if (pd?.hvacSpec) { s.open({ kind: 'hvac', hk: pd.hvacSpec.kind, edit: { pid: o.part, spec: pd.hvacSpec } } as never); return; }
+    if (pd?.pipeSpec) { const p = pd.pipeSpec; s.open({ kind: 'piping', pk: p.kind, norm: p.norm, init: { size: p.size, sch: p.sch, wall: p.wall, material: p.material, flStd: p.flStd, rating: p.rating, flType: p.flType }, edit: { pid: o.part, spec: p } } as never); return; }
+    s.open({ kind: 'occprops', occ });
+  },
+  /** Tras editar una pieza generada: nombre de fichero y de los componentes según la nueva designación (si no está guardada en disco) */
+  renameGenerated: (pid: string, nd: PartDoc) => {
+    const s = S(); const d = s.docs.find((x) => x.id === pid); if (!d || d.path) return;
+    const fn = nd.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_') + '.i3p';
+    if (fn === d.fileName || s.docs.some((x) => x.id !== pid && x.fileName === fn)) return;
+    const base = fn.replace(/\.i3p$/, '');
+    useStore.setState({ docs: s.docs.map((x) => (x.id === pid ? { ...x, fileName: fn } : x)) });
+    let n = 0; S().commitAsm((a) => { for (const o of a.occurrences) if (o.part === pid) o.name = `${base}:${++n}`; });
+  },
+  /** ¿La pieza es de chapa (tiene desarrollo)? */
+  isSheet: (part: string) => { const pd = S().docData(part) as PartDoc | null; return !!pd && 'features' in pd && pd.features.some((f) => String(f.type).startsWith('sm_')); },
   /** Gira el componente y todo lo que arrastra detrás sobre su ePoint: el de su unión o, en el componente raíz (fijo), su ePoint de conexión */
   epRotate: (occ: string, deg: number) => {
     if (foranJoint(occ)) { asmActions.foranSpin(occ, deg); return; }

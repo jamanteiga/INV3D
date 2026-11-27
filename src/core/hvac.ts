@@ -498,6 +498,8 @@ export const OVAL_KINDS: HvacKind[] = ['duct', 'elbow', 'transition', 'coupling'
 export function makeHvacPart(s: HvacSpec): PartDoc {
   const d = makeHvacPart0(s);
   if (!d.epoints?.length) d.epoints = hvacEnds(s);
+  // se guarda la especificación: doble clic en el ensamblaje vuelve a abrir el generador con sus valores
+  (d as PartDoc & { hvacSpec?: HvacSpec }).hvacSpec = { ...s };
   return d;
 }
 /** ePoints de inserción en los centros de las bocas (dirección hacia fuera); bocas iguales se conectan solas */

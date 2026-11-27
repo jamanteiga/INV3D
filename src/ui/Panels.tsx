@@ -2483,28 +2483,30 @@ function DimIn({ label, mm, std, list, onChange }: { label: string; mm: number; 
   );
 }
 
-function HvacDialog({ hk, shape0, init, onClose }: { hk: string; shape0?: DuctShape; init?: { W: number; H: number; D: number; spiral?: boolean }; onClose: () => void }) {
+function HvacDialog({ hk, shape0, init, edit, onClose }: { hk: string; shape0?: DuctShape; init?: { W: number; H: number; D: number; spiral?: boolean }; edit?: { pid: string; spec: HvacSpec }; onClose: () => void }) {
   const s = useStore();
-  const [kind, setKind] = useState<HvacKind>(hk as HvacKind);
-  const [std, setStd] = useState<'EN' | 'SMACNA'>(s.settings.drawingStd === 'ANSI' ? 'SMACNA' : 'EN');
-  const [shape, setShape] = useState<DuctShape>(shape0 ?? (['flex'].includes(hk) ? 'round' : 'rect'));
+  // edición de una pieza ya generada (doble clic en el ensamblaje): se parte de su especificación
+  const E = edit?.spec;
+  const [kind, setKind] = useState<HvacKind>(E?.kind ?? (hk as HvacKind));
+  const [std, setStd] = useState<'EN' | 'SMACNA'>(E?.std ?? (s.settings.drawingStd === 'ANSI' ? 'SMACNA' : 'EN'));
+  const [shape, setShape] = useState<DuctShape>(E?.shape ?? shape0 ?? (['flex'].includes(hk) ? 'round' : 'rect'));
   // con una boca de referencia (Crear componente) la pieza toma su sección
-  const [spiral, setSpiral] = useState(init?.spiral ?? true), [seamGeo, setSeamGeo] = useState(false);
-  const [W, setW] = useState(init?.W || 600), [H, setH] = useState(init?.H || 400), [D, setD] = useState(init?.D || 400);
-  const [shape2, setShape2] = useState<DuctShape>('round');
-  const [W2, setW2] = useState(400), [H2, setH2] = useState(300), [D2, setD2] = useState(250);
-  const [ex, setEx] = useState(0), [ey, setEy] = useState(0);
-  const [L, setL] = useState(1200);
-  const [tOv, setTOv] = useState(0);
-  const [angle, setAngle] = useState(90);
-  const [elType, setElType] = useState<'radius' | 'square' | 'smooth' | 'segmented'>('radius');
-  const [rw, setRw] = useState(1), [vanes, setVanes] = useState(true), [gores, setGores] = useState(5);
-  const [branch, setBranch] = useState<'tee' | 'shoe' | 'collar' | 'y'>('tee'), [bAng, setBAng] = useState(90);
-  const [ends, setEnds] = useState<'none' | 'tdc' | 'angle' | 'socket'>('none');
-  const [blAng, setBlAng] = useState(30), [plate, setPlate] = useState(595), [neck, setNeck] = useState(250), [split, setSplit] = useState(100), [spig, setSpig] = useState<'top' | 'side'>('top');
-  const [ins, setIns] = useState(25), [withIns, setWithIns] = useState(false), [insMat, setInsMat] = useState(HVAC_INS_MATS[0]);
-  const [rod, setRod] = useState('');
-  const [mat, setMat] = useState(HVAC_DUCT_MATS[0]);
+  const [spiral, setSpiral] = useState(E ? E.seam === 'spiral' : init?.spiral ?? true), [seamGeo, setSeamGeo] = useState(E?.seamGeo ?? false);
+  const [W, setW] = useState(E?.W ?? (init?.W || 600)), [H, setH] = useState(E?.H ?? (init?.H || 400)), [D, setD] = useState(E?.D ?? (init?.D || 400));
+  const [shape2, setShape2] = useState<DuctShape>(E?.shape2 ?? 'round');
+  const [W2, setW2] = useState(E?.W2 ?? 400), [H2, setH2] = useState(E?.H2 ?? 300), [D2, setD2] = useState(E?.D2 ?? 250);
+  const [ex, setEx] = useState(E?.ex ?? 0), [ey, setEy] = useState(E?.ey ?? 0);
+  const [L, setL] = useState(E?.L ?? 1200);
+  const [tOv, setTOv] = useState(E?.t ?? 0);
+  const [angle, setAngle] = useState(E?.angle ?? 90);
+  const [elType, setElType] = useState<'radius' | 'square' | 'smooth' | 'segmented'>(E?.elbowType ?? 'radius');
+  const [rw, setRw] = useState(E?.rw ?? 1), [vanes, setVanes] = useState(E?.vanes ?? true), [gores, setGores] = useState(E?.gores ?? 5);
+  const [branch, setBranch] = useState<'tee' | 'shoe' | 'collar' | 'y'>(E?.branch ?? 'tee'), [bAng, setBAng] = useState(E?.branchAngle ?? 90);
+  const [ends, setEnds] = useState<'none' | 'tdc' | 'angle' | 'socket'>(E?.ends ?? 'none');
+  const [blAng, setBlAng] = useState(E?.bladeAngle ?? 30), [plate, setPlate] = useState(E?.plate ?? 595), [neck, setNeck] = useState(E?.neck ?? 250), [split, setSplit] = useState(E?.splitter ?? 100), [spig, setSpig] = useState<'top' | 'side'>(E?.spigot ?? 'top');
+  const [ins, setIns] = useState(E?.ins ?? 25), [withIns, setWithIns] = useState(false), [insMat, setInsMat] = useState(HVAC_INS_MATS[0]);
+  const [rod, setRod] = useState(E?.rod ?? '');
+  const [mat, setMat] = useState(E && HVAC_DUCT_MATS.includes(E.material) ? E.material : HVAC_DUCT_MATS[0]);
   const sm = std === 'SMACNA';
   const RL = sm ? SM_RECT : EN_RECT, RD = sm ? SM_ROUND : EN_ROUND;
   const roundOnly = kind === 'flex' || (kind === 'branch' && branch === 'y');
@@ -2514,7 +2516,7 @@ function HvacDialog({ hk, shape0, init, onClose }: { hk: string; shape0?: DuctSh
   const elT = sh !== 'round' ? (elType === 'square' ? 'square' : 'radius') : elType === 'segmented' ? 'segmented' : 'smooth';
   const material = kind === 'insulation' ? insMat : kind === 'ahu' ? 'Panel sándwich UTA 50 mm (equivalente)' : kind === 'flex' ? 'Lona flexible / aluminio' : mat;
   const defL: Partial<Record<HvacKind, number>> = { coupling: 0, transition: 400, branch: Math.max(sh === 'rect' ? W : D, 400) + 200, plenum: 300, damper: 0, firedamper: 0, silencer: 1500, flex: 1500, ahu: 4000, fancoil: 600, support: 500 };
-  const Lv = kind === 'duct' || kind === 'insulation' || !(kind in defL) ? L : (L === 1200 ? defL[kind]! : L);
+  const Lv = E || kind === 'duct' || kind === 'insulation' || !(kind in defL) ? L : (L === 1200 ? defL[kind]! : L);
   const spec: HvacSpec = {
     kind, std, shape: sh, seam: kind === 'duct' && sh !== 'rect' && spiral ? 'spiral' : undefined, seamGeo, W, H, D, shape2: kind === 'transition' ? shape2 : kind === 'branch' ? (shape2 === 'oval' ? 'rect' : shape2) : undefined, W2, H2, D2, ex, ey, L: Lv, t: tOv || undefined,
     angle, elbowType: elT, rw, vanes, gores, branch, branchAngle: branch === 'y' ? (bAng === 90 ? 30 : bAng) : bAng, ends,
@@ -2562,7 +2564,7 @@ function HvacDialog({ hk, shape0, init, onClose }: { hk: string; shape0?: DuctSh
   const EndsRow = <Row label="Uniones"><select value={ends} onChange={(e) => setEnds(e.target.value as 'none')}><option value="none">Sin bridas</option><option value="tdc">{sh === 'rect' ? 'Brida TDC (marco de perfil)' : 'Brida de perfil'}</option><option value="angle">Marco de angular L30×3</option>{sh !== 'rect' && <option value="socket">Unión por enchufe (manguito)</option>}</select></Row>;
   const groups: [string, HvacKind[]][] = HVAC_GROUPS;
   return (
-    <Modal title="HVAC · Centro de contenido" onClose={onClose} wide>
+    <Modal title={edit ? `Editar · ${s.docs.find((d) => d.id === edit.pid)?.fileName ?? 'pieza HVAC'}` : 'HVAC · Centro de contenido'} onClose={onClose} wide>
       <div className="cc">
         <div className="cc-tree">
           <div style={{ padding: '4px 6px 8px' }}><Seg value={std} onChange={setStd} options={[['EN', 'EN / UNE'], ['SMACNA', 'SMACNA']]} /></div>
@@ -2624,9 +2626,10 @@ function HvacDialog({ hk, shape0, init, onClose }: { hk: string; shape0?: DuctSh
           {!['insulation', 'ahu', 'flex'].includes(kind) && <Row label="Material"><select value={mat} onChange={(e) => setMat(e.target.value)}>{HVAC_DUCT_MATS.map((m) => <option key={m}>{m}</option>)}</select></Row>}
           {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
           <p className="phelp">Medidas interiores. Pieza paramétrica con descripción y material para la lista de materiales; en un ensamblaje se restringe con Insertar en las bocas.</p>
-          <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
-            <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
-            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}
+          <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>{edit ? 'Cancelar' : 'Cerrar'}</button>
+            {edit ? <button className="btn primary" disabled={!!err} onClick={() => { try { const nd = makeHvacPart(spec); s.editPartDoc(edit.pid, nd); asmActions.renameGenerated(edit.pid, nd); onClose(); s.notify(`Actualizada: ${nd.iProperties.description}`); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Actualizar pieza</button>
+              : <><button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
+            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}</>}
           </div>
         </div>
       </div>
@@ -2807,7 +2810,8 @@ function DuctCalcDialog({ onClose }: { onClose: () => void }) {
 }
 
 type PipeInit = { size?: string; sch?: string; wall?: number; material?: string; flStd?: string; rating?: number; flType?: string };
-function PipingDialog({ pk: pk0, norm: norm0, init, onClose }: { pk: string; norm: 'ASME' | 'EN'; init?: PipeInit; onClose: () => void }) {
+function PipingDialog({ pk: pk0, norm: norm0, init, edit, onClose }: { pk: string; norm: 'ASME' | 'EN'; init?: PipeInit; edit?: { pid: string; spec: PipeSpec }; onClose: () => void }) {
+  const E = edit?.spec;
   const s = useStore();
   const [kind, setKind] = useState<PipeKind>(pk0 as PipeKind);
   const [norm, setNorm] = useState<'ASME' | 'EN'>(norm0);
@@ -2831,7 +2835,7 @@ function PipingDialog({ pk: pk0, norm: norm0, init, onClose }: { pk: string; nor
   const sz = sizes.includes(size) ? size : defSize;
   const npsBig = norm === 'ASME' ? sz : DN_NPS[Number(sz)] ?? '';
   const size2List = (kind === 'rtee' || kind === 'reducer') ? reducedOptions(npsBig).map((n) => (norm === 'ASME' ? n : String(NPS_DN[n]))).filter((x) => norm === 'ASME' || EN_OD[Number(x)]) : [];
-  const [size2, setSize2] = useState('');
+  const [size2, setSize2] = useState(E?.size2 ?? '');
   const sz2 = size2List.includes(size2) ? size2 : size2List[0] ?? '';
   const schs = norm === 'ASME' && ASME_PIPE[norm === 'ASME' ? sz : npsBig] ? Object.keys(ASME_PIPE[sz]?.[1] ?? {}) : [];
   const [sch, setSch] = useState(init?.sch ?? 'STD');
@@ -2839,15 +2843,15 @@ function PipingDialog({ pk: pk0, norm: norm0, init, onClose }: { pk: string; nor
   const enW = norm === 'EN' ? enWalls(EN_OD[Number(sz)] ?? 0) : [];
   const [wall, setWall] = useState(init?.wall ?? 0);
   const wallV = enW.includes(wall) ? wall : (EN_S[Number(sz)] ?? enW[0] ?? 0);
-  const [len, setLen] = useState(6000);
-  const [elbow, setElbow] = useState<'LR' | 'SR' | '3D' | '5D'>(norm0 === 'EN' ? '3D' : 'LR');
-  const [angle, setAngle] = useState<45 | 90 | 180>(90);
-  const [ecc, setEcc] = useState(false);
-  const [cls, setCls] = useState<3000 | 6000>(3000);
-  const [sw, setSw] = useState(false);
-  const [half, setHalf] = useState(false);
-  const [facing, setFacing] = useState<'RF' | 'FF'>('RF');
-  const [stubShort, setStubShort] = useState(false);
+  const [len, setLen] = useState(E?.length ?? 6000);
+  const [elbow, setElbow] = useState<'LR' | 'SR' | '3D' | '5D'>(E?.elbow ?? (norm0 === 'EN' ? '3D' : 'LR'));
+  const [angle, setAngle] = useState<45 | 90 | 180>(E?.angle ?? 90);
+  const [ecc, setEcc] = useState(E?.ecc ?? false);
+  const [cls, setCls] = useState<3000 | 6000>(E?.cls ?? 3000);
+  const [sw, setSw] = useState(E?.sw ?? false);
+  const [half, setHalf] = useState(E?.half ?? false);
+  const [facing, setFacing] = useState<'RF' | 'FF'>(E?.facing ?? 'RF');
+  const [stubShort, setStubShort] = useState(E?.kind === 'stub' ? E.length === 1 : false);
   const use = kind === 'pipe' ? 'pipe' : kind === 'flange' ? 'flange' : 'fitting';
   const mats = PIPE_MATERIALS.filter((m) => m.std === norm && m.use.includes(use));
   const [mat, setMat] = useState(init?.material ?? '');
@@ -2879,7 +2883,7 @@ function PipingDialog({ pk: pk0, norm: norm0, init, onClose }: { pk: string; nor
   };
   const kinds: [PipeKind, string][] = Object.entries(PIPE_KINDS).filter(([k]) => norm === 'ASME' || k !== 'stub') as [PipeKind, string][];
   return (
-    <Modal title="Tubería · Centro de contenido" onClose={onClose} wide>
+    <Modal title={edit ? `Editar · ${useStore.getState().docs.find((d) => d.id === edit.pid)?.fileName ?? 'tubería'}` : 'Tubería · Centro de contenido'} onClose={onClose} wide>
       <div className="cc">
         <div className="cc-tree">
           <div style={{ padding: '4px 6px 8px' }}><Seg value={norm} onChange={(v) => { setNorm(v); setFlStd(v === 'EN' ? 'EN1092' : 'B16.5'); setRating(v === 'EN' ? 16 : 150); setFlType(v === 'EN' ? '11' : 'WN'); setElbow(v === 'EN' ? '3D' : 'LR'); }} options={[['ASME', 'ASME'], ['EN', 'EN']]} /></div>
@@ -2914,8 +2918,9 @@ function PipingDialog({ pk: pk0, norm: norm0, init, onClose }: { pk: string; nor
           {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
           <p className="phelp">Se crea una pieza paramétrica con sus iProperties (designación, norma y material) para la lista de materiales. En un ensamblaje se coloca y se restringe con Insertar en las caras de los extremos.</p>
           <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
+            {edit ? <button className="btn primary" disabled={!!err} onClick={() => { try { const nd = makePipePart(spec); s.editPartDoc(edit.pid, nd); asmActions.renameGenerated(edit.pid, nd); onClose(); s.notify(`Actualizada: ${nd.iProperties.description}`); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Actualizar pieza</button> : <>
             <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>
-            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}
+            {s.kind === 'assembly' && <button className="btn primary" disabled={!!err} onClick={() => create(true)}>Colocar</button>}</>}
           </div>
         </div>
       </div>
@@ -3158,11 +3163,14 @@ function UcsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function FlatDialog({ onClose }: { onClose: () => void }) {
+function FlatDialog({ pid, onClose }: { pid?: string; onClose: () => void }) {
   const s = useStore();
   const [res, setRes] = useState<FlatResult | null>(null);
   const [err, setErr] = useState('');
-  useEffect(() => { cad.flat(s.doc).then(setRes).catch((e) => setErr((e as Error).message)); }, [s.doc]);
+  // pieza activa o, desde un ensamblaje, la del componente elegido
+  const src = (pid ? s.docData(pid) : s.doc) as PartDoc;
+  const fname = pid ? s.docs.find((d) => d.id === pid)?.fileName ?? 'pieza.i3p' : s.fileName;
+  useEffect(() => { setRes(null); setErr(''); cad.flat(src).then(setRes).catch((e) => setErr((e as Error).message)); }, [src]);
   // toSVGPaths devuelve Y hacia abajo: se invierte para coincidir con las líneas de pliegue
   const polys: P2[][] = res ? res.paths.flatMap((d) => flattenPath(d)).map((pl) => pl.map(([x, y]) => [x, -y] as P2)) : [];
   const bb = bboxOf(polys);
@@ -3173,10 +3181,10 @@ function FlatDialog({ onClose }: { onClose: () => void }) {
     const doc = { layers: [{ name: 'CORTE', color: 7 }, { name: 'PLIEGUE', color: 1, ltype: 'CENTER' as const }, { name: 'TEXTO', color: 3 }, { name: 'MARCADO', color: 5 }],
       lines: [...polys.map((pts) => ({ layer: 'CORTE', pts })), ...res.bends.map((b) => ({ layer: 'PLIEGUE', pts: [b.a, b.b] as P2[] })), ...(res.marks ?? []).map((pts) => ({ layer: 'MARCADO', pts: pts as P2[] }))],
       texts: res.bends.map((b) => { const q = bendTextPos(b.a as P2, b.b as P2, 1.5); return { layer: 'TEXTO', x: q.x, y: q.y, h: 3, text: b.label, rot: q.rot }; }) };
-    saveText(writeDxf(doc), s.fileName.replace(/\.[^.]+$/, '-desarrollo.dxf'), 'DXF', '.dxf', 'application/dxf');
+    saveText(writeDxf(doc), fname.replace(/\.[^.]+$/, '-desarrollo.dxf'), 'DXF', '.dxf', 'application/dxf');
   };
   return (
-    <Modal title="Desarrollo de chapa" onClose={onClose} xwide>
+    <Modal title={`Desarrollo de chapa · ${fname.replace(/\.[^.]+$/, '')}`} onClose={onClose} xwide>
       {err ? <Err text={err} /> : !res ? <p className="phelp">Calculando…</p> : (<>
         <div className="flat-view">
           <svg viewBox={`0 0 ${W} ${H}`}>
@@ -3324,10 +3332,10 @@ export function Modals() {
     case 'cpattern': return <CompPatternDialog onClose={close} />;
     case 'drive': return <DriveDialog onClose={close} />;
     case 'motion': return <MotionDialog onClose={close} />;
-    case 'hvac': return <HvacDialog key={`${(d as { hk: string }).hk}${(d as { shape?: string }).shape ?? ''}`} hk={(d as { hk: string }).hk} shape0={(d as { shape?: DuctShape }).shape} init={(d as { init?: { W: number; H: number; D: number; spiral?: boolean } }).init} onClose={close} />;
+    case 'hvac': return <HvacDialog key={`${(d as { hk: string }).hk}${(d as { shape?: string }).shape ?? ''}${(d as { edit?: { pid: string } }).edit?.pid ?? ''}`} hk={(d as { hk: string }).hk} shape0={(d as { shape?: DuctShape }).shape} init={(d as { init?: { W: number; H: number; D: number; spiral?: boolean } }).init} edit={(d as { edit?: { pid: string; spec: HvacSpec } }).edit} onClose={close} />;
     case 'spiro': return <SpiroDialog key={(d as { sk: string }).sk} sk={(d as { sk: string }).sk} D0={(d as { D?: number }).D} onClose={close} />;
     case 'ductcalc': return <DuctCalcDialog onClose={close} />;
-    case 'piping': return <PipingDialog key={JSON.stringify(d)} pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} init={(d as { init?: PipeInit }).init} onClose={close} />;
+    case 'piping': return <PipingDialog key={JSON.stringify(d)} pk={(d as { pk: string }).pk} norm={(d as { norm: 'ASME' | 'EN' }).norm} init={(d as { init?: PipeInit }).init} edit={(d as { edit?: { pid: string; spec: PipeSpec } }).edit} onClose={close} />;
     case 'ipart': return <IPartDialog onClose={close} />;
     case 'ifeature': return <IFeatureDialog onClose={close} />;
     case 'sketch3d': return <Sketch3dDialog id={(d as { id?: string }).id} onClose={close} />;
@@ -3394,7 +3402,7 @@ export function Modals() {
     case 'print3d': return <PX.Print3dDialog onClose={close} />;
     case 'share': return <PX.ShareDialog onClose={close} />;
     case 'meshfit': return <MeshFitDialog onClose={close} />;
-    case 'flat': return <FlatDialog onClose={close} />;
+    case 'flat': return <FlatDialog key={(d as { pid?: string }).pid ?? ''} pid={(d as { pid?: string }).pid} onClose={close} />;
     case 'firstplace': return <FirstPlaceStep key={(d as { pid: string }).pid} pid={(d as { pid: string }).pid} extras={(d as { extras?: string[] }).extras} onClose={close} />;
     case 'newdoc': return <NewDocDialog key={(d as { start?: boolean }).start ? 's' : 'n'} start={(d as { start?: boolean }).start} onClose={close} />;
     case 'drwview': return <DrwViewDialog onClose={close} />;

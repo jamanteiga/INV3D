@@ -113,8 +113,9 @@ export type Dialog =
   | { kind: 'auxsketch'; init?: { pt?: string; ax?: string } }
   | { kind: 'asmaux'; aux: 'axis' | 'point' }
   | { kind: 'sketch3d'; id?: string }
-  | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN'; init?: { size?: string; sch?: string; wall?: number; material?: string; flStd?: string; rating?: number; flType?: string } }
-  | { kind: 'hvac'; hk: string; shape?: 'rect' | 'round' | 'oval' }
+  | { kind: 'piping'; pk: string; norm: 'ASME' | 'EN'; edit?: { pid: string; spec: unknown }; init?: { size?: string; sch?: string; wall?: number; material?: string; flStd?: string; rating?: number; flType?: string } }
+  | { kind: 'hvac'; hk: string; shape?: 'rect' | 'round' | 'oval'; init?: unknown; edit?: { pid: string; spec: unknown } }
+  | { kind: 'flat'; pid?: string }
   | { kind: 'spiro'; sk: string }
   | { kind: 'ductcalc' }
   | { kind: 'occprops'; occ: string }

@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.49.2
+## Versión 0.50
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,12 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.50**
+- **Doble clic sobre un componente = editarlo**: los conductos y accesorios HVAC y la tubería ASME/EN vuelven a abrir **su generador con sus valores** (sección, longitud, ángulo, chapa, uniones, norma, tamaño, schedule…); *Actualizar pieza* la regenera en su sitio, manteniendo sus uniones por ePoints (lo que cuelga detrás se recoloca) y cambia el nombre del componente según la nueva designación. Las demás piezas abren sus propiedades y cotas editables. También en el clic derecho › *Editar componente…*.
+- **Ctrl + doble clic = editar en contexto**: la pieza se abre para modificarla en el 3D con el resto del ensamblaje **visible y difuminado**; *Volver al ensamblaje* termina.
+- **Desarrollo de chapa desde el ensamblaje**: clic derecho sobre un componente de chapa (conductos rectangulares, transiciones, reducciones, desvíos, piezas de chapa) › *Desarrollo de chapa…*: patrón plano con líneas de pliegue, dimensiones y **DXF para corte** (capas CORTE, PLIEGUE, TEXTO, MARCADO), sin abrir la pieza.
+- Las piezas HVAC guardan su especificación (las creadas antes de esta versión abren sus propiedades y cotas).
 
 **Novedades 0.49.2**
 - El modo de inserción pasa a llamarse **Inserción espacial** (la pieza nueva entra unida por ePoints a la boca libre; antes «Foran») e **Inserción paramétrica** (la pieza sigue al cursor y se restringe después; antes «Inventor»). Botón en Ensamblar › Componente, HVAC › Tendido y Mecánica › Tendido, y en Archivo › Opciones de la aplicación.
