@@ -1062,7 +1062,7 @@ export default function AsmViewport() {
       V.request();
     };
     const unsubR = useRoute.subscribe(drawRoute);
-    const unsubCalc = useAsmCalc.subscribe((a, b) => { if (a.colorBy !== b.colorBy || (a.colorBy !== 'none' && a.calc !== b.calc)) build(useStore.getState()); });
+    const unsubCalc = useAsmCalc.subscribe((a, b) => { if (a.colorBy !== b.colorBy || a.revDiff !== b.revDiff || (a.colorBy !== 'none' && a.calc !== b.calc)) build(useStore.getState()); });
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
       if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.selGroup !== p.selGroup || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud) {
@@ -1194,12 +1194,14 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
     useStore.setState({ dialog: { ...dlg, draft: { ...dlg.draft, epMode: true, type: 'mate', a: undefined, b: undefined, aL: undefined, bL: undefined, aW: undefined, bW: undefined }, step: 0 }, hud: { ...st.hud, epoints: true } });
     if (ep) setJointEPoint(ep.occ, ep.id, 'a');
   };
+  const tpls = ctx.ep ? (() => { try { return JSON.parse(localStorage.getItem('inv3d.routeTemplates') ?? '[]') as { name: string; date: string; items: unknown[] }[]; } catch { return []; } })() : [];
   if (ctx.ep) return (
     <div className="ctx" style={{ left: ctx.x, top: ctx.y, position: 'fixed' }} onContextMenu={(e) => e.preventDefault()}>
       <div className="ctx-title">{ctx.label}</div>
       <button title="Este ePoint es el origen; después haz clic en el ePoint destino de otro componente" onClick={() => epEp(ctx.ep)}>Restringir ePoint origen → ePoint destino…</button>
       <button title="Encadenar tubos, conductos, codos, tes… desde esta boca, restringidos por ePoints" onClick={() => { close(); const F = ctx.ep && epFrame(ctx.ep.occ, ctx.ep.id); if (!F) return; useStore.setState({ createRecursive: true, createCat: /^(Tubo|Cara brida|Cara portabridas)/.test(F.e.name) ? 'mech' : 'hvac', createTarget: { occ: F.o.id, ref: epRef(F.e, F.o.id), ep: F.e.id, epKind: F.e.kind, label: F.name, pW: [F.P.x, F.P.y, F.P.z], nW: [F.D.x, F.D.y, F.D.z] }, dialog: { kind: 'createcomp' } }); }}>Añadir desde aquí…</button>
       <button title="Tramos rectos y codos de 90° hasta un punto (X, Y, Z) o hasta otra boca, con las longitudes calculadas" onClick={() => { close(); if (ctx.ep) s.open({ kind: 'routeto', occ: ctx.ep.occ, ep: ctx.ep.id } as never); }}>Tender hasta…</button>
+      {tpls.length > 0 && <><div className="ctx-sub">Insertar plantilla</div>{tpls.map((t) => <button key={t.name} title={`${t.items.length} piezas · ${t.date}`} onClick={() => { close(); if (ctx.ep) void import('./asmextra').then((m) => m.insertTemplate(t.name, ctx.ep!.occ, ctx.ep!.id)); }}>{t.name}</button>)}</>}
     </div>
   );
   return (
@@ -1214,6 +1216,8 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
       {occ && isStraightDuct(occ.id) && (() => { const d0 = Math.round(distAlong(occ.id, ctx.pW)); const cf = segCfg(); return (<><hr />
         <div className="ctx-sub">Tramo recto · punto a {d0} mm de su entrada</div>
         <button title={`Corta el conducto en el punto pulsado: dos tramos con bridas ${cf.joint === 'tdc' ? 'TDC' : 'de marco angular'} en el corte y junta de ${cf.g} mm`} onClick={() => { close(); cutDuct(occ.id, d0); }}>Cortar aquí (bridas + junta)</button>
+        <button title="Paso por mamparo o cubierta en el punto pulsado: manguito con holgura 10 mm y chapa de refuerzo" onClick={() => { close(); void import('./asmextra').then((m) => m.addPenetration(occ.id, d0, 0)); }}>Paso por mamparo aquí (estanco)</button>
+        <button title="Paso por mamparo clase A-60: manguito, chapa de refuerzo y aislamiento" onClick={() => { close(); const v = prompt('Paso A-60: espesor del aislamiento del paso (mm)', '50'); const e = v ? parseFloat(v.replace(',', '.')) : NaN; if (e > 0) void import('./asmextra').then((m) => m.addPenetration(occ.id, d0, e)); }}>Paso por mamparo aquí (A-60)…</button>
         <button onClick={() => { close(); const v = prompt('Cortar a (mm desde la entrada del tramo)', String(d0)); const d = v ? parseFloat(v.replace(',', '.')) : NaN; if (isFinite(d)) cutDuct(occ.id, d); }}>Cortar a…</button>
         <button title="Parte el tramo en el punto pulsado e inserta una compuerta, silenciador, cortafuegos, transición… elegida en el centro de contenido" onClick={() => { close(); const T = asmActions.inlineTarget(occ.id, d0); if (T) { useStore.setState({ inlineAt: { occ: occ.id, d: d0 }, createTarget: T, createCat: 'hvac' }); s.open({ kind: 'createcomp' }); } }}>Insertar en línea aquí…</button>
         <button title={`Partes de ≤ ${cf.maxL} mm y ≤ ${cf.maxKg} kg con bridas y juntas (Archivo › Opciones › Tramos)`} onClick={() => { close(); segmentDuct(occ.id); }}>Dividir en tramos (≤ {cf.maxL} mm / {cf.maxKg} kg)</button>
@@ -1240,6 +1244,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
           <button onClick={() => { close(); const v = prompt('Sistema del ramal (p. ej. Impulsión, Retorno, Extracción; vacío = quitar)', occ.system ?? 'Impulsión'); if (v != null) setSystem(occ.id, v.trim()); }}>Asignar sistema…</button>
           <button onClick={() => { close(); const v = prompt('Soportes en el ramal: separación (mm)', '2500'); const d = v ? parseFloat(v.replace(',', '.')) : NaN; if (d > 200) addSupports(d, 500, epGroup(occ.id)); }}>Soportes en el ramal…</button>
           <button onClick={() => { close(); const v = prompt(`Aislar el ramal: espesor (mm). Mínimo RITE (λ 0,04): interior ${riteMin('int', 'cold')} frío / ${riteMin('int', 'hot')} caliente · exterior ${riteMin('ext', 'cold')} / ${riteMin('ext', 'hot')}`, String(riteMin('int', 'cold'))); const e = v ? parseFloat(v.replace(',', '.')) : NaN; if (e > 0) addInsulation(e, epGroup(occ.id)); }}>Aislar ramal…</button>
+          <button title="Guarda el ramal (o las piezas resaltadas) como plantilla para insertarla después en cualquier boca libre (clic derecho sobre el ePoint › Insertar plantilla)" onClick={() => { close(); const ids = s.selGroup?.includes(occ.id) ? s.selGroup : epGroup(occ.id); const v = prompt(`Nombre de la plantilla (${ids.length} piezas; se inserta por la boca de entrada de «${occ.name}»)`, 'Rejilla + plenum'); if (v?.trim()) void import('./asmextra').then((m) => m.saveTemplate(v.trim(), ids, occ.id)); }}>Guardar como plantilla…</button>
           <button onClick={() => { close(); const g = epGroup(occ.id); if (confirm(`¿Borrar el ramal (${g.length} componentes)?`)) void import('./hvacops').then((m) => m.deleteBranch(occ.id)); }}>Borrar ramal</button>
         </div>)}
         <button title="Tríada X, Y, Z en el ePoint: doble clic en una flecha = mover (mm), doble clic en un anillo = girar (°); negativo = sentido contrario" onClick={() => { close(); useStore.setState({ selItem: occ.id, epMove: occ.id }); s.setTool('epMove'); }}>Mover / girar con la tríada…</button>

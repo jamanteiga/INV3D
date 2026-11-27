@@ -3,13 +3,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../core/store';
 import { saveText } from '../core/files';
 import { Modal } from './Panels';
-import { UnitsTab, LabelsTab, BoltsTab, BudgetTab, StatusTab } from './FabTabs';
+import { UnitsTab, LabelsTab, BoltsTab, BudgetTab, StatusTab, RevTab } from './FabTabs';
 import { collectFlats, nest, placedPolys, nestDxf, buildSpools, spoolSvg, spoolsCsv, assemblyDrawing, partDrawings, type NestPiece } from './fab';
 
 const SHEETS: [number, number][] = [[1000, 2000], [1250, 2500], [1500, 3000]];
 const f = (x: number, d = 1) => x.toLocaleString('es-ES', { minimumFractionDigits: d, maximumFractionDigits: d });
 
-type Tab = 'nest' | 'spools' | 'draw' | 'units' | 'labels' | 'bolts' | 'budget' | 'status';
+type Tab = 'nest' | 'spools' | 'draw' | 'units' | 'labels' | 'bolts' | 'budget' | 'status' | 'rev';
 export default function FabDialog({ onClose, tab: tab0 }: { onClose: () => void; tab?: Tab }) {
   const s = useStore();
   const [tab, setTab] = useState<Tab>(tab0 ?? 'nest');
@@ -17,9 +17,9 @@ export default function FabDialog({ onClose, tab: tab0 }: { onClose: () => void;
   return (
     <Modal title="Fabricación" onClose={onClose} xwide>
       <div className="ai-row" style={{ gap: 6, flexWrap: 'wrap' }}>
-        {([['nest', 'Anidado'], ['spools', 'Spools'], ['units', 'Unidades e izado'], ['labels', 'Etiquetas QR'], ['bolts', 'Tornillería'], ['budget', 'Presupuesto'], ['status', 'Estados'], ['draw', 'Planos']] as const).map(([k, n]) => <button key={k} className={`btn sm ${tab === k ? 'primary' : ''}`} onClick={() => setTab(k)}>{n}</button>)}
+        {([['nest', 'Anidado'], ['spools', 'Spools'], ['units', 'Unidades e izado'], ['labels', 'Etiquetas QR'], ['bolts', 'Tornillería'], ['budget', 'Presupuesto'], ['status', 'Estados'], ['rev', 'Revisiones'], ['draw', 'Planos']] as const).map(([k, n]) => <button key={k} className={`btn sm ${tab === k ? 'primary' : ''}`} onClick={() => setTab(k)}>{n}</button>)}
       </div>
-      {tab === 'nest' ? <NestTab base={base} /> : tab === 'spools' ? <SpoolTab base={base} /> : tab === 'units' ? <UnitsTab base={base} /> : tab === 'labels' ? <LabelsTab base={base} /> : tab === 'bolts' ? <BoltsTab base={base} /> : tab === 'budget' ? <BudgetTab base={base} /> : tab === 'status' ? <StatusTab /> : <DrawTab onClose={onClose} />}
+      {tab === 'nest' ? <NestTab base={base} /> : tab === 'spools' ? <SpoolTab base={base} /> : tab === 'units' ? <UnitsTab base={base} /> : tab === 'labels' ? <LabelsTab base={base} /> : tab === 'bolts' ? <BoltsTab base={base} /> : tab === 'budget' ? <BudgetTab base={base} /> : tab === 'status' ? <StatusTab /> : tab === 'rev' ? <RevTab base={base} /> : <DrawTab onClose={onClose} />}
       <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
     </Modal>
   );

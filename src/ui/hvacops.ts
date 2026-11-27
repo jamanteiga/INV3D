@@ -43,7 +43,7 @@ export function ductKg(sp: HvacSpec, L: number, flanges = 0, gaskets = 0, g = se
 }
 
 /** Documento de pieza (reutiliza el ya abierto con el mismo nombre) */
-function partFor(doc: PartDoc) {
+export function partFor(doc: PartDoc) {
   const s = S(); const fn = doc.iProperties.partNumber.replace(/[\\/:*?"<>|]+/g, '_') + '.i3p';
   return s.docs.find((d) => d.fileName === fn)?.id ?? s.addDocument('part', doc, fn, false);
 }
@@ -161,6 +161,7 @@ function gasketAt(occ: string, ep: string) {
     const other = s.asm.occurrences.find((x) => x.id === (me === 'a' ? j.b.occ : j.a.occ)); return specOf(other?.part ?? '')?.kind === 'gasket'; });
 }
 /** Bocas de entrada y salida del tramo (la de entrada es la de su unión con la pieza anterior) */
+export const inOutOf = (occ: string) => inOut(occ);
 function inOut(occ: string) { const jIn = foranJoint(occ); const eIn = jIn?.ep ? (jIn.a.occ === occ ? jIn.ep.a : jIn.ep.b) : 'ep1'; return { eIn, eOut: eIn === 'ep2' ? 'ep1' : 'ep2' }; }
 
 /** Longitud máxima (mm) de una parte con `nf` bridas y `ng` juntas que cumple la longitud y el peso máximos */

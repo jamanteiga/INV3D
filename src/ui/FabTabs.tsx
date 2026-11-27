@@ -77,3 +77,27 @@ export function StatusTab() {
     <div className="ai-row"><button className="btn" onClick={() => useAsmCalc.setState({ colorBy: useAsmCalc.getState().colorBy === 'status' ? 'none' : 'status' })}>{useAsmCalc.getState().colorBy === 'status' ? 'Colores por material' : 'Colores por estado'}</button></div>
   </>);
 }
+
+export function RevTab({ base }: { base: string }) {
+  const s = useStore(); const [mod, setMod] = useState<typeof import('./asmextra') | null>(null); const [cmp, setCmp] = useState<{ id: string; d: import('./asmextra').RevDiff } | null>(null);
+  useMemo(() => { void import('./asmextra').then(setMod); }, []);
+  if (!mod) return <p className="phelp">Cargando…</p>;
+  const revs = mod.revisions(); const nm = (id: string) => s.asm.occurrences.find((o) => o.id === id)?.name ?? id;
+  return (<>
+    <p className="phelp">Guarda una <b>revisión</b> del ensamblaje (piezas y posiciones) y compárala después con el estado actual: <span style={{ color: '#27ae60' }}>■ nuevas</span>, <span style={{ color: '#f2994a' }}>■ modificadas</span> (otra pieza, movidas o giradas) en el 3D, y la lista de las eliminadas.</p>
+    <div className="ai-row"><button className="btn primary" onClick={() => { const v = prompt('Nombre de la revisión', String.fromCharCode(65 + revs.length)); if (v?.trim()) mod.saveRevision(v.trim()); }}>Guardar revisión actual</button>
+      {cmp && <button className="btn" onClick={() => { setCmp(null); useAsmCalc.setState({ colorBy: 'none' }); }}>Quitar colores</button>}</div>
+    {revs.length ? <table className="bom-table"><thead><tr><th>Revisión</th><th>Fecha</th><th>Piezas</th><th /></tr></thead>
+      <tbody>{revs.map((r) => <tr key={r.id}><td>{r.name}</td><td>{r.date}</td><td>{Object.keys(r.snap).length}</td><td style={{ whiteSpace: 'nowrap' }}><button className="btn sm" onClick={() => { const d = mod.compareRevision(r.id); if (d) setCmp({ id: r.id, d }); }}>Comparar con la actual</button> <button className="btn sm" onClick={() => mod.deleteRevision(r.id)}>✕</button></td></tr>)}</tbody></table>
+      : <p className="phelp">Sin revisiones guardadas.</p>}
+    {cmp && (<>
+      <p className="phelp"><b>{cmp.d.added.length}</b> nuevas · <b>{cmp.d.changed.length}</b> modificadas · <b>{cmp.d.removed.length}</b> eliminadas respecto a {revs.find((r) => r.id === cmp.id)?.name}</p>
+      <div style={{ maxHeight: 220, overflow: 'auto' }}><table className="bom-table"><tbody>
+        {cmp.d.added.map((id) => <tr key={'a' + id}><td style={{ color: '#27ae60' }}>Nueva</td><td>{nm(id)}</td><td /></tr>)}
+        {cmp.d.changed.map((c) => <tr key={'c' + c.id}><td style={{ color: '#f2994a' }}>Modificada</td><td>{nm(c.id)}</td><td>{c.why}</td></tr>)}
+        {cmp.d.removed.map((r, i) => <tr key={'r' + i}><td style={{ color: '#c0392b' }}>Eliminada</td><td>{r.name}</td><td>{r.pn}</td></tr>)}
+      </tbody></table></div>
+      <div className="ai-row"><button className="btn" onClick={() => saveText(csv([['Cambio', 'Componente', 'Detalle'], ...cmp.d.added.map((id) => ['Nueva', nm(id), '']), ...cmp.d.changed.map((c) => ['Modificada', nm(c.id), c.why]), ...cmp.d.removed.map((r) => ['Eliminada', r.name, r.pn])]), `${base}-cambios.csv`, 'CSV', '.csv', 'text/csv')}>Exportar cambios (CSV)</button></div>
+    </>)}
+  </>);
+}

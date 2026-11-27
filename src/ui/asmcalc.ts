@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { useStore } from '../core/store';
 import { uid, v3, type V3, type PartDoc } from '../core/doc';
 import { q as qq, xfPoint, type Xform } from '../core/asm';
-import { makeHvacPart, type HvacSpec } from '../core/hvac';
+import { makeHvacPart, autoT, type HvacSpec } from '../core/hvac';
 import { ductFriction, FITTING_LOSSES } from '../core/hvacdata';
 import { xfOf, epGroup } from './actions';
 
@@ -15,7 +15,7 @@ const specOf = (pid: string) => (S().docData(pid) as HPart | null)?.hvacSpec;
 // ---------- estado de cálculo y colores ----------
 export interface PieceCalc { occ: string; name: string; kind: string; size: string; q: number; v: number; R: number; L: number; dpF: number; zeta: number; dpS: number; dp: number; warn?: string }
 export interface AsmCalc { rows: PieceCalc[]; paths: { term: string; name: string; dp: number }[]; index: string[]; fanDp: number; qTot: number; source: string; warnings: string[] }
-export const useAsmCalc = create<{ calc: AsmCalc | null; colorBy: 'none' | 'velocity' | 'system' | 'status'; vMax: number; rMax: number }>(() => ({ calc: null, colorBy: 'none', vMax: 8, rMax: 1.5 }));
+export const useAsmCalc = create<{ revDiff?: { added: Set<string>; changed: Set<string> }; calc: AsmCalc | null; colorBy: 'none' | 'velocity' | 'system' | 'status' | 'revision'; vMax: number; rMax: number }>(() => ({ calc: null, colorBy: 'none', vMax: 8, rMax: 1.5 }));
 
 export const SYS_COLORS = ['#2f80ed', '#eb5757', '#27ae60', '#f2994a', '#9b51e0', '#56ccf2', '#bb6bd9', '#219653', '#f2c94c', '#828282'];
 /** Color de un sistema (por orden de aparición en el ensamblaje) */
@@ -27,6 +27,7 @@ export function systemColor(name: string) {
 export function calcColor(occ: string): string | null {
   const st = useAsmCalc.getState();
   if (st.colorBy !== 'none' && (S().asm.occurrences.find((x) => x.id === occ) as { tag?: string } | undefined)?.tag) return null; // soportes y aislamiento: su material
+  if (st.colorBy === 'revision') return st.revDiff?.added.has(occ) ? '#27ae60' : st.revDiff?.changed.has(occ) ? '#f2994a' : '#c3c8cf';
   if (st.colorBy === 'status') { const o = S().asm.occurrences.find((x) => x.id === occ); return STATUS_COLORS[o?.status ?? 'design']; }
   if (st.colorBy === 'system') { const o = S().asm.occurrences.find((x) => x.id === occ); return o?.system ? systemColor(o.system) : '#c3c8cf'; }
   if (st.colorBy === 'velocity') {
@@ -124,13 +125,15 @@ export function addSupports(spacing = 2500, rod = 500, scope?: string[]) {
   for (const o of runs) {
     const sp = specOf(o.part)!; const X = xfOf(o.id);
     const ax = v3.norm(qq.rotate(X.quat, [0, 0, 1]) as V3);
-    if (Math.abs(ax[2]) > 0.2) { skipped++; continue; } // vertical o inclinado: sin trapecio
-    const up: V3 = [0, 0, 1]; const xw = v3.norm(v3.cross(up, ax) as V3);
+    const vert = Math.abs(ax[2]) > 0.8;
+    if (!vert && Math.abs(ax[2]) > 0.2) { skipped++; continue; } // inclinado: sin soporte automático
+    // vertical: ménsula a pared (el trapecio girado: brazos horizontales hacia el lado W del conducto)
+    const up: V3 = vert ? v3.norm(qq.rotate(X.quat, [1, 0, 0]) as V3) : [0, 0, 1]; const xw = v3.norm(v3.cross(up, ax) as V3);
     // la anchura del soporte va en horizontal: si el lado W del conducto está en vertical se cambian W y H
-    const wLocal = v3.norm(qq.rotate(X.quat, [1, 0, 0]) as V3); const swap = Math.abs(wLocal[2]) > 0.7;
-    const ssp: HvacSpec = { ...sp, kind: 'support', L: rod, W: swap ? sp.H : sp.W, H: swap ? sp.W : sp.H, ends: 'none' };
+    const wLocal = v3.norm(qq.rotate(X.quat, [1, 0, 0]) as V3); const swap = !vert && Math.abs(wLocal[2]) > 0.7;
+    const ssp: HvacSpec = { ...sp, kind: 'support', L: vert ? 300 : rod, W: swap ? sp.H : sp.W, H: swap ? sp.W : sp.H, ends: 'none' };
     const pid = partFor(makeHvacPart(ssp));
-    const n = Math.max(1, Math.round(sp.L / spacing));
+    const n = Math.max(1, Math.round(sp.L / (vert ? Math.max(spacing, 3000) : spacing)));
     // base: X ↦ xw, Y ↦ arriba, Z ↦ eje del conducto
     const quat = quatFromBasis(xw, up, ax);
     for (let k = 0; k < n; k++) {
@@ -139,20 +142,28 @@ export function addSupports(spacing = 2500, rod = 500, scope?: string[]) {
     }
   }
   s.commitAsm((a) => { const cnt = new Map<string, number>(); for (const it of out) { const c = (cnt.get(it.pid) ?? 0) + 1; cnt.set(it.pid, c); a.occurrences.push({ id: uid('o'), name: `${it.name}:${c}`, part: it.pid, xf: it.xf, grounded: true, tag: 'support' } as typeof a.occurrences[number]); } });
-  s.notify(`${out.length} soporte(s) cada ≈${spacing} mm${skipped ? ` · ${skipped} tramo(s) vertical(es) sin soporte` : ''}`);
+  s.notify(`${out.length} soporte(s) cada ≈${spacing} mm (verticales: ménsula a pared cada ≈${Math.max(spacing, 3000)} mm)${skipped ? ` · ${skipped} tramo(s) inclinado(s) sin soporte` : ''}`);
 }
 // ---------- aislamiento ----------
 /** Espesor mínimo RITE IT 1.2.4.2.1 (λ = 0,04 W/m·K) */
 export const riteMin = (where: 'int' | 'ext', mode: 'cold' | 'hot') => (where === 'int' ? (mode === 'hot' ? 20 : 30) : mode === 'hot' ? 30 : 50);
 export function addInsulation(e: number, scope?: string[]) {
   const s = S(); removeTagged('insulation', scope);
-  const out: { pid: string; xf: Xform }[] = [];
+  const out: { pid: string; xf: Xform }[] = []; let elb = 0, elbSkip = 0;
   for (const o of s.asm.occurrences) {
-    if (scope && !scope.includes(o.id)) continue; const sp = specOf(o.part); if (!sp || sp.kind !== 'duct') continue;
+    if (scope && !scope.includes(o.id)) continue; const sp = specOf(o.part); if (!sp || (sp.kind !== 'duct' && sp.kind !== 'elbow')) continue;
+    if (sp.kind === 'elbow') {
+      // codo: otra «piel» de codo con el mismo eje (radio de eje igual) y el aislamiento como espesor
+      const t = autoT(sp), sq = sp.shape === 'rect' && sp.elbowType === 'square'; if (sq) { elbSkip++; continue; }
+      const base = sp.shape === 'round' ? sp.D : sp.W, rw = sp.rw ?? (sp.shape === 'round' ? 1.5 : 1), Rc = rw * base;
+      const isp: HvacSpec = { ...sp, W: sp.W + 2 * t, H: sp.H + 2 * t, D: sp.D + 2 * t, t: e, rw: Rc / (base + 2 * t), ends: 'none', endsAt: undefined, material: 'Lana mineral 40 kg/m³' };
+      try { const d = makeHvacPart(isp); d.iProperties.partNumber = `Aislamiento codo ${sp.angle ?? 90} ${sp.shape === 'round' ? 'Ø' + sp.D : sp.W + '×' + sp.H} e=${e}`; d.iProperties.description = `Aislamiento de ${e} mm para codo ${sp.shape === 'round' ? 'Ø' + sp.D : sp.W + '×' + sp.H}`; out.push({ pid: partFor(d), xf: xfOf(o.id) }); elb++; } catch { elbSkip++; }
+      continue;
+    }
     out.push({ pid: partFor(makeHvacPart({ ...sp, kind: 'insulation', ins: e, ends: 'none', material: 'Lana mineral 40 kg/m³' })), xf: xfOf(o.id) });
   }
   s.commitAsm((a) => { const cnt = new Map<string, number>(); for (const it of out) { const c = (cnt.get(it.pid) ?? 0) + 1; cnt.set(it.pid, c); a.occurrences.push({ id: uid('o'), name: `${nameOf(it.pid)}:${c}`, part: it.pid, xf: { pos: [...it.xf.pos] as V3, quat: [...it.xf.quat] as Xform['quat'] }, grounded: true, tag: 'insulation' } as typeof a.occurrences[number]); } });
-  s.notify(`Aislamiento de ${e} mm en ${out.length} tramo(s) recto(s) (codos y accesorios: aislar en obra)`);
+  s.notify(`Aislamiento de ${e} mm en ${out.length - elb} tramo(s) recto(s) y ${elb} codo(s)${elbSkip ? ` · ${elbSkip} codo(s) rectos con álabes y accesorios: aislar en obra` : ' (accesorios: aislar en obra)'}`);
 }
 function removeTagged(tag: string, scope?: string[]) {
   const s = S(); const keep = (o: { tag?: string; xf: Xform }) => o.tag !== tag;

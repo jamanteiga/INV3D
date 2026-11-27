@@ -44,7 +44,7 @@ export function labelItems(what: 'pieces' | 'units'): Label[] {
     lines: [`${r.n} piezas · ${Math.round(r.dims[0])}×${Math.round(r.dims[1])}×${Math.round(r.dims[2])} mm`, `Peso ${f1(r.kg)} kg · izado ${f1(r.lift)} kg`, `CdG ${r.cog.map((x) => Math.round(x)).join(', ')}`, `${asmName}${proj ? ' · ' + proj : ''}`],
     qr: `INV3D|${proj}|${asmName}|${r.u.name}|${r.kg.toFixed(1)}kg`,
   }));
-  return occs().filter((o) => !o.tag).map((o) => {
+  return occs().filter((o) => !o.tag || o.tag === 'penetration').map((o) => {
     const pd = partOf(o.part); const kg = occKg(o.id); const u = unitOf(o.id);
     const sz = pd?.hvacSpec ? (pd.hvacSpec.shape === 'round' ? `Ø${pd.hvacSpec.D}` : `${pd.hvacSpec.W}×${pd.hvacSpec.H}`) + (pd.hvacSpec.kind === 'duct' ? ` L=${pd.hvacSpec.L}` : '') : pd?.pipeSpec ? `${pd.pipeSpec.size}${pd.pipeSpec.norm === 'ASME' ? '"' : ''}${pd.pipeSpec.length ? ' L=' + pd.pipeSpec.length : ''}` : '';
     return { code: o.name, title: pd?.iProperties?.description?.slice(0, 60) || o.name,

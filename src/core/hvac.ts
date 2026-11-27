@@ -7,7 +7,7 @@ import type { EPoint } from './epoints';
 export type HvacKind =
   | 'duct' | 'elbow' | 'transition' | 'branch' | 'coupling' | 'cap' | 'plenum'
   | 'grille' | 'diffuser' | 'damper' | 'firedamper' | 'silencer' | 'flex' | 'ahu' | 'fancoil'
-  | 'flange' | 'support' | 'insulation' | 'gasket';
+  | 'flange' | 'support' | 'insulation' | 'gasket' | 'penetration';
 
 /** Sección: rectangular, circular u oval plana (dos semicírculos unidos por tramos rectos: anchura = eje mayor) */
 export type DuctShape = 'rect' | 'round' | 'oval';
@@ -504,6 +504,18 @@ function makeInsulation(s: HvacSpec): PartDoc {
   d.features = b.f; return d;
 }
 
+/** Paso por mamparo / cubierta: manguito (holgura 10 mm) + chapa de refuerzo (coaming); con `ins` > 0, aislamiento A-60 alrededor */
+function makePenetration(s: HvacSpec): PartDoc {
+  const t = autoT(s), L = s.L > 0 ? s.L : 300, gap = 10, ts = Math.max(4, 3 * t), pl = 6, mg = 100, b = new B();
+  const g0 = 2 * t + 2 * gap;
+  b.ext('Manguito', XY(-L / 2), [secE(s.shape, s.W, s.H, s.D, g0 + 2 * ts), secE(s.shape, s.W, s.H, s.D, g0)], L);
+  b.ext('Chapa de refuerzo', XY(-pl / 2), [secE(s.shape, s.W, s.H, s.D, g0 + 2 * ts + 2 * mg), secE(s.shape, s.W, s.H, s.D, g0 + 2 * ts)], pl, 'join');
+  if (s.ins && s.ins > 0) b.ext('Aislamiento A-60', XY(-L / 2), [secE(s.shape, s.W, s.H, s.D, g0 + 2 * ts + 2 * s.ins), secE(s.shape, s.W, s.H, s.D, g0 + 2 * ts)], L, 'join');
+  const cls = s.ins && s.ins > 0 ? 'A-60' : 'estanco';
+  const d = doc({ ...s, material: s.material }, `Paso mamparo ${sizeLabel(s)} ${cls}`, `Paso por mamparo/cubierta ${cls} para conducto ${sizeLabel(s)} · manguito ${L} mm e=${ts}, holgura ${gap} mm, chapa de refuerzo ${pl} mm (+${mg} mm)${s.ins ? ` · aislamiento ${s.ins} mm` : ''}`);
+  d.features = b.f; return d;
+}
+
 /** Elementos que admiten sección oval plana */
 export const OVAL_KINDS: HvacKind[] = ['duct', 'elbow', 'transition', 'coupling', 'cap', 'flange', 'support', 'insulation'];
 export function makeHvacPart(s: HvacSpec): PartDoc {
@@ -610,6 +622,7 @@ function makeHvacPart0(s: HvacSpec): PartDoc {
     case 'flange': return makeFlangeFrame(s);
     case 'support': return makeSupport(s);
     case 'insulation': return makeInsulation(s);
+    case 'penetration': return makePenetration(s);
     case 'gasket': return makeGasket(s);
   }
 }
@@ -618,7 +631,7 @@ export const HVAC_KINDS: Record<HvacKind, string> = {
   duct: 'Conducto recto', elbow: 'Codo', transition: 'Transición / reducción / desvío', branch: 'Derivación', coupling: 'Manguito de unión (espiral)', cap: 'Tapa final', plenum: 'Plenum',
   grille: 'Rejilla', diffuser: 'Difusor', damper: 'Compuerta de regulación', firedamper: 'Compuerta cortafuegos', silencer: 'Silenciador', flex: 'Conducto flexible',
   ahu: 'UTA (climatizadora)', fancoil: 'Fancoil de conductos',
-  flange: 'Brida / marco', support: 'Soporte', insulation: 'Aislamiento', gasket: 'Junta de brida',
+  flange: 'Brida / marco', support: 'Soporte', insulation: 'Aislamiento', gasket: 'Junta de brida', penetration: 'Paso por mamparo',
 };
 export const HVAC_GROUPS: [string, HvacKind[]][] = [
   ['Conductos', ['duct', 'elbow', 'transition', 'branch', 'coupling', 'cap', 'plenum']],

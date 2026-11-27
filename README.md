@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.55
+## Versión 0.56
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,13 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.56** — coordinación y tendido
+- **Soportes en verticales**: HVAC › Ingeniería › *Soportes* pone también **ménsulas a pared** en los tramos verticales (cada ≥ 3000 mm, brazos hacia el lado W); los inclinados se avisan.
+- **Aislamiento de codos**: *Aislamiento* aísla también los codos con radio, prensados y por gajos (misma línea de eje, con el espesor elegido); los codos rectos con álabes y accesorios se indican para aislar en obra.
+- **Pasos por mamparo / cubierta** (clic derecho sobre un tramo recto › *Paso por mamparo aquí (estanco)* o *(A-60)…*): manguito con holgura de 10 mm, chapa de refuerzo de 6 mm (+100 mm) y, en A-60, aislamiento del espesor indicado; en la lista de materiales y etiquetas.
+- **Plantillas de tendido**: clic derecho › *Ramal ▸ Guardar como plantilla…* (el ramal o las piezas resaltadas, con sus uniones); en cualquier boca libre, clic derecho sobre el ePoint › *Insertar plantilla* › nombre: se inserta orientada y unida a la boca, a 0 GDL. Se guardan en este navegador.
+- **Revisiones** (Fabricación › *Revisiones*): *Guardar revisión actual* y *Comparar con la actual*: piezas **nuevas** (verde) y **modificadas** (naranja: otra pieza, movidas o giradas) en el 3D, lista de **eliminadas** y CSV de cambios.
 
 **Novedades 0.55** — taller (HVAC › Ingeniería › *Fabricación*)
 - **Unidades e izado**: por unidad de montaje, medidas de la caja envolvente, peso, **centro de gravedad** (X, Y, Z del ensamblaje) y **peso de izado** con suplemento de eslingas y útiles (10 % por defecto); CSV.
