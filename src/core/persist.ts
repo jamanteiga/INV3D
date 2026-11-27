@@ -33,7 +33,7 @@ export interface AppSettings {
   /** Tramos rectos de conducto: longitud (mm) y peso (kg) máximos; unión al dividir/cortar; espesor de junta; dividir al insertar */
   /** Holguras al insertar */
   clearCheck?: boolean; clearMin?: number;
-  segMaxL?: number; segMaxKg?: number; segJoint?: 'tdc' | 'angle'; segGasket?: number; segAuto?: boolean;
+  segMaxL?: number; segMaxKg?: number; segJoint?: 'tdc' | 'angle'; segGasket?: number; segAuto?: boolean; segMode?: 'max' | 'equal';
 }
 export const DEFAULT_SETTINGS: AppSettings = {
   userName: '', company: '', defaultMaterial: 'Acero S275JR', restoreSession: true, autosave: true, autosaveFolder: true, autosaveMin: 2,

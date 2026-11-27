@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.53.1
+## Versión 0.53.2
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.53.2**
+- **División por la longitud que cumple**: el tramo se parte en piezas de la **longitud máxima que cumple a la vez 1500 mm y 80 kg** (cada pieza con sus bridas reales y la junta de su salida) y el **resto en la última**. Ejemplo: 2000×1000 e 1,2 de 4000 mm → 1331 (sin brida de entrada) + 1270 + 1270 + 117 mm, a 80 kg las completas. Archivo › Opciones de la aplicación › *Tramos rectos de conducto › Reparto*: *longitud máxima + resto* (por defecto) o *partes iguales*.
+- **Actualización automática**: al cambiar el ensamblaje (insertar, *Longitud del tramo…*, cambiar sección, chapa o uniones, editar el componente) los tramos que pasen de los máximos se vuelven a dividir solos. Tras **deshacer** no se vuelve a dividir hasta el siguiente cambio. Se desactiva en la misma sección de Opciones.
 
 **Novedades 0.53.1**
 - **Tramos de longitud o peso máximos con bridas y juntas incluidas**: cada parte cuenta con sus **2 bridas y una junta**. Longitud = tramo con sus bridas + junta ≤ máximo (1500 mm); peso = chapa + 2 bridas (TDC o marco angular con su ala, con las medidas reales del modelo) + junta EPDM ≤ máximo (80 kg). Ejemplo: 2000×1000 e 1,2 de 4000 mm → 4 partes de 997 mm (con 3 partes saldrían ≈ 83 kg). Indicado en Archivo › Opciones de la aplicación › *Tramos rectos de conducto*.

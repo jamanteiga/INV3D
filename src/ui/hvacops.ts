@@ -148,26 +148,80 @@ function orient(occ: string, sp: HvacSpec) {
   return eIn === 'ep2' ? { f0: f.f1, f1: f.f0 } : f;
 }
 
-/** Dividir el tramo en partes iguales que no pasen de la longitud ni del peso máximos (bridas + junta entre partes) */
+/** ¿Hay una junta unida a la boca `ep` del componente? */
+function gasketAt(occ: string, ep: string) {
+  const s = S();
+  return s.asm.joints.some((j) => { if (!j.ep || j.suppressed) return false; const me = j.a.occ === occ ? 'a' : j.b.occ === occ ? 'b' : null; if (!me || j.ep[me] !== ep) return false;
+    const other = s.asm.occurrences.find((x) => x.id === (me === 'a' ? j.b.occ : j.a.occ)); return specOf(other?.part ?? '')?.kind === 'gasket'; });
+}
+/** Bocas de entrada y salida del tramo (la de entrada es la de su unión con la pieza anterior) */
+function inOut(occ: string) { const jIn = foranJoint(occ); const eIn = jIn?.ep ? (jIn.a.occ === occ ? jIn.ep.a : jIn.ep.b) : 'ep1'; return { eIn, eOut: eIn === 'ep2' ? 'ep1' : 'ep2' }; }
+
+/** Longitud máxima (mm) de una parte con `nf` bridas y `ng` juntas que cumple la longitud y el peso máximos */
+function maxPart(sp: HvacSpec, nf: number, ng: number) {
+  const { maxL, maxKg, joint, g } = segCfg();
+  const b = ductKg(sp, 0, nf, ng, g, joint), a = ductKg(sp, 1000, 0, 0, g, joint) / 1000;
+  return Math.floor(Math.min(maxL - ng * g, (maxKg - b) / a));
+}
+/** Peso y longitud de un tramo con sus bridas y la junta de su salida */
+export function ductCheck(occ: string) {
+  const o = S().asm.occurrences.find((x) => x.id === occ); const sp = o && specOf(o.part); if (!sp || sp.kind !== 'duct') return null;
+  const { maxL, maxKg, joint, g } = segCfg(); const fo = origFlanges(sp), nf = (fo.f0 ? 1 : 0) + (fo.f1 ? 1 : 0), ng = gasketAt(occ, inOut(occ).eOut) ? 1 : 0;
+  const kg = ductKg(sp, sp.L, nf, ng, g, joint), len = sp.L + ng * g;
+  return { kg, len, ok: kg <= maxKg + 1e-6 && len <= maxL + 1e-6 };
+}
+
+/** Divide el tramo: partes de la longitud máxima que cumple (longitud y peso con sus bridas y la junta de su salida)
+ *  y el resto en la última; o en partes iguales (Archivo › Opciones › Tramos) */
 export function segmentDuct(occ: string, quiet = false) {
   const s = S(); const o = s.asm.occurrences.find((x) => x.id === occ); const sp = o && specOf(o.part);
   if (!sp || sp.kind !== 'duct') { if (!quiet) s.notify('Dividir: elige un tramo recto de conducto', 'error'); return null; }
-  const { maxL, maxKg, joint, g } = segCfg(); const L = sp.L;
-  const fo = origFlanges(sp), nf0 = (fo.f0 ? 1 : 0) + (fo.f1 ? 1 : 0);
-  // cada parte cuenta con sus 2 bridas y una junta (longitud: tramo con bridas + junta; peso: chapa + 2 bridas + junta)
-  const fits = (n: number) => { if (n === 1) return L <= maxL && ductKg(sp, L, nf0, 0, g, joint) <= maxKg; const seg = (L - (n - 1) * g) / n; return seg + g <= maxL && ductKg(sp, seg, 2, 1, g, joint) <= maxKg; };
-  let n = 1; while (n < 200 && !fits(n)) n++;
-  if (n <= 1) { if (!quiet) s.notify(`El tramo (${L} mm, ≈${ductKg(sp, L, nf0, 0, g, joint).toFixed(1)} kg con bridas) no supera ${maxL} mm ni ${maxKg} kg`); return null; }
-  const seg = (L - (n - 1) * g) / n, r = Math.round(seg);
-  const { f0, f1 } = orient(occ, sp);
-  const chain: string[] = [];
-  for (let k = 0; k < n; k++) {
-    const len = k < n - 1 ? r : L - (n - 1) * g - r * (n - 1);
-    chain.push(ductDoc(sp, len, k === 0 ? f0 : true, k === n - 1 ? f1 : true, joint));
-    if (k < n - 1) chain.push(gasketDoc(sp, g, joint));
+  const { maxL, maxKg, joint, g } = segCfg(); const L = sp.L, mode = s.settings.segMode ?? 'max';
+  const chk = ductCheck(occ)!;
+  if (chk.ok) { if (!quiet) s.notify(`El tramo (${L} mm, ≈${chk.kg.toFixed(1)} kg con bridas y juntas) no supera ${maxL} mm ni ${maxKg} kg`); return null; }
+  const { f0, f1 } = orient(occ, sp); const gOut = gasketAt(occ, inOut(occ).eOut) ? 1 : 0;
+  const lens: number[] = [];
+  if (mode === 'equal') {
+    let n = 2;
+    const fits = (n: number) => { const seg = (L - (n - 1) * g) / n; return seg <= maxPart(sp, 2, 1) && seg <= maxPart(sp, 1 + (f1 ? 1 : 0), gOut); };
+    while (n < 200 && !fits(n)) n++;
+    const r = Math.round((L - (n - 1) * g) / n); for (let k = 0; k < n - 1; k++) lens.push(r); lens.push(L - (n - 1) * (r + g));
+  } else {
+    let rem = L, k = 0;
+    while (k < 200) {
+      const fs = k === 0 ? (f0 ? 1 : 0) : 1;
+      const lastMax = maxPart(sp, fs + (f1 ? 1 : 0), gOut);
+      if (rem <= lastMax && k > 0) { lens.push(rem); break; }
+      const Lk = maxPart(sp, fs + 1, 1);
+      if (Lk < 50) { s.notify('Con esa sección el peso máximo no permite tramos útiles: revisa Archivo › Opciones › Tramos', 'error'); return null; }
+      if (rem <= Lk + g) { const a = Math.floor((rem - g) / 2); lens.push(a, rem - g - a); break; } // la última no cabría entera: se reparten las dos
+      lens.push(Lk); rem -= Lk + g; k++;
+    }
   }
-  return replaceByChain(occ, chain, `Tramo de ${L} mm dividido en ${n} partes de ≈${r} mm (≈${ductKg(sp, r, 2, 1, g, joint).toFixed(1)} kg cada una con 2 bridas y junta; máx. ${maxL} mm / ${maxKg} kg incluidas bridas y juntas)`);
+  const n = lens.length; if (n < 2) return null;
+  const chain: string[] = [];
+  lens.forEach((len, k) => { chain.push(ductDoc(sp, len, k === 0 ? f0 : true, k === n - 1 ? f1 : true, joint)); if (k < n - 1) chain.push(gasketDoc(sp, g, joint)); });
+  const kgs = lens.map((len, k) => ductKg(sp, len, (k === 0 ? (f0 ? 1 : 0) : 1) + (k === n - 1 ? (f1 ? 1 : 0) : 1), k < n - 1 ? 1 : gOut, g, joint));
+  return replaceByChain(occ, chain, `Tramo de ${L} mm dividido en ${n} partes: ${lens.map((x, k) => `${Math.round(x)} mm (${kgs[k].toFixed(1)} kg)`).join(' + ')} · máx. ${maxL} mm / ${maxKg} kg con bridas y juntas`);
 }
+
+// ---------- Actualización automática: al cambiar el ensamblaje o una pieza, los tramos que pasen de los máximos se dividen ----------
+let autoTm: ReturnType<typeof setTimeout> | null = null, busy = false, lastAsm: unknown = null, lastDocs: unknown = null;
+useStore.subscribe((st) => {
+  if (busy || st.kind !== 'assembly' || !(st.settings.segAuto ?? true)) return;
+  if (st.asm === lastAsm && st.docs === lastDocs) return; lastAsm = st.asm; lastDocs = st.docs;
+  if (st.future.length) return; // tras deshacer no se vuelve a dividir
+  if (autoTm) clearTimeout(autoTm);
+  autoTm = setTimeout(() => {
+    const s = S(); if (s.kind !== 'assembly' || s.future.length) return;
+    const bad = s.asm.occurrences.filter((o) => !o.suppressed && isStraightDuct(o.id) && ductCheck(o.id)?.ok === false).map((o) => o.id);
+    if (!bad.length) return;
+    busy = true;
+    try { let n = 0; for (const id of bad) if (segmentDuct(id, true)) n++; if (n > 1) s.notify(`${n} tramos ajustados a ${segCfg().maxL} mm / ${segCfg().maxKg} kg con bridas y juntas`); }
+    finally { busy = false; lastAsm = S().asm; lastDocs = S().docs; }
+  }, 400);
+});
+
 /** Divide todos los tramos rectos del ensamblaje que superen los máximos */
 export function segmentAll() {
   const ids = S().asm.occurrences.filter((o) => isStraightDuct(o.id)).map((o) => o.id);
