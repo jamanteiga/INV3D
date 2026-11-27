@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.53
+## Versión 0.53.1
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.53.1**
+- **Tramos de longitud o peso máximos con bridas y juntas incluidas**: cada parte cuenta con sus **2 bridas y una junta**. Longitud = tramo con sus bridas + junta ≤ máximo (1500 mm); peso = chapa + 2 bridas (TDC o marco angular con su ala, con las medidas reales del modelo) + junta EPDM ≤ máximo (80 kg). Ejemplo: 2000×1000 e 1,2 de 4000 mm → 4 partes de 997 mm (con 3 partes saldrían ≈ 83 kg). Indicado en Archivo › Opciones de la aplicación › *Tramos rectos de conducto*.
 
 **Novedades 0.53** — fabricación desde el ensamblaje
 - **Desarrollo de codos** (clic derecho sobre el codo › *Desarrollo de chapa…*): codo rectangular con radio → **2 tapas** (corona Ri–Re) + **chapa de garganta** y **chapa de talón**; codo recto con álabes → tapas en L y chapas; **codo circular por gajos** → gajos extremos y centrales trazados desde la línea de talón; **virola** circular de costura longitudinal (π·(D+t) × L). Los codos prensados se indican como no desarrollables. Exportación DXF.

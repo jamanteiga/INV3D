@@ -2140,6 +2140,7 @@ function OptionsDialog({ onClose }: { onClose: () => void }) {
           Peso máximo (kg) <input type="number" min={5} step={5} value={st.segMaxKg ?? 80} onChange={(e) => setS({ segMaxKg: Number(e.target.value) || 80 })} style={{ width: 70 }} /></label>
         <label className="row-l">Unión al cortar o dividir <select value={st.segJoint ?? 'tdc'} onChange={(e) => setS({ segJoint: e.target.value as 'tdc' | 'angle' })}><option value="tdc">Brida TDC</option><option value="angle">Marco angular L30×3</option></select>
           Junta (mm) <input type="number" min={1} max={15} step={1} value={st.segGasket ?? 4} onChange={(e) => setS({ segGasket: Number(e.target.value) || 4 })} style={{ width: 55 }} /></label>
+        <p className="phelp">Los máximos incluyen las bridas y la junta de cada parte: longitud = tramo con sus bridas + junta; peso = chapa + 2 bridas + junta EPDM.</p>
         <label className="check"><input type="checkbox" checked={st.segAuto ?? true} onChange={(e) => setS({ segAuto: e.target.checked })} />Dividir solos los tramos que pasen de esos máximos al insertarlos</label>
         <label className="check"><input type="checkbox" checked={st.autosave} onChange={(e) => setS({ autosave: e.target.checked })} />Autoguardar la sesión en el navegador (cada cambio)</label>
         <label className="check"><input type="checkbox" checked={st.autosaveFolder} onChange={(e) => setS({ autosaveFolder: e.target.checked })} />Autoguardar cada

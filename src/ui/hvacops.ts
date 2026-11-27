@@ -6,6 +6,7 @@ import { uid, v3, type V3, type PartDoc } from '../core/doc';
 import { epJoint, partEPoints, type EPoint } from '../core/epoints';
 import { q as qq, type Xform, type Joint } from '../core/asm';
 import { makeHvacPart, type HvacSpec } from '../core/hvac';
+import { autoT } from '../core/hvac';
 import { foranJoint, xfOf } from './actions';
 
 const S = () => useStore.getState();
@@ -20,13 +21,20 @@ export const segCfg = () => { const st = S().settings; return { maxL: st.segMaxL
 /** ¿Es un tramo recto de conducto (con especificación)? */
 export function isStraightDuct(occ: string) { const o = S().asm.occurrences.find((x) => x.id === occ); const sp = o && specOf(o.part); return !!sp && sp.kind === 'duct'; }
 
-/** Peso aproximado (kg) de un tramo: chapa + bridas (acero 7850 kg/m³) */
-export function ductKg(sp: HvacSpec, L: number, flanges = 0) {
-  const t = sp.t ?? (sp.shape === 'round' ? (sp.D <= 200 ? 0.5 : sp.D <= 500 ? 0.6 : sp.D <= 800 ? 0.8 : 1) : Math.max(sp.W, sp.H) <= 500 ? 0.6 : Math.max(sp.W, sp.H) <= 1000 ? 0.8 : Math.max(sp.W, sp.H) <= 2000 ? 1 : 1.2);
-  const per = sp.shape === 'round' ? Math.PI * sp.D : sp.shape === 'oval' ? Math.PI * sp.H + 2 * (sp.W - sp.H) : 2 * (sp.W + sp.H);
-  const k = 7.85e-6, sheet = per * L * t * k;
-  const fl = per * 60 * 3 * k; // brida por extremo (≈ marco 30×30×3)
-  return sheet + flanges * fl;
+/** Peso (kg) de un tramo: chapa + bridas (las mismas medidas que el modelo: TDC o marco angular con su ala, acero 7850)
+ *  + juntas (EPDM 1200 kg/m³, espesor g). La longitud L ya incluye las bridas (van dentro del tramo). */
+export function ductKg(sp: HvacSpec, L: number, flanges = 0, gaskets = 0, g = segCfg().g, joint: 'tdc' | 'angle' = segCfg().joint) {
+  const t = autoT(sp), st = 7.85e-6, epdm = 1.2e-6;
+  const e = sp.ends && sp.ends !== 'none' && sp.ends !== 'socket' ? sp.ends : joint;
+  const fh = e === 'tdc' ? (Math.max(sp.W ?? 0, sp.H ?? 0, sp.D ?? 0) > 1000 ? 40 : 30) : 30, ft = e === 'tdc' ? Math.max(t, 0.8) * 1.5 : 3, coll = e === 'angle' ? 30 : 0;
+  // área de la sección exterior al crecer `x` (mm) por cada lado
+  const sec = (x: number) => sp.shape === 'round' ? (Math.PI / 4) * (sp.D + 2 * x) ** 2
+    : sp.shape === 'oval' ? (Math.PI / 4) * (sp.H + 2 * x) ** 2 + (sp.W - sp.H) * (sp.H + 2 * x) : (sp.W + 2 * x) * (sp.H + 2 * x);
+  const ring = (x0: number, x1: number) => sec(x1) - sec(x0);
+  const sheet = ring(0, t) * L * st;
+  const flange = (ring(t, t + fh) * ft + (coll ? ring(t, t + ft) * coll : 0)) * st;
+  const gasket = ring(t, t + fh) * g * epdm;
+  return sheet + flanges * flange + gaskets * gasket;
 }
 
 /** Documento de pieza (reutiliza el ya abierto con el mismo nombre) */
@@ -145,9 +153,11 @@ export function segmentDuct(occ: string, quiet = false) {
   const s = S(); const o = s.asm.occurrences.find((x) => x.id === occ); const sp = o && specOf(o.part);
   if (!sp || sp.kind !== 'duct') { if (!quiet) s.notify('Dividir: elige un tramo recto de conducto', 'error'); return null; }
   const { maxL, maxKg, joint, g } = segCfg(); const L = sp.L;
-  let n = Math.max(1, Math.ceil(L / maxL));
-  while (n < 200 && ductKg(sp, (L - (n - 1) * g) / n, 2) > maxKg) n++;
-  if (n <= 1) { if (!quiet) s.notify(`El tramo (${L} mm, ≈${ductKg(sp, L).toFixed(1)} kg) no supera ${maxL} mm ni ${maxKg} kg`); return null; }
+  const fo = origFlanges(sp), nf0 = (fo.f0 ? 1 : 0) + (fo.f1 ? 1 : 0);
+  // cada parte cuenta con sus 2 bridas y una junta (longitud: tramo con bridas + junta; peso: chapa + 2 bridas + junta)
+  const fits = (n: number) => { if (n === 1) return L <= maxL && ductKg(sp, L, nf0, 0, g, joint) <= maxKg; const seg = (L - (n - 1) * g) / n; return seg + g <= maxL && ductKg(sp, seg, 2, 1, g, joint) <= maxKg; };
+  let n = 1; while (n < 200 && !fits(n)) n++;
+  if (n <= 1) { if (!quiet) s.notify(`El tramo (${L} mm, ≈${ductKg(sp, L, nf0, 0, g, joint).toFixed(1)} kg con bridas) no supera ${maxL} mm ni ${maxKg} kg`); return null; }
   const seg = (L - (n - 1) * g) / n, r = Math.round(seg);
   const { f0, f1 } = orient(occ, sp);
   const chain: string[] = [];
@@ -156,7 +166,7 @@ export function segmentDuct(occ: string, quiet = false) {
     chain.push(ductDoc(sp, len, k === 0 ? f0 : true, k === n - 1 ? f1 : true, joint));
     if (k < n - 1) chain.push(gasketDoc(sp, g, joint));
   }
-  return replaceByChain(occ, chain, `Tramo de ${L} mm dividido en ${n} partes de ≈${r} mm (≈${ductKg(sp, r, 2).toFixed(1)} kg cada una; máx. ${maxL} mm / ${maxKg} kg) con bridas y juntas`);
+  return replaceByChain(occ, chain, `Tramo de ${L} mm dividido en ${n} partes de ≈${r} mm (≈${ductKg(sp, r, 2, 1, g, joint).toFixed(1)} kg cada una con 2 bridas y junta; máx. ${maxL} mm / ${maxKg} kg incluidas bridas y juntas)`);
 }
 /** Divide todos los tramos rectos del ensamblaje que superen los máximos */
 export function segmentAll() {
