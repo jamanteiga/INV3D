@@ -41,7 +41,7 @@ export function buildContext(s: State = S()): string {
     if (errs?.length) L.push(`Piezas con error: ${errs.map(([k, v]) => `${k}: ${v.error}`).join('; ')}`);
     if (s.selItem) L.push(`Seleccionado: ${s.selItem}`);
     const pc = portsContext(); if (pc) L.push(pc);
-    L.push(`Modo de inserción: ${(s.settings.insertMode ?? 'foran') === 'foran' ? 'Foran (las piezas nuevas se unen por ePoints a la boca libre)' : 'Inventor'}`);
+    L.push(`Modo de inserción: ${(s.settings.insertMode ?? 'foran') === 'foran' ? 'espacial (las piezas nuevas se unen por ePoints a la boca libre)' : 'paramétrica (sigue al cursor y se restringe después)'}`);
   }
   if (s.kind === 'drawing') {
     const w = s.drw;

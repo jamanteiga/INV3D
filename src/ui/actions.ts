@@ -421,7 +421,7 @@ export const asmActions = {
         if (s.placing) s.setTool(null);
         useStore.setState({ createTarget: T });
         if (asmActions.placeAtTarget(partId, extras, { noRecurse: true })) return;
-      } else s.notify('Modo Foran: no hay ninguna boca (ePoint) libre a la que unir la pieza; se coloca con el cursor', 'error');
+      } else s.notify('Inserción espacial: no hay ninguna boca (ePoint) libre a la que unir la pieza; se coloca con el cursor', 'error');
     }
     if (s.placing) s.setTool(null);
     const base = e.fileName.replace(/\.[^.]+$/, '');

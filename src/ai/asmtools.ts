@@ -1,4 +1,4 @@
-// Herramientas de ensamblaje del asistente IA: generadores (HVAC, tubería) colocados y unidos por ePoints (filosofía Foran),
+// Herramientas de ensamblaje del asistente IA: generadores (HVAC, tubería) colocados y unidos por ePoints (inserción espacial),
 // giro/desplazamiento/cambio de boca de las uniones y revisión del ensamblaje.
 import * as THREE from 'three';
 import { useStore } from '../core/store';
@@ -94,7 +94,7 @@ async function placeDoc(pid: string, pl: Placement, F: ReturnType<typeof targetO
 
 export const ASM_TOOLS: GTool[] = [
   { name: 'list_free_ports', description: 'Bocas libres (ePoints sin unir) de los componentes del ensamblaje activo: occ, ep, sección, punto y dirección hacia fuera.' },
-  { name: 'insert_hvac', description: 'Genera una pieza HVAC (conducto, codo, transición, derivación, compuerta, terminal…) y, en un ensamblaje, la coloca UNIDA por ePoints a una boca (filosofía Foran) con 0 GDL. Si spec no da la sección, toma la de la boca de destino. En codos y derivaciones rectangulares hacia el lado H se cambian W y H solos.',
+  { name: 'insert_hvac', description: 'Genera una pieza HVAC (conducto, codo, transición, derivación, compuerta, terminal…) y, en un ensamblaje, la coloca UNIDA por ePoints a una boca (inserción espacial) con 0 GDL. Si spec no da la sección, toma la de la boca de destino. En codos y derivaciones rectangulares hacia el lado H se cambian W y H solos.',
     parameters: { type: 'OBJECT', properties: {
       spec: { type: 'STRING', description: 'JSON HvacSpec: {"kind":"duct|elbow|transition|branch|coupling|cap|plenum|grille|diffuser|damper|firedamper|silencer|flex|ahu|fancoil|flange","shape":"rect|round|oval","W":600,"H":400,"D":400,"L":1200,"angle":90,"elbowType":"radius|square|segmented|smooth","shape2":"rect|round","W2":400,"H2":300,"D2":250,"branch":"tee|shoe|y|collar","seam":"long|spiral","ends":"none|tdc|angle|socket"} (W anchura, H altura, D diámetro, mm; L longitud)' },
       at: { type: 'STRING', description: 'JSON {"occ":"...","ep":"ep2"}: boca de destino. Si se omite: la boca libre del componente seleccionado o del último insertado' },
@@ -102,7 +102,7 @@ export const ASM_TOOLS: GTool[] = [
       roll: { type: 'NUMBER', description: 'Giro extra en grados (solo circulares)' },
       first: { type: 'STRING', description: 'Solo si el ensamblaje está vacío: JSON {"ep":"ep1","pos":[x,y,z],"face":"+X","roll":0,"grounded":true} (ePoint que va al punto pos, hacia dónde mira y giro sobre su eje)' },
       summary: { type: 'STRING' } }, required: ['spec', 'summary'] } },
-  { name: 'insert_pipe', description: 'Genera una pieza de tubería ASME/EN (tubo, brida, codo, te, te reducida, cruz, reducción, casquete, portabridas, manguito) y, en un ensamblaje, la coloca unida por ePoints a un extremo libre (Foran), con 0 GDL. Si spec no da norma/tamaño/schedule/material, los toma de la pieza de destino.',
+  { name: 'insert_pipe', description: 'Genera una pieza de tubería ASME/EN (tubo, brida, codo, te, te reducida, cruz, reducción, casquete, portabridas, manguito) y, en un ensamblaje, la coloca unida por ePoints a un extremo libre (inserción espacial), con 0 GDL. Si spec no da norma/tamaño/schedule/material, los toma de la pieza de destino.',
     parameters: { type: 'OBJECT', properties: {
       spec: { type: 'STRING', description: 'JSON PipeSpec: {"kind":"pipe|flange|elbow|tee|rtee|cross|reducer|cap|stub|coupling","norm":"ASME|EN","size":"4" (NPS) o "100" (DN),"size2":"3","sch":"40|STD|80…","wall":3.6 (EN),"length":1000,"flStd":"B16.5|B16.47A|B16.47B|EN1092","rating":150 (clase) o 16 (PN),"flType":"WN|SO|BL|LJ|SW|TH" o tipo EN "01|05|11|12|13","elbow":"LR|SR|3D|5D","angle":90,"ecc":false,"material":"…"}' },
       at: { type: 'STRING', description: 'JSON {"occ":"...","ep":"ep2"} extremo de destino (si se omite: el libre del seleccionado o del último)' },

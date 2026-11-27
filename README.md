@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.49.1
+## Versión 0.49.2
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,9 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.49.2**
+- El modo de inserción pasa a llamarse **Inserción espacial** (la pieza nueva entra unida por ePoints a la boca libre; antes «Foran») e **Inserción paramétrica** (la pieza sigue al cursor y se restringe después; antes «Inventor»). Botón en Ensamblar › Componente, HVAC › Tendido y Mecánica › Tendido, y en Archivo › Opciones de la aplicación.
 
 **Novedades 0.49.1**
 - **Girar como se quiera, siempre desde el ePoint**:
@@ -58,7 +61,7 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 - **Primer componente de un ensamblaje** (desde cualquier sitio: Colocar, HVAC › Conducto…, Mecánica › Tubo…, Crear): se abre *Colocar primer componente* con 1) el **ePoint de la pieza** que se conecta (primero sus bocas ep1, ep2…, después el de inserción y el origen), 2) el **punto de destino** (X, Y, Z; botones *Origen* y puntos de trabajo del ensamblaje), 3) la **orientación**: hacia dónde mira ese ePoint (como en la pieza, ±X, ±Y, ±Z) y **giro sobre su eje** (0/90/180/270° o un ángulo), y si queda fijo. En modo Foran no siguen copias al cursor: las piezas siguientes se conectan por sus ePoints a las bocas libres de esta.
 
 **Novedades 0.46**
-- **Filosofía Foran o Inventor al insertar piezas en un ensamblaje** (botón **Inserción: Foran / Inventor** en Ensamblar › Componente, HVAC › Tendido y Mecánica › Tendido; también en Archivo › Opciones de la aplicación; por defecto **Foran**).
+- **Filosofía Foran o Inventor al insertar piezas en un ensamblaje** (botón **Inserción espacial / paramétrica** en Ensamblar › Componente, HVAC › Tendido y Mecánica › Tendido; también en Archivo › Opciones de la aplicación; por defecto **Foran**).
   - **Foran**: cualquier pieza que se coloca desde la cinta (HVAC › Conducto, Codo…, Mecánica › Tubo, Brida…, Colocar) entra **ya unida por ePoints** a la boca libre de la pieza **seleccionada** o, si no hay selección, de la **última insertada** (por su boca de salida: en un conducto, el otro extremo), encajada (W con W), con el giro bloqueado y 0 GDL. La pieza nueva queda seleccionada, así que se sigue encadenando.
   - **Clic derecho sobre una pieza unida**: *Girar sobre la boca* ±90° o un ángulo (gira también las piezas que cuelgan de ella), *Desplazar…* a lo largo del eje de la unión (0 = encajada), *Cambiar boca · usar otra boca de la pieza*, *Cambiar boca de destino…* (clic en otra boca libre) y *Mover / girar libre* (quita la unión y abre el gizmo). En piezas sueltas: *Unir por ePoint a una boca…*.
   - **Inventor**: como hasta ahora, la pieza sigue al cursor (con imán sobre los ePoints) y se restringe después.
