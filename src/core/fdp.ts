@@ -21,7 +21,9 @@ export interface FdpProject {
   libraries: FdpPath[];
   favorites: FdpPath[];
   folders: { styles: string; templates: string; content: string };
-  options: { oldVersions: number; uniqueNames: boolean; shortcut: string; owner: string; releaseId: string; contentAutoSave: boolean };
+  options: { oldVersions: number; uniqueNames: boolean; shortcut: string; owner: string; releaseId: string; contentAutoSave: boolean;
+    /** Tramos de conducto: longitud (mm) y peso (kg) máximos del proyecto (vacío: los de la aplicación) */
+    segMaxL?: number; segMaxKg?: number };
   /** subcarpetas del espacio de trabajo con su uso (dónde se proponen los documentos nuevos) */
   subdirs: FdpSub[];
   created: string; author?: string; notes?: string;

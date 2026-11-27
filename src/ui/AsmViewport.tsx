@@ -14,7 +14,8 @@ import { makeEval } from '../core/expr';
 import { docParams, planeFrame, toWorld, entityOutline, consumedSketches, resolveWorkPlanes, v3, MATERIALS, type V3, type PartDoc } from '../core/doc';
 import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef, workAxisRef, ASM_REF, type Xform, type AsmDoc, type FaceRef, type JointType } from '../core/asm';
 import { asmActions, foranJoint, epOfOcc, epGroup } from './actions';
-import { isStraightDuct, distAlong, cutDuct, segmentDuct, setDuctLength, segCfg } from './hvacops';
+import { isStraightDuct, distAlong, cutDuct, segmentDuct, setDuctLength, segCfg, unitOf, unitInfo, setUnit, fitUnit, deleteUnit } from './hvacops';
+import UnitBar from './UnitBar';
 import { calcColor, useAsmCalc, setSystem, addSupports, addInsulation, riteMin } from './asmcalc';
 import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
@@ -737,6 +738,11 @@ export default function AsmViewport() {
       if (!downAt || !small || ev.button !== 0 || (tc as any).dragging) { downAt = null; return; }
       downAt = null;
       const s = useStore.getState();
+      if (s.unitPick) {
+        const pk = pickRef(ev); const id = pk && pk.ref.occ !== ASM_REF ? topOf(s, pk.ref.occ) : null;
+        if (id) { const cur = s.selGroup ?? []; useStore.setState({ selGroup: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id], selItem: null }); }
+        return;
+      }
       if (s.tool === 'measure') {
         const mode = useMeasure.getState().mode, hit = hitAt(ev), camDir = V.camDir(), lim = hit ? hit.point.dot(camDir) + V.worldPerPx() * 6 : Infinity;
         let e: MEnt | null = null;
@@ -1068,7 +1074,7 @@ export default function AsmViewport() {
       if (s.dialog !== p.dialog) { buildLines(s); if (!preview(s) && p.dialog?.kind === 'joint') build(s); }
       if (s.placing !== p.placing && s.placing && p.placing && s.placing.occ === p.placing.occ && lastCursor) moveGhost(lastCursor);
       if (s.tool !== p.tool || s.asmResult !== p.asmResult) drawRoute();
-      if (s.selItem !== p.selItem && s.selGroup && !(s.selItem && s.selGroup.includes(s.selItem))) setTimeout(() => useStore.setState({ selGroup: null }), 0);
+      if (!s.unitPick && s.selItem !== p.selItem && s.selGroup && !(s.selItem && s.selGroup.includes(s.selItem))) setTimeout(() => useStore.setState({ selGroup: null }), 0);
       if (p.tool === 'asmCreatePick' && s.tool !== 'asmCreatePick' && (s.reattach || s.routePick)) useStore.setState({ reattach: null, routePick: null });
       if (p.dialog && !s.dialog && s.createTarget) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.createTarget) useStore.setState({ createTarget: null }); }, 0);
       if (p.dialog && !s.dialog && s.inlineAt) setTimeout(() => { const t = useStore.getState(); if (!t.dialog && t.inlineAt) useStore.setState({ inlineAt: null, createTarget: null }); }, 0);
@@ -1113,6 +1119,7 @@ export default function AsmViewport() {
       {(hint || (tool && hints[tool])) && <div className="vp-hint">{hint || hints[tool!]}</div>}
       {ctx && <AsmCtxMenu ctx={ctx} close={() => setCtx(null)} />}
       {axisIn && <AxisInput {...axisIn} close={() => setAxisIn(null)} />}
+      <UnitBar />
     </div>
   );
 }
@@ -1144,6 +1151,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
   const [rotOpen, setRotOpen] = useState(false);
   const [rotAx, setRotAx] = useState<'ep' | 'X' | 'Y' | 'Z'>('ep');
   const [brOpen, setBrOpen] = useState(false);
+  const [unOpen, setUnOpen] = useState(false);
   const occRef = useRef<string | null>(null);
   const rot = (deg: number) => { const id = occRef.current; if (!id) return; if (rotAx === 'ep') asmActions.epRotate(id, deg); else asmActions.epRotateAxis(id, rotAx === 'X' ? [1, 0, 0] : rotAx === 'Y' ? [0, 1, 0] : [0, 0, 1], deg); };
   const s = useStore.getState();
@@ -1241,6 +1249,19 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
         </>)}</>)}
       {occ && !foranJoint(occ.id) && !occ.grounded && (<><hr />
         <button title="Une la pieza a una boca libre de otro componente (elegida en pantalla)" onClick={() => { close(); asmActions.foranReattach(occ.id); }}>Unir por ePoint a una boca…</button></>)}
+      {occ && s.asm.env?.hvac !== false && (() => { const un = unitOf(occ.id); return (<><hr />
+        <button className={unOpen ? 'on' : ''} title="Conjunto de piezas que se fabrica y transporta junto: su longitud (caja envolvente) y su peso, con bridas y juntas, no pasan de los máximos; si pasan se cortan sus tramos rectos de los extremos" onClick={() => setUnOpen(!unOpen)}>Unidad de montaje{un ? ` (${un.name})` : ''} {unOpen ? '▾' : '▸'}</button>
+        {unOpen && (<div className="ctx-indent">
+          <button onClick={() => { close(); useStore.setState({ unitPick: {}, selGroup: [occ.id], selItem: null }); }}>Nueva unidad: elegir piezas con el ratón…</button>
+          <button onClick={() => { close(); setUnit(epGroup(occ.id)); const u = unitOf(occ.id); if (u) setTimeout(() => fitUnit(u.id), 50); }}>Nueva unidad con el ramal</button>
+          {un && <>
+            <button onClick={() => { close(); useStore.setState({ unitPick: { id: un.id }, selGroup: [...un.occs], selItem: null }); }}>Editar piezas de {un.name}…</button>
+            <button onClick={() => { close(); const i = unitInfo(un); s.notify(`${un.name}: ${i.ids.length} piezas · ${Math.round(i.len)} mm · ${i.kg.toFixed(1)} kg (máx. ${segCfg().maxL} mm / ${segCfg().maxKg} kg)`); useStore.setState({ selGroup: [...un.occs], selItem: occ.id }); }}>Ver {un.name} (longitud y peso)</button>
+            <button onClick={() => { close(); fitUnit(un.id); }}>Ajustar {un.name} a los máximos</button>
+            <button onClick={() => { close(); setUnit(un.occs.filter((x) => x !== occ.id), un.id); }}>Quitar la pieza de {un.name}</button>
+            <button onClick={() => { close(); deleteUnit(un.id); }}>Borrar la unidad {un.name}</button>
+          </>}
+        </div>)}</>); })()}
       {occ && (<><hr />
         <button onClick={() => { close(); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.grounded = !t.grounded; }); }}>{occ.grounded ? 'Liberar' : 'Fijar'}</button>
         {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); s.open({ kind: 'occprops', occ: vo?.id ?? occ.id }); }}>Propiedades y cotas…</button>}

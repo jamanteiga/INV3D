@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.53.2
+## Versión 0.54
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,11 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.54** — unidades de montaje y máximos por proyecto
+- **Unidades de montaje**: conjuntos de piezas que se fabrican y transportan juntos (codo con sus rectos, compuerta o silenciador con su tramo…). Clic derecho sobre una pieza › **Unidad de montaje ▸** *Nueva unidad: elegir piezas con el ratón…* (barra inferior: clic en cada pieza para añadirla o quitarla, con la longitud, el peso y ✓/✗ en directo; *Aceptar*) o *Nueva unidad con el ramal*; también *Editar piezas*, *Ver*, *Ajustar a los máximos*, *Quitar la pieza* y *Borrar la unidad*.
+- Longitud de la unidad = lado mayor de su caja envolvente (con bridas y juntas); peso = tramos y juntas por cálculo + resto de piezas por volumen del modelo × densidad. Si pasa de los máximos se ajusta **sola** (actualización automática): se acorta el tramo recto del extremo más alineado con el lado mayor (por longitud) o el más largo (por peso); si al otro lado de su brida ya hay junta + tramo recto, **se le pasa la longitud que sobra**; si no, se corta con brida + junta y la parte cortada sale de la unidad (y se divide con las reglas normales). Los tramos de una unidad no se dividen por separado.
+- **Máximos por proyecto**: Archivo › Proyectos (.fdp) › Opciones › *Tramos de conducto* (longitud y peso del proyecto) y **HVAC › Tendido › Máximos y unidades** (los de este ensamblaje, con la lista de unidades, su longitud, peso y estado). Orden: ensamblaje → proyecto → aplicación (Archivo › Opciones).
 
 **Novedades 0.53.2**
 - **División por la longitud que cumple**: el tramo se parte en piezas de la **longitud máxima que cumple a la vez 1500 mm y 80 kg** (cada pieza con sus bridas reales y la junta de su salida) y el **resto en la última**. Ejemplo: 2000×1000 e 1,2 de 4000 mm → 1331 (sin brida de entrada) + 1270 + 1270 + 117 mm, a 80 kg las completas. Archivo › Opciones de la aplicación › *Tramos rectos de conducto › Reparto*: *longitud máxima + resto* (por defecto) o *partes iguales*.

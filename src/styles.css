@@ -825,3 +825,5 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .ctx-axes button { flex: 1; padding: 2px 0 !important; text-align: center !important; font-size: 11px; border: 1px solid var(--line, #d6d9de) !important; border-radius: 4px; }
 .ctx-axes button.on { background: var(--accent, #2f6fde) !important; color: #fff; }
 .ctx-indent { padding-left: 12px; display: flex; flex-direction: column; }
+.unit-bar { position: absolute; z-index: 40; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; max-width: calc(100% - 32px); padding: 7px 10px; background: var(--panel, #fff); border: 1px solid var(--line, #d6d9de); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.18); font-size: 12.5px; }
+.unit-bar .ok { color: #1f8a4c; font-weight: 600; } .unit-bar .bad { color: #c0392b; font-weight: 600; }

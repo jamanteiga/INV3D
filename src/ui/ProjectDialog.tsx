@@ -111,6 +111,10 @@ export default function ProjectDialog({ onClose, create }: { onClose: () => void
               <label className="check"><input type="checkbox" checked={ed.options.contentAutoSave} onChange={(e) => up({ options: { ...ed.options, contentAutoSave: e.target.checked } })} />Guardar las piezas del centro de contenido en su carpeta al colocarlas</label>
               <Row label="Acceso directo"><input value={ed.options.shortcut} onChange={(e) => up({ options: { ...ed.options, shortcut: e.target.value } })} onKeyDown={(e) => e.stopPropagation()} /></Row>
               <Row label="Propietario"><input value={ed.options.owner} onChange={(e) => up({ options: { ...ed.options, owner: e.target.value } })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+              <div className="plabel">Tramos de conducto (HVAC)</div>
+              <Row label="Longitud máxima (mm)"><input className="num" type="number" min={200} step={50} placeholder="de la aplicación" value={ed.options.segMaxL ?? ''} onChange={(e) => up({ options: { ...ed.options, segMaxL: e.target.value ? Math.max(200, Number(e.target.value)) : undefined } })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+              <Row label="Peso máximo (kg)"><input className="num" type="number" min={5} step={5} placeholder="de la aplicación" value={ed.options.segMaxKg ?? ''} onChange={(e) => up({ options: { ...ed.options, segMaxKg: e.target.value ? Math.max(5, Number(e.target.value)) : undefined } })} onKeyDown={(e) => e.stopPropagation()} /></Row>
+              <p className="phelp">Máximos de cada tramo y de cada unidad de montaje (con bridas y juntas) en los ensamblajes de este proyecto. Vacío: los de Archivo › Opciones de la aplicación. Un ensamblaje puede tener los suyos (HVAC › Tendido › Máximos de tramo).</p>
               <Row label="ID de versión"><input value={ed.options.releaseId} onChange={(e) => up({ options: { ...ed.options, releaseId: e.target.value } })} onKeyDown={(e) => e.stopPropagation()} /></Row>
             </>)}
           </div>

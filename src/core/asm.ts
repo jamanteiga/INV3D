@@ -170,6 +170,10 @@ export interface AsmDoc {
   workPoints?: AsmWorkPoint[];
   /** desplazamientos de explosionado por id (componente o barra) */
   explode: Record<string, V3>;
+  /** Tramos de conducto: máximos propios de este ensamblaje (si no, los del proyecto o de la aplicación) */
+  segCfg?: { maxL?: number; maxKg?: number };
+  /** Unidades de montaje: conjuntos de componentes que se fabrican y transportan juntos (longitud y peso máximos) */
+  segUnits?: { id: string; name: string; occs: string[] }[];
 }
 
 export function newAsm(kind: AsmDoc['kind'] = 'assembly'): AsmDoc {
