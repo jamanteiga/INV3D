@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.54
+## Versión 0.55
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,15 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.55** — taller (HVAC › Ingeniería › *Fabricación*)
+- **Unidades e izado**: por unidad de montaje, medidas de la caja envolvente, peso, **centro de gravedad** (X, Y, Z del ensamblaje) y **peso de izado** con suplemento de eslingas y útiles (10 % por defecto); CSV.
+- **Etiquetas QR**: PDF de etiquetas de **piezas** o de **unidades** (código, descripción, medidas, material, peso, sistema, unidad, estado, proyecto) con QR `INV3D|proyecto|ensamblaje|pieza|unidad|peso`; A4 2×7 (105×42 mm) o etiquetadora 100×50 mm.
+- **Tornillería**: material de unión de todas las uniones embridadas: TDC (esquineras, 4 tornillos M8, clips cada 300 mm, sellante), marco/aro angular (M8 cada 150 mm), juntas EPDM (también las no modeladas) y en tubería espárragos/tuercas/junta por par de bridas según su norma y clase; CSV.
+- **Presupuesto** orientativo: chapa, tubería y otros por kg, aislamiento por m², soportes, juegos de unión, soldaduras y horas de taller y montaje por kg (precios editables, se recuerdan); CSV.
+- **Estados** por pieza (diseñada, revisada, fabricada, enviada, montada) con **colores en el 3D**; clic derecho › *Estado ▸* (a la pieza o al ramal resaltado) o en la pestaña *Estados*, con recuento y %. También en Calcular › Colores › *Estado*.
+- **Anidado**: kg de chapa comprada, neta y recorte.
+- **Remate mínimo** al dividir tramos (300 mm por defecto, Archivo › Opciones › Tramos): si la última parte queda más corta, las dos últimas se reparten a partes iguales.
 
 **Novedades 0.54** — unidades de montaje y máximos por proyecto
 - **Unidades de montaje**: conjuntos de piezas que se fabrican y transportan juntos (codo con sus rectos, compuerta o silenciador con su tramo…). Clic derecho sobre una pieza › **Unidad de montaje ▸** *Nueva unidad: elegir piezas con el ratón…* (barra inferior: clic en cada pieza para añadirla o quitarla, con la longitud, el peso y ✓/✗ en directo; *Aceptar*) o *Nueva unidad con el ramal*; también *Editar piezas*, *Ver*, *Ajustar a los máximos*, *Quitar la pieza* y *Borrar la unidad*.

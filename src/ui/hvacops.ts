@@ -204,6 +204,9 @@ export function segmentDuct(occ: string, quiet = false) {
       lens.push(Lk); rem -= Lk + g; k++;
     }
   }
+  // remate mínimo: si la última queda más corta que el mínimo, las dos últimas se reparten a partes iguales
+  const minL = s.settings.segMinL ?? 300;
+  if (lens.length >= 2 && lens[lens.length - 1] < minL) { const t = lens[lens.length - 2] + g + lens[lens.length - 1], a = Math.ceil((t - g) / 2); lens.splice(-2, 2, a, t - g - a); }
   const n = lens.length; if (n < 2) return null;
   const chain: string[] = [];
   lens.forEach((len, k) => { chain.push(ductDoc(sp, len, k === 0 ? f0 : true, k === n - 1 ? f1 : true, joint)); if (k < n - 1) chain.push(gasketDoc(sp, g, joint)); });

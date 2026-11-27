@@ -14,6 +14,8 @@ export interface Occurrence {
   flow?: number;
   /** Generado automáticamente (soportes, aislamiento): se rehace al repetir la orden */
   tag?: 'support' | 'insulation';
+  /** Estado de fabricación y montaje */
+  status?: 'design' | 'review' | 'fab' | 'sent' | 'mounted';
   /** id del documento de pieza (en el espacio de trabajo / embebido) */
   part: string;
   xf: Xform;

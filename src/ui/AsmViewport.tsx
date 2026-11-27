@@ -16,6 +16,7 @@ import { xfPoint, xfInvPoint, xfInvDir, solveAssembly, ORIGIN_REFS, workPlaneRef
 import { asmActions, foranJoint, epOfOcc, epGroup } from './actions';
 import { isStraightDuct, distAlong, cutDuct, segmentDuct, setDuctLength, segCfg, unitOf, unitInfo, setUnit, fitUnit, deleteUnit } from './hvacops';
 import UnitBar from './UnitBar';
+import { STATUS_NAMES, STATUS_COLORS, setStatus } from './asmcalc';
 import { calcColor, useAsmCalc, setSystem, addSupports, addInsulation, riteMin } from './asmcalc';
 import { normalizeAsm, compose, type FlatOcc } from '../core/subasm';
 import { docGetter } from '../core/store';
@@ -1152,6 +1153,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
   const [rotAx, setRotAx] = useState<'ep' | 'X' | 'Y' | 'Z'>('ep');
   const [brOpen, setBrOpen] = useState(false);
   const [unOpen, setUnOpen] = useState(false);
+  const [stOpen, setStOpen] = useState(false);
   const occRef = useRef<string | null>(null);
   const rot = (deg: number) => { const id = occRef.current; if (!id) return; if (rotAx === 'ep') asmActions.epRotate(id, deg); else asmActions.epRotateAxis(id, rotAx === 'X' ? [1, 0, 0] : rotAx === 'Y' ? [0, 1, 0] : [0, 0, 1], deg); };
   const s = useStore.getState();
@@ -1262,6 +1264,9 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
             <button onClick={() => { close(); deleteUnit(un.id); }}>Borrar la unidad {un.name}</button>
           </>}
         </div>)}</>); })()}
+      {occ && (() => { const tgt = s.selGroup?.includes(occ.id) ? s.selGroup : [occ.id]; return (<>
+        <button className={stOpen ? 'on' : ''} title="Estado de fabricación y montaje (colores por estado)" onClick={() => setStOpen(!stOpen)}>Estado: {STATUS_NAMES[occ.status ?? 'design']}{tgt.length > 1 ? ` · ${tgt.length} piezas` : ''} {stOpen ? '▾' : '▸'}</button>
+        {stOpen && (<div className="ctx-indent">{(Object.keys(STATUS_NAMES) as (keyof typeof STATUS_NAMES)[]).map((k) => <button key={k} onClick={() => { close(); setStatus(tgt, k); }}><span style={{ display: 'inline-block', width: 10, height: 10, background: STATUS_COLORS[k], borderRadius: 2, marginRight: 6 }} />{STATUS_NAMES[k]}</button>)}</div>)}</>); })()}
       {occ && (<><hr />
         <button onClick={() => { close(); s.commitAsm((a) => { const t = a.occurrences.find((x) => x.id === occ.id); if (t) t.grounded = !t.grounded; }); }}>{occ.grounded ? 'Liberar' : 'Fijar'}</button>
         {s.docs.find((d) => d.id === openPart)?.kind === 'part' && <button onClick={() => { close(); s.open({ kind: 'occprops', occ: vo?.id ?? occ.id }); }}>Propiedades y cotas…</button>}

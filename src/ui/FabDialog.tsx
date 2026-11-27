@@ -3,21 +3,23 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../core/store';
 import { saveText } from '../core/files';
 import { Modal } from './Panels';
+import { UnitsTab, LabelsTab, BoltsTab, BudgetTab, StatusTab } from './FabTabs';
 import { collectFlats, nest, placedPolys, nestDxf, buildSpools, spoolSvg, spoolsCsv, assemblyDrawing, partDrawings, type NestPiece } from './fab';
 
 const SHEETS: [number, number][] = [[1000, 2000], [1250, 2500], [1500, 3000]];
 const f = (x: number, d = 1) => x.toLocaleString('es-ES', { minimumFractionDigits: d, maximumFractionDigits: d });
 
-export default function FabDialog({ onClose, tab: tab0 }: { onClose: () => void; tab?: 'nest' | 'spools' | 'draw' }) {
+type Tab = 'nest' | 'spools' | 'draw' | 'units' | 'labels' | 'bolts' | 'budget' | 'status';
+export default function FabDialog({ onClose, tab: tab0 }: { onClose: () => void; tab?: Tab }) {
   const s = useStore();
-  const [tab, setTab] = useState(tab0 ?? 'nest');
+  const [tab, setTab] = useState<Tab>(tab0 ?? 'nest');
   const base = s.fileName.replace(/\.[^.]+$/, '');
   return (
     <Modal title="Fabricación" onClose={onClose} xwide>
-      <div className="ai-row" style={{ gap: 6 }}>
-        {([['nest', 'Anidado de chapa'], ['spools', 'Spools de tubería'], ['draw', 'Planos automáticos']] as const).map(([k, n]) => <button key={k} className={`btn sm ${tab === k ? 'primary' : ''}`} onClick={() => setTab(k)}>{n}</button>)}
+      <div className="ai-row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        {([['nest', 'Anidado'], ['spools', 'Spools'], ['units', 'Unidades e izado'], ['labels', 'Etiquetas QR'], ['bolts', 'Tornillería'], ['budget', 'Presupuesto'], ['status', 'Estados'], ['draw', 'Planos']] as const).map(([k, n]) => <button key={k} className={`btn sm ${tab === k ? 'primary' : ''}`} onClick={() => setTab(k)}>{n}</button>)}
       </div>
-      {tab === 'nest' ? <NestTab base={base} /> : tab === 'spools' ? <SpoolTab base={base} /> : <DrawTab onClose={onClose} />}
+      {tab === 'nest' ? <NestTab base={base} /> : tab === 'spools' ? <SpoolTab base={base} /> : tab === 'units' ? <UnitsTab base={base} /> : tab === 'labels' ? <LabelsTab base={base} /> : tab === 'bolts' ? <BoltsTab base={base} /> : tab === 'budget' ? <BudgetTab base={base} /> : tab === 'status' ? <StatusTab /> : <DrawTab onClose={onClose} />}
       <div className="modal-btns"><span className="grow" /><button className="btn primary" onClick={onClose}>Cerrar</button></div>
     </Modal>
   );
@@ -37,7 +39,7 @@ function NestTab({ base }: { base: string }) {
     <div className="ai-row" style={{ gap: 12, flexWrap: 'wrap' }}>
       <label>Chapa <select value={si} onChange={(e) => { setSi(Number(e.target.value)); setPage(0); }}>{SHEETS.map(([a, b], i) => <option key={i} value={i}>{a} × {b}</option>)}</select></label>
       <label>Separación (mm) <input type="number" value={gap} min={0} onChange={(e) => setGap(Math.max(0, Number(e.target.value) || 0))} style={{ width: 60 }} /></label>
-      <span>{pieces.length} pieza(s) · {res?.sheets.length ?? 0} chapa(s) · aprovechamiento medio {f(tot * 100)} %</span>
+      <span>{pieces.length} pieza(s) · {res?.sheets.length ?? 0} chapa(s) · aprovechamiento medio {f(tot * 100)} %{res ? (() => { const bruto = res.sheets.reduce((a, x) => a + x.W * x.H * x.t * 7.85e-6, 0), neto = res.sheets.reduce((a, x) => a + x.usage * x.W * x.H * x.t * 7.85e-6, 0); return ` · chapa comprada ${f(bruto)} kg · neta ${f(neto)} kg · recorte ${f(bruto - neto)} kg`; })() : ''}</span>
     </div>
     {sh ? (<>
       <div className="ai-row" style={{ gap: 6 }}>

@@ -2141,7 +2141,8 @@ function OptionsDialog({ onClose }: { onClose: () => void }) {
           Peso máximo (kg) <input type="number" min={5} step={5} value={st.segMaxKg ?? 80} onChange={(e) => setS({ segMaxKg: Number(e.target.value) || 80 })} style={{ width: 70 }} /></label>
         <label className="row-l">Unión al cortar o dividir <select value={st.segJoint ?? 'tdc'} onChange={(e) => setS({ segJoint: e.target.value as 'tdc' | 'angle' })}><option value="tdc">Brida TDC</option><option value="angle">Marco angular L30×3</option></select>
           Junta (mm) <input type="number" min={1} max={15} step={1} value={st.segGasket ?? 4} onChange={(e) => setS({ segGasket: Number(e.target.value) || 4 })} style={{ width: 55 }} /></label>
-        <label className="row-l">Reparto <select value={st.segMode ?? 'max'} onChange={(e) => setS({ segMode: e.target.value as 'max' | 'equal' })}><option value="max">Partes de la longitud máxima que cumple y el resto en la última</option><option value="equal">Partes iguales</option></select></label>
+        <label className="row-l">Reparto <select value={st.segMode ?? 'max'} onChange={(e) => setS({ segMode: e.target.value as 'max' | 'equal' })}><option value="max">Partes de la longitud máxima que cumple y el resto en la última</option><option value="equal">Partes iguales</option></select>
+          Remate mínimo (mm) <input type="number" min={0} step={50} value={st.segMinL ?? 300} onChange={(e) => setS({ segMinL: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 70 }} title="Si la última parte queda más corta, las dos últimas se reparten a partes iguales" /></label>
         <p className="phelp">Los máximos incluyen las bridas y la junta de cada parte: longitud = tramo con sus bridas + junta de su salida; peso = chapa + bridas + junta EPDM.</p>
         <label className="check"><input type="checkbox" checked={st.segAuto ?? true} onChange={(e) => setS({ segAuto: e.target.checked })} />Actualización automática: dividir solos los tramos que pasen de esos máximos (al insertar, al cambiar longitud, sección, chapa o uniones)</label>
         <label className="check"><input type="checkbox" checked={st.autosave} onChange={(e) => setS({ autosave: e.target.checked })} />Autoguardar la sesión en el navegador (cada cambio)</label>
@@ -3458,7 +3459,7 @@ export function Modals() {
     case 'flat': return <FlatDialog key={(d as { pid?: string }).pid ?? ''} pid={(d as { pid?: string }).pid} onClose={close} />;
     case 'asmcalc': return <Suspense fallback={null}><AsmCalcDialog onClose={close} /></Suspense>;
     case 'segunits': return <Suspense fallback={null}><SegUnitsDialog onClose={close} /></Suspense>;
-    case 'fab': return <Suspense fallback={null}><FabDialog onClose={close} tab={(d as { tab?: 'nest' | 'spools' | 'draw' }).tab} /></Suspense>;
+    case 'fab': return <Suspense fallback={null}><FabDialog onClose={close} tab={(d as { tab?: 'nest' }).tab} /></Suspense>;
     case 'routeto': return <RouteToDialog key={(d as { occ: string }).occ + (d as { ep: string }).ep} occ={(d as { occ: string }).occ} ep={(d as { ep: string }).ep} onClose={close} />;
     case 'firstplace': return <FirstPlaceStep key={(d as { pid: string }).pid} pid={(d as { pid: string }).pid} extras={(d as { extras?: string[] }).extras} onClose={close} />;
     case 'newdoc': return <NewDocDialog key={(d as { start?: boolean }).start ? 's' : 'n'} start={(d as { start?: boolean }).start} onClose={close} />;

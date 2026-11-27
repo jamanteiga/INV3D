@@ -26,7 +26,7 @@ export default function AsmCalcDialog({ onClose }: { onClose: () => void }) {
         <label>v máx. (m/s) <input type="number" step={0.5} value={st.vMax} onChange={(e) => { useAsmCalc.setState({ vMax: Number(e.target.value) || 8 }); setTimeout(run, 0); }} style={{ width: 60 }} /></label>
         <label>R máx. (Pa/m) <input type="number" step={0.1} value={st.rMax} onChange={(e) => { useAsmCalc.setState({ rMax: Number(e.target.value) || 1.5 }); setTimeout(run, 0); }} style={{ width: 60 }} /></label>
         <span>Colores en el 3D:</span>
-        {(['none', 'velocity', 'system'] as const).map((k) => <button key={k} className={`btn sm ${st.colorBy === k ? 'primary' : ''}`} onClick={() => useAsmCalc.setState({ colorBy: k })}>{k === 'none' ? 'Material' : k === 'velocity' ? 'Velocidad' : 'Sistema'}</button>)}
+        {(['none', 'velocity', 'system', 'status'] as const).map((k) => <button key={k} className={`btn sm ${st.colorBy === k ? 'primary' : ''}`} onClick={() => useAsmCalc.setState({ colorBy: k })}>{k === 'none' ? 'Material' : k === 'velocity' ? 'Velocidad' : k === 'system' ? 'Sistema' : 'Estado'}</button>)}
       </div>
       {err && <div className="fdlg-err">{err}</div>}
       {c && (<>

@@ -15,7 +15,7 @@ const specOf = (pid: string) => (S().docData(pid) as HPart | null)?.hvacSpec;
 // ---------- estado de cálculo y colores ----------
 export interface PieceCalc { occ: string; name: string; kind: string; size: string; q: number; v: number; R: number; L: number; dpF: number; zeta: number; dpS: number; dp: number; warn?: string }
 export interface AsmCalc { rows: PieceCalc[]; paths: { term: string; name: string; dp: number }[]; index: string[]; fanDp: number; qTot: number; source: string; warnings: string[] }
-export const useAsmCalc = create<{ calc: AsmCalc | null; colorBy: 'none' | 'velocity' | 'system'; vMax: number; rMax: number }>(() => ({ calc: null, colorBy: 'none', vMax: 8, rMax: 1.5 }));
+export const useAsmCalc = create<{ calc: AsmCalc | null; colorBy: 'none' | 'velocity' | 'system' | 'status'; vMax: number; rMax: number }>(() => ({ calc: null, colorBy: 'none', vMax: 8, rMax: 1.5 }));
 
 export const SYS_COLORS = ['#2f80ed', '#eb5757', '#27ae60', '#f2994a', '#9b51e0', '#56ccf2', '#bb6bd9', '#219653', '#f2c94c', '#828282'];
 /** Color de un sistema (por orden de aparición en el ensamblaje) */
@@ -27,12 +27,22 @@ export function systemColor(name: string) {
 export function calcColor(occ: string): string | null {
   const st = useAsmCalc.getState();
   if (st.colorBy !== 'none' && (S().asm.occurrences.find((x) => x.id === occ) as { tag?: string } | undefined)?.tag) return null; // soportes y aislamiento: su material
+  if (st.colorBy === 'status') { const o = S().asm.occurrences.find((x) => x.id === occ); return STATUS_COLORS[o?.status ?? 'design']; }
   if (st.colorBy === 'system') { const o = S().asm.occurrences.find((x) => x.id === occ); return o?.system ? systemColor(o.system) : '#c3c8cf'; }
   if (st.colorBy === 'velocity') {
     const r = st.calc?.rows.find((x) => x.occ === occ); if (!r || !r.q) return '#c3c8cf';
     const u = Math.min(1.25, r.v / st.vMax); return `hsl(${Math.round(Math.max(0, 220 - u * 176))}, 75%, 50%)`;
   }
   return null;
+}
+
+export const STATUS_NAMES = { design: 'Diseñada', review: 'Revisada', fab: 'Fabricada', sent: 'Enviada a obra', mounted: 'Montada' } as const;
+export const STATUS_COLORS: Record<keyof typeof STATUS_NAMES, string> = { design: '#b8bec7', review: '#f2c94c', fab: '#2f80ed', sent: '#9b51e0', mounted: '#27ae60' };
+/** Cambia el estado de los componentes indicados */
+export function setStatus(ids: string[], st: keyof typeof STATUS_NAMES) {
+  S().commitAsm((a) => { for (const o of a.occurrences) if (ids.includes(o.id)) o.status = st; });
+  useAsmCalc.setState({ colorBy: 'status' });
+  S().notify(`${ids.length} componente(s) → ${STATUS_NAMES[st]} (colores por estado)`);
 }
 
 // ---------- grafo del tendido ----------
