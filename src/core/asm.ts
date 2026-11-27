@@ -44,6 +44,8 @@ export interface Joint {
   aligned?: boolean;
   /** Rotación/corredera: fija el ángulo (rotación) o la posición (corredera) en el valor indicado (para conducir) */
   lock?: boolean;
+  /** Giro (°) sobre el eje de la unión respecto a la posición encajada (con lock) */
+  spin?: number;
   /** Límites de recorrido (rotación en grados, corredera en mm) */
   min?: string; max?: string;
   suppressed?: boolean;
@@ -363,7 +365,11 @@ export function jointResiduals(j: Joint, A: Xform, B: Xform, ev: (s: string) => 
       const out = [...(j.aligned ? sub3(na, nb) : v3.add(na, nb)), ...perp(sub3(pb, pa), na), dot3(sub3(pb, pa), na) - off];
       // bocas de conducto: giro bloqueado (lado W con W)
       // (múltiplos de 90°: una pieza con W y H cambiados encaja con su W contra el H de la boca)
-      if (j.lock && j.a.xdir && j.b.xdir) { const xa = v3.norm(xfDir(A, j.a.xdir)), xb = v3.norm(xfDir(B, j.b.xdir)); out.push(LOCK_L * 2 * dot3(cross3(xa, xb), na) * dot3(xa, xb)); }
+      if (j.lock && j.a.xdir && j.b.xdir) {
+        let xa = v3.norm(xfDir(A, j.a.xdir)); const xb = v3.norm(xfDir(B, j.b.xdir));
+        // giro sobre la unión (Girar desde el ePoint): el lado A se compara girado ese ángulo sobre su normal
+        if (j.spin) { const t = (j.spin * Math.PI) / 180, c = Math.cos(t), sn = Math.sin(t), k = v3.norm(na); xa = v3.norm(v3.add(v3.add(v3.mul(xa, c), v3.mul(cross3(k, xa), sn)), v3.mul(k, dot3(k, xa) * (1 - c)))); }
+        out.push(LOCK_L * 2 * dot3(cross3(xa, xb), na) * dot3(xa, xb)); }
       return out;
     }
     case 'rigid': return [...v3.add(na, nb), ...sub3(pb, v3.add(pa, v3.mul(na, off)))];

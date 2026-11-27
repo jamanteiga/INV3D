@@ -815,3 +815,9 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .ai-prov { font-size: 11px; max-width: 150px; padding: 1px 4px; border-radius: 4px; border: 1px solid var(--line, #d6d9de); background: var(--panel, #fff); color: inherit; }
 .ai-mic-on { background: #e5484d !important; color: #fff; animation: aimic 1s ease-in-out infinite; }
 @keyframes aimic { 50% { opacity: .55; } }
+.ctx-angles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; padding: 2px 6px 4px; }
+.ctx-angles button { padding: 3px 0 !important; text-align: center !important; font-size: 11px; justify-content: center; }
+.ctx-angles button.wide { grid-column: 1 / -1; }
+.axis-in { position: absolute; z-index: 40; display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: var(--panel, #fff); border: 1px solid var(--line, #d6d9de); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+.axis-in input { width: 110px; padding: 3px 6px; font: inherit; }
+.axis-in b { font-size: 14px; } .axis-in .ax-X { color: #e5484d; } .axis-in .ax-Y { color: #30a46c; } .axis-in .ax-Z { color: #3e63dd; }

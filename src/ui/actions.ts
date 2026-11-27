@@ -664,18 +664,52 @@ export const asmActions = {
     const X = xfOf(occ); const u = v3.norm(xfDirW(X, me.normal)), P = xfPoint(X, me.point);
     const th = (deg * Math.PI) / 180;
     const jj = ensureLock(j);
-    const mine = jj[side];
-    const xd = rodr(mine.xdir!, v3.norm(mine.normal), -th);
     const sub = subtree(occ, j);
     const rq = axisQuat(u, th);
     s.commitAsm((a) => {
       for (const id of sub) { const o = a.occurrences.find((x) => x.id === id); if (!o) continue; const X0 = xfOf(id); o.xf = { pos: v3.add(P, qq.rotate(rq, v3.sub(X0.pos, P))) as V3, quat: qq.mul(rq, X0.quat) as Xform['quat'] }; }
-      const k = a.joints.findIndex((x) => x.id === j.id); if (k >= 0) a.joints[k] = { ...jj, [side]: { ...mine, xdir: xd }, ...(side === 'a' ? { b: other } : { a: other }) } as Joint;
+      // el giro se guarda en la unión (las bocas de conducto vuelven a tomar su orientación de la sección)
+      const sp = Math.round((((jj.spin ?? 0) - deg) % 360) * 1e6) / 1e6;
+      const k = a.joints.findIndex((x) => x.id === j.id); if (k >= 0) a.joints[k] = { ...jj, spin: sp || undefined } as Joint;
     });
     const Fm = R.epFrame(other.occ, j.ep![side === 'a' ? 'b' : 'a'])?.m;
     const odd = Math.abs(((deg % 180) + 180) % 180) > 1e-6;
-    if (odd && Fm && Fm.shape !== 'round' && Math.abs(Fm.W - Fm.H) > 0.5) s.notify(`Girada ${deg > 0 ? '+' : ''}${deg}°: la boca ${Fm.W}×${Fm.H} ya no coincide (W contra H). Para girar hacia el lado H usa una pieza con W y H cambiados (Añadir lo hace solo)`, 'error');
+    if (odd && Fm && Fm.shape !== 'round' && Math.abs(Fm.W - Fm.H) > 0.5) s.notify(`Girada ${deg > 0 ? '+' : ''}${deg}° sobre su unión. Aviso: la boca rectangular ${Fm.W}×${Fm.H} queda girada respecto a la anterior y no encaja${Math.abs(((deg % 180) + 180) % 180 - 90) < 1e-6 ? ' (W contra H: para girar hacia el lado H usa una pieza con W y H cambiados; Añadir lo hace solo)' : ''}`, 'error');
     else s.notify(`Girada ${deg > 0 ? '+' : ''}${deg}° sobre su unión`);
+  },
+  /** Gira el componente y todo lo que arrastra detrás sobre su ePoint: el de su unión o, en el componente raíz (fijo), su ePoint de conexión */
+  epRotate: (occ: string, deg: number) => {
+    if (foranJoint(occ)) { asmActions.foranSpin(occ, deg); return; }
+    const s = S(); const F = rootFrame(occ); if (!F) { s.notify('El componente no tiene ePoints', 'error'); return; }
+    const u: V3 = [F.D.x, F.D.y, F.D.z], P: V3 = [F.P.x, F.P.y, F.P.z];
+    const rq = axisQuat(v3.norm(u), (deg * Math.PI) / 180), sub = linked(occ);
+    s.commitAsm((a) => { for (const id of sub) { const o = a.occurrences.find((x) => x.id === id); if (!o) continue; const X0 = xfOf(id); o.xf = { pos: v3.add(P, qq.rotate(rq, v3.sub(X0.pos, P))) as V3, quat: qq.mul(rq, X0.quat) as Xform['quat'] }; } });
+    s.notify(`Girado ${deg > 0 ? '+' : ''}${deg}° sobre «${F.name}»${sub.length > 1 ? ` con ${sub.length - 1} componente(s) unidos` : ''}`);
+  },
+  /** Mueve el componente (y lo que arrastra detrás) un vector desde su ePoint. Unido: a lo largo de la unión es un desfase;
+   *  en otra dirección se suelta de la pieza anterior y queda fijo en la nueva posición. */
+  epMove: (occ: string, d: V3) => {
+    const s = S(); const L = Math.hypot(...d); if (!(L > 1e-9)) return;
+    const j = foranJoint(occ);
+    if (j) {
+      const side = j.a.occ === occ ? 'a' : 'b';
+      const na = v3.norm(xfDirW(xfOf(j.a.occ), j.a.normal)); const away = side === 'a' ? v3.mul(na, -1) : na;
+      const along = v3.dot(d, away);
+      if (Math.abs(Math.abs(along) - L) < 1e-6 * Math.max(1, L)) {
+        const ev = (x: string) => { try { return makeEval([])(x); } catch { return 0; } };
+        asmActions.foranOffset(occ, Math.round(((ev(j.offset || '0') || 0) + along) * 1000) / 1000); return;
+      }
+      const sub = subtree(occ, j);
+      s.commitAsm((a) => {
+        a.joints = a.joints.filter((x) => x.id !== j.id);
+        for (const id of sub) { const o = a.occurrences.find((x) => x.id === id); if (!o) continue; const X0 = xfOf(id); o.xf = { pos: v3.add(X0.pos, d) as V3, quat: [...X0.quat] as Xform['quat'] }; if (id === occ) o.grounded = true; }
+      });
+      s.notify(`Movido ${d.map((v) => +v.toFixed(2)).join(', ')} mm: se ha separado de la pieza anterior y queda fijo (para volver a unirlo: clic derecho › Cambiar boca de destino)`);
+      return;
+    }
+    const sub = linked(occ);
+    s.commitAsm((a) => { for (const id of sub) { const o = a.occurrences.find((x) => x.id === id); if (!o) continue; const X0 = xfOf(id); o.xf = { pos: v3.add(X0.pos, d) as V3, quat: [...X0.quat] as Xform['quat'] }; } });
+    s.notify(`Movido ${d.map((v) => +v.toFixed(2)).join(', ')} mm${sub.length > 1 ? ` con ${sub.length - 1} componente(s) unidos` : ''}`);
   },
   /** Foran: separa la pieza a lo largo del eje de su unión (desfase de la unión) */
   foranOffset: (occ: string, d: number) => {
@@ -1149,6 +1183,8 @@ function usedEps(occ: string, except?: string) {
 }
 /** Unión por ePoints que «sujeta» la pieza: la que la une a su pieza anterior */
 export function foranJoint(occ: string): Joint | undefined {
+  // un componente fijo no «cuelga» de nadie: se gira y mueve desde su propio ePoint, arrastrando a los demás
+  if (S().asm.occurrences.find((o) => o.id === occ)?.grounded) return undefined;
   const js = S().asm.joints.filter((j) => j.ep && !j.suppressed && (j.a.occ === occ || j.b.occ === occ));
   return js.find((j) => j.a.occ === occ) ?? js[0];
 }
@@ -1217,4 +1253,24 @@ export function foranTarget(sel: string | null): NonNullable<ReturnType<typeof S
     return { occ: o.id, ref: epRef(e, o.id), ep: e.id, epKind: e.kind, label: F.name, pW: [F.P.x, F.P.y, F.P.z], nW: [F.D.x, F.D.y, F.D.z] };
   }
   return null;
+}
+
+/** ePoint de conexión de un componente: el de su unión; si no tiene, su primera boca (ep1) o el de inserción */
+export function epOfOcc(occ: string) {
+  const j = foranJoint(occ);
+  if (j?.ep) return R.epFrame(occ, j.ep[j.a.occ === occ ? 'a' : 'b']);
+  return rootFrame(occ);
+}
+function rootFrame(occ: string) {
+  const s = S(); const o = s.asm.occurrences.find((x) => x.id === occ); const pd = o && partOf(s, o.part); if (!pd) return null;
+  const eps = partEPoints(pd).filter((e) => !e.inactive && e.kind !== 'composite');
+  const e = eps.find((x) => x.id === 'ep1') ?? eps.find((x) => !x.isDefault) ?? eps[0];
+  return e ? R.epFrame(occ, e.id) : null;
+}
+/** Todo lo que está unido al componente (por cualquier unión), sin cruzar otros componentes fijos */
+function linked(occ: string): string[] {
+  const s = S(); const fixed = new Set(s.asm.occurrences.filter((o) => o.grounded && o.id !== occ).map((o) => o.id));
+  const seen = new Set([occ]); const q2 = [occ];
+  while (q2.length) { const c = q2.shift()!; for (const x of s.asm.joints) { if (x.suppressed) continue; const n = x.a.occ === c ? x.b.occ : x.b.occ === c ? x.a.occ : null; if (!n || seen.has(n) || n.startsWith('__') || fixed.has(n)) continue; seen.add(n); q2.push(n); } }
+  return [...seen];
 }
