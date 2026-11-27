@@ -3,7 +3,8 @@ import { useStore, type State } from '../core/store';
 import { uid, MATERIALS, type PartDoc, type Feature } from '../core/doc';
 type Param = PartDoc['parameters'][number];
 import { COMMANDS, ctxNow } from '../ui/commands';
-import { generate, type GContent, type GTool, type GPart } from './gemini';
+import { type GTool } from './gemini';
+import { chat, provInfo, type AiConn, type Msg } from './providers';
 import { ASM_TOOLS, ASM_MODIFY, execAsmTool, portsContext } from './asmtools';
 
 const S = () => useStore.getState();
@@ -148,35 +149,35 @@ export async function execTool(name: string, args: Record<string, unknown>, conf
 
 export interface ChatMsg { role: 'user' | 'model' | 'action' | 'error'; text: string }
 
-/** Un turno: envía la pregunta con el contexto y resuelve las llamadas a herramientas hasta la respuesta final */
+/** Un turno: envía la pregunta con el contexto y resuelve las llamadas a herramientas hasta la respuesta final (cualquier proveedor) */
 export async function runTurn(opts: {
-  key: string; model: string; history: GContent[]; question: string; image?: { mimeType: string; data: string };
+  conn: AiConn; history: Msg[]; question: string; image?: { mimeType: string; data: string; name?: string };
   confirm: (title: string, detail: string) => Promise<boolean>; onMsg: (m: ChatMsg) => void; signal?: AbortSignal;
-}): Promise<GContent[]> {
-  const hist = [...opts.history];
-  const parts: GPart[] = [{ text: `ESTADO ACTUAL:\n${buildContext()}\n\nPREGUNTA:\n${opts.question}` }];
-  if (opts.image) parts.push({ inlineData: opts.image });
-  hist.push({ role: 'user', parts });
+}): Promise<Msg[]> {
+  const hist: Msg[] = [...opts.history];
+  const tools = provInfo(opts.conn.prov).tools ? TOOLS : [];
+  const sys = tools.length ? SYSTEM : SYSTEM + '\n\nEn esta conexión NO tienes herramientas: no puedes modificar el documento. Responde y explica los pasos con rutas de menú exactas.';
+  hist.push({ role: 'user', text: `ESTADO ACTUAL:\n${buildContext()}\n\nPREGUNTA:\n${opts.question}`, att: opts.image });
   for (let step = 0; step < 24; step++) {
-    const r = await generate(opts.key, opts.model, SYSTEM, hist, TOOLS, opts.signal);
-    if (r.promptFeedback?.blockReason) throw new Error(`Gemini bloqueó la consulta (${r.promptFeedback.blockReason})`);
-    const c = r.candidates?.[0]?.content;
-    if (!c?.parts?.length) throw new Error(`Respuesta vacía de Gemini (${r.candidates?.[0]?.finishReason ?? 'sin motivo'})`);
-    hist.push({ role: 'model', parts: c.parts });   // tal cual (incluye firmas de razonamiento)
-    const text = c.parts.filter((p) => p.text && !p.thought).map((p) => p.text).join('').trim();
-    const calls = c.parts.filter((p) => p.functionCall);
-    if (text) opts.onMsg({ role: 'model', text });
-    if (!calls.length) break;
-    const resp: GPart[] = [];
-    for (const p of calls) {
-      const fc = p.functionCall!, args = fc.args ?? {};
+    const r = await chat(opts.conn, sys, hist, tools, opts.signal);
+    hist.push({ role: 'assistant', text: r.text, calls: r.calls, raw: r.raw });
+    if (r.text) opts.onMsg({ role: 'model', text: r.text });
+    if (!r.calls.length) break;
+    const results: { id: string; name: string; result: unknown }[] = [];
+    for (const c of r.calls) {
       let result: unknown;
-      try { result = await execTool(fc.name, args, opts.confirm); } catch (e) { result = { error: (e as Error).message }; }
-      if (MODIFY.has(fc.name) || fc.name === 'run_command') opts.onMsg({ role: 'action', text: `${describeCall(fc.name, args)} → ${(result as { applied?: boolean })?.applied === false ? 'no aplicado' : (result as { error?: string })?.error ? `error: ${(result as { error: string }).error}` : (result as { ok?: boolean })?.ok === false ? `con errores: ${(result as { errors: string[] }).errors.join('; ')}` : 'hecho'}` });
-      resp.push({ functionResponse: { name: fc.name, response: { result }, ...(fc.id ? { id: fc.id } : {}) } });
+      try { result = await execTool(c.name, c.args, opts.confirm); } catch (e) { result = { error: (e as Error).message }; }
+      if (MODIFY.has(c.name) || c.name === 'run_command') opts.onMsg({ role: 'action', text: `${describeCall(c.name, c.args)} → ${(result as { applied?: boolean })?.applied === false ? 'no aplicado' : (result as { error?: string })?.error ? `error: ${(result as { error: string }).error}` : (result as { ok?: boolean })?.ok === false ? `con errores: ${(result as { errors: string[] }).errors.join('; ')}` : 'hecho'}` });
+      results.push({ id: c.id, name: c.name, result });
     }
-    hist.push({ role: 'user', parts: resp });
+    hist.push({ role: 'tool', results });
   }
-  // el contexto de turnos anteriores se aligera: solo se conserva la pregunta, no el estado completo
-  return hist.map((h, i) => (i === opts.history.length && h.role === 'user' ? { role: 'user', parts: [{ text: `PREGUNTA:\n${opts.question}` }] } : h));
+  // el contexto de turnos anteriores se aligera: solo se conserva la pregunta (sin el estado completo ni el adjunto)
+  return hist.map((h, i) => (i === opts.history.length && h.role === 'user' ? { role: 'user', text: `PREGUNTA:\n${opts.question}` } : h));
+}
+/** Recorta el historial empezando siempre por una pregunta del usuario (sin respuestas de herramientas huérfanas) */
+export function trimHistory(h: Msg[], max = 30): Msg[] {
+  if (h.length <= max) return h;
+  let i = h.length - max; while (i < h.length && !(h[i].role === 'user')) i++;
+  return h.slice(i);
 }

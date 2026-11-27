@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.47
+## Versión 0.48
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.48**
+- **Asistente IA con varios proveedores** (panel IA o F1, desplegable junto al título): **Google Gemini**, **OpenAI (ChatGPT)**, **Anthropic (Claude)**, **Perplexity** y **cualquier otra con API compatible con OpenAI** (DeepSeek, Mistral, Groq, OpenRouter, xAI, Ollama o LM Studio en local…: se indica la URL base). Cada uno con su clave y modelo (lista de modelos del servicio o nombre escrito), guardados solo en este navegador. Gemini, ChatGPT, Claude y los compatibles usan todas las herramientas (piezas, ensamblajes HVAC y tubería); Perplexity responde con búsqueda web y fuentes, sin modificar el documento. Imágenes y PDF adjuntos en Gemini, ChatGPT y Claude.
+- **Dictado por voz** 🎤 en el panel (castellano; Chrome, Edge y Safari): pulsa, habla y se envía al terminar (o queda en la caja para revisarlo: ⚙ › *Enviar al terminar de hablar*).
 
 **Novedades 0.47**
 - **Asistente IA en ensamblajes** (IA o F1): ahora tiende conductos y tuberías con los **generadores normalizados** en lugar de modelar a mano. Herramientas nuevas:

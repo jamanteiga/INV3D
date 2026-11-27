@@ -812,3 +812,6 @@ body { text-rendering: optimizeLegibility; -moz-osx-font-smoothing: grayscale; }
 .start-recent button:hover { background: var(--hover, rgba(0,0,0,.06)); }
 .ctx .ctx-sub { font-size: 11px; color: var(--muted, #777); padding: 2px 10px; }
 .row-l { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
+.ai-prov { font-size: 11px; max-width: 150px; padding: 1px 4px; border-radius: 4px; border: 1px solid var(--line, #d6d9de); background: var(--panel, #fff); color: inherit; }
+.ai-mic-on { background: #e5484d !important; color: #fff; animation: aimic 1s ease-in-out infinite; }
+@keyframes aimic { 50% { opacity: .55; } }
