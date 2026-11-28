@@ -55,7 +55,7 @@ export function BudgetTab({ base }: { base: string }) {
   return (<>
     <p className="phelp">Presupuesto orientativo a partir del propio ensamblaje (pesos de cálculo y del modelo, aislamiento por m², soportes, uniones y soldaduras). Los precios se guardan en este navegador.</p>
     <div className="ai-row" style={{ gap: 10, flexWrap: 'wrap' }}>
-      <In k="sheet" l="Chapa €/kg" /><In k="pipe" l="Tubería €/kg" /><In k="other" l="Otros €/kg" /><In k="insul" l="Aislam. €/m²" /><In k="support" l="Soporte €/ud" /><In k="boltSet" l="Unión €/ud" /><In k="weld" l="Soldadura €/ud" /><In k="shopH" l="Taller h/kg" /><In k="siteH" l="Montaje h/kg" /><In k="rate" l="€/h" />
+      <In k="sheet" l="Chapa €/kg" /><In k="pipe" l="Tubería €/kg" /><In k="other" l="Otros €/kg" /><In k="insul" l="Aislam. €/m² (30 mm)" /><In k="clad" l="Acabado €/m²" /><In k="support" l="Soporte €/ud" /><In k="boltSet" l="Unión €/ud" /><In k="weld" l="Soldadura €/ud" /><In k="shopH" l="Taller h/kg" /><In k="siteH" l="Montaje h/kg" /><In k="rate" l="€/h" />
     </div>
     <table className="bom-table"><thead><tr><th>Partida</th><th>Cantidad</th><th>Ud</th><th>€/ud</th><th>Importe €</th></tr></thead>
       <tbody>{b.lines.map((l, i) => <tr key={i}><td>{l.k}</td><td>{f(l.q, l.u === 'ud' ? 0 : 1)}</td><td>{l.u}</td><td>{f(l.pu, 2)}</td><td>{f(l.tot, 2)}</td></tr>)}

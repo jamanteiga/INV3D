@@ -105,6 +105,7 @@ export type Dialog =
   | { kind: 'fem'; shape?: boolean }
   | { kind: 'fab'; tab?: 'nest' | 'spools' | 'draw' | 'units' | 'labels' | 'bolts' | 'budget' | 'status' | 'rev' }
   | { kind: 'segunits' }
+  | { kind: 'insulate'; scope?: string[] }
   | { kind: 'pmi'; pmiKind: import('./pmi').PmiKind; editId?: string }
   | { kind: 'tolstack' | 'toladvisor' | 'promote' | 'drf' | 'analysis' | 'region' | 'limits' | 'material' | 'appearance' | 'docset' | 'news' | 'links' | 'addins' | 'macros' | 'find' | 'purge' | 'insertobj' | 'exportobj' | 'structshape' | 'cloud' | 'rules' | 'publish' | 'studio' | 'mold' | 'bim' | 'print3d' | 'share' }
   | { kind: 'savenewpart'; part: string; occ: string }
@@ -373,6 +374,9 @@ const uniqueName = (docs: DocEntry[], base: string, ext: string) => {
   return `${base}${i}${ext}`;
 };
 
+/** Ajustes automáticos tras cada cambio del ensamblaje, en el mismo paso de deshacer (p. ej. aislamiento asociado) */
+export const asmPostHooks: ((a: AsmDoc) => void)[] = [];
+
 export const useStore = create<State>((set, get) => ({
   docs: [{ id: FIRST_ID, kind: 'part', fileName: 'Pieza1.i3p', data: firstPart, past: [], future: [], dirty: false, blank: true }],
   active: FIRST_ID,
@@ -555,6 +559,7 @@ export const useStore = create<State>((set, get) => ({
       for (const o of next.occurrences) if (r.xf[o.id] && !o.grounded) o.xf = { pos: r.xf[o.id].pos.map((v) => Number(v.toFixed(6))) as V3, quat: r.xf[o.id].quat.map((v) => Number(v.toFixed(9))) as [number, number, number, number] };
     }
     if (next.patterns?.length || next.occurrences.some((o) => o.mirrorOf)) applyAssociative(next, (x) => { try { return makeEval([])(x); } catch { return NaN; } }, uid);
+    for (const h of asmPostHooks) { try { h(next); } catch (e) { console.warn('asm hook', e); } }
     set({ asm: next, past: [...past.slice(-99), asm], future: [], dirty: true });
   },
   editPartDoc: (id, next) => {

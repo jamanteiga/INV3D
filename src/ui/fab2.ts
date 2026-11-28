@@ -8,6 +8,7 @@ import { xfPoint } from '../core/asm';
 import { occKg, unitInfo, unitOf, segCfg } from './hvacops';
 import { STATUS_NAMES } from './asmcalc';
 import { buildSpools } from './fab';
+import { insTakeoff, INS_TYPES } from './insul';
 
 const S = () => useStore.getState();
 type XPart = PartDoc & { hvacSpec?: HvacSpec; pipeSpec?: PipeSpec };
@@ -123,13 +124,14 @@ export function boltList(): { rows: BoltRow[]; joints: number } {
 }
 
 // ---------- Presupuesto ----------
-export interface Prices { sheet: number; pipe: number; other: number; insul: number; support: number; boltSet: number; shopH: number; siteH: number; rate: number; weld: number }
-export const DEFAULT_PRICES: Prices = { sheet: 3.2, pipe: 4.5, other: 6, insul: 22, support: 35, boltSet: 6, shopH: 0.06, siteH: 0.08, rate: 38, weld: 28 };
+export interface Prices { clad: number; sheet: number; pipe: number; other: number; insul: number; support: number; boltSet: number; shopH: number; siteH: number; rate: number; weld: number }
+export const DEFAULT_PRICES: Prices = { clad: 18, sheet: 3.2, pipe: 4.5, other: 6, insul: 22, support: 35, boltSet: 6, shopH: 0.06, siteH: 0.08, rate: 38, weld: 28 };
 export function budget(p: Prices) {
   const s = S(); let sheetKg = 0, pipeKg = 0, otherKg = 0, insulM2 = 0, supports = 0, missing = 0;
   for (const o of occs()) {
     const pd = partOf(o.part); const kg = occKg(o.id);
     if (o.tag === 'support') { supports++; continue; }
+    if (o.tag === 'insulation' && o.host) continue; // asociado: medido por tipo abajo
     if (o.tag === 'insulation') { const sp = pd?.hvacSpec; if (sp) { const e = 0; const per = sp.shape === 'round' ? Math.PI * sp.D : 2 * (sp.W + sp.H); insulM2 += ((per + e) * sp.L) / 1e6; } continue; }
     if (!Number.isFinite(kg)) { missing++; continue; }
     if (pd?.hvacSpec?.kind === 'gasket') continue; if (pd?.hvacSpec) sheetKg += kg; else if (pd?.pipeSpec) pipeKg += kg; else otherKg += kg;
@@ -139,7 +141,8 @@ export function budget(p: Prices) {
     { k: 'Chapa y accesorios HVAC', q: sheetKg, u: 'kg', pu: p.sheet },
     { k: 'Tubería, bridas y accesorios', q: pipeKg, u: 'kg', pu: p.pipe },
     { k: 'Otros componentes (por peso)', q: otherKg, u: 'kg', pu: p.other },
-    { k: 'Aislamiento', q: insulM2, u: 'm²', pu: p.insul },
+    ...(insulM2 ? [{ k: 'Aislamiento (sin asociar)', q: insulM2, u: 'm²', pu: p.insul }] : []),
+    ...insTakeoff().flatMap((r) => [{ k: `${INS_TYPES[r.type].name} e=${r.e}`, q: r.m2, u: 'm²', pu: p.insul * (r.e / 30) }, ...(r.clad ? [{ k: `${INS_TYPES[r.type].clad}`, q: r.clad, u: 'm²', pu: p.clad }] : [])]),
     { k: 'Soportes', q: supports, u: 'ud', pu: p.support },
     { k: 'Juegos de unión (tornillería, juntas, clips)', q: bj.joints, u: 'ud', pu: p.boltSet },
     { k: 'Soldaduras de tubería', q: welds, u: 'ud', pu: p.weld },

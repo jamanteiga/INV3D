@@ -82,7 +82,8 @@ export function calcAssembly(): AsmCalc {
     const Q = q.get(id) ?? 0;
     if (!sp) { rows.push({ occ: id, name: o.name, kind: '—', size: '', q: Q, v: 0, R: 0, L: 0, dpF: 0, zeta: 0, dpS: 0, dp: 0 }); continue; }
     const sh = sp.shape === 'round' ? 'round' : 'rect';
-    const a = sp.shape === 'round' ? sp.D : sp.W, b = sp.shape === 'round' ? sp.D : sp.H;
+    const ii = o.ins?.type === 'inner' ? 2 * o.ins.e : 0; // aislamiento interior: sección libre menor
+    const a = (sp.shape === 'round' ? sp.D : sp.W) - ii, b = (sp.shape === 'round' ? sp.D : sp.H) - ii;
     const f = Q > 0 && a > 0 ? ductFriction(sh, a, b, Q) : { v: 0, R: 0 };
     let L = 0, zeta = 0, dpFix = 0;
     const Z = (idz: string) => FITTING_LOSSES.find((x) => x.id === idz)!;
@@ -147,24 +148,7 @@ export function addSupports(spacing = 2500, rod = 500, scope?: string[]) {
 // ---------- aislamiento ----------
 /** Espesor mínimo RITE IT 1.2.4.2.1 (λ = 0,04 W/m·K) */
 export const riteMin = (where: 'int' | 'ext', mode: 'cold' | 'hot') => (where === 'int' ? (mode === 'hot' ? 20 : 30) : mode === 'hot' ? 30 : 50);
-export function addInsulation(e: number, scope?: string[]) {
-  const s = S(); removeTagged('insulation', scope);
-  const out: { pid: string; xf: Xform }[] = []; let elb = 0, elbSkip = 0;
-  for (const o of s.asm.occurrences) {
-    if (scope && !scope.includes(o.id)) continue; const sp = specOf(o.part); if (!sp || (sp.kind !== 'duct' && sp.kind !== 'elbow')) continue;
-    if (sp.kind === 'elbow') {
-      // codo: otra «piel» de codo con el mismo eje (radio de eje igual) y el aislamiento como espesor
-      const t = autoT(sp), sq = sp.shape === 'rect' && sp.elbowType === 'square'; if (sq) { elbSkip++; continue; }
-      const base = sp.shape === 'round' ? sp.D : sp.W, rw = sp.rw ?? (sp.shape === 'round' ? 1.5 : 1), Rc = rw * base;
-      const isp: HvacSpec = { ...sp, W: sp.W + 2 * t, H: sp.H + 2 * t, D: sp.D + 2 * t, t: e, rw: Rc / (base + 2 * t), ends: 'none', endsAt: undefined, material: 'Lana mineral 40 kg/m³' };
-      try { const d = makeHvacPart(isp); d.iProperties.partNumber = `Aislamiento codo ${sp.angle ?? 90} ${sp.shape === 'round' ? 'Ø' + sp.D : sp.W + '×' + sp.H} e=${e}`; d.iProperties.description = `Aislamiento de ${e} mm para codo ${sp.shape === 'round' ? 'Ø' + sp.D : sp.W + '×' + sp.H}`; out.push({ pid: partFor(d), xf: xfOf(o.id) }); elb++; } catch { elbSkip++; }
-      continue;
-    }
-    out.push({ pid: partFor(makeHvacPart({ ...sp, kind: 'insulation', ins: e, ends: 'none', material: 'Lana mineral 40 kg/m³' })), xf: xfOf(o.id) });
-  }
-  s.commitAsm((a) => { const cnt = new Map<string, number>(); for (const it of out) { const c = (cnt.get(it.pid) ?? 0) + 1; cnt.set(it.pid, c); a.occurrences.push({ id: uid('o'), name: `${nameOf(it.pid)}:${c}`, part: it.pid, xf: { pos: [...it.xf.pos] as V3, quat: [...it.xf.quat] as Xform['quat'] }, grounded: true, tag: 'insulation' } as typeof a.occurrences[number]); } });
-  s.notify(`Aislamiento de ${e} mm en ${out.length - elb} tramo(s) recto(s) y ${elb} codo(s)${elbSkip ? ` · ${elbSkip} codo(s) rectos con álabes y accesorios: aislar en obra` : ' (accesorios: aislar en obra)'}`);
-}
+export function addInsulation(e: number, scope?: string[]) { void import('./insul').then((m) => m.insulate(e, 'mw', scope)); }
 function removeTagged(tag: string, scope?: string[]) {
   const s = S(); const keep = (o: { tag?: string; xf: Xform }) => o.tag !== tag;
   if (scope) return; // en un ramal no se borran los de otros ramales

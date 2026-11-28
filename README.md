@@ -3,7 +3,7 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.56
+## Versión 0.57
 
 | Entorno | Qué hace |
 | --- | --- |
@@ -28,6 +28,14 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.57** — aislamiento asociado (HVAC › Ingeniería › *Aislamiento*, clic derecho › *Aislamiento…* o *Ramal ▸ Aislar ramal…*)
+- **Asociado a cada pieza**: se rehace solo al **cortar, dividir, cambiar longitud o sección, mover o borrar** la pieza, en el mismo paso de deshacer (antes quedaba como copia fija).
+- **Todas las piezas**: rectos y codos con su forma; transiciones, tes, compuertas, plenums y codos con álabes con una **funda** sobre su envolvente. Casillas para elegir rectos, codos y accesorios.
+- **Tipos**: lana mineral, lana + **aluminio**, lana + **chapa 0,6** (exterior), **espuma elastomérica** e **interior** (lana con velo; reduce la sección libre y *Calcular* usa la sección libre). Espesores rápidos 20–50 mm con los mínimos RITE a la vista.
+- **Vista**: translúcido (por defecto), opaco u oculto.
+- **Mediciones** por tipo y espesor: m² de superficie de conducto, m³, kg y m² de acabado; **CSV** y **BC3**. El presupuesto (Fabricación) las usa por tipo, con el precio del acabado.
+- Corregido: *Longitud del tramo…* sobre un tramo con piezas detrás dejaba sus uniones de salida en la boca equivocada (restricciones no satisfechas).
 
 **Novedades 0.56** — coordinación y tendido
 - **Soportes en verticales**: HVAC › Ingeniería › *Soportes* pone también **ménsulas a pared** en los tramos verticales (cada ≥ 3000 mm, brazos hacia el lado W); los inclinados se avisan.

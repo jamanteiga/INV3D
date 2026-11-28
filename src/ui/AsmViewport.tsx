@@ -378,7 +378,10 @@ export default function AsmViewport() {
             continue;
           }
           const tr = tempRot.get(topOf(s, o.id));
+          const iv = o.tag === 'insulation' ? (s.settings.insView ?? 'transp') : null; if (iv === 'hidden') continue;
+          const n0 = modelGroup.children.length;
           add('occ', o.id, meshOf('occ', o.id), color, tr ? tr.clone().multiply(xfMatrix(xf, explodeOf(s, o.id))) : xfMatrix(xf, explodeOf(s, o.id)));
+          if (iv === 'transp') for (const g of modelGroup.children.slice(n0)) g.traverse((x: any) => { if (x.material) { x.material = x.material.clone(); x.material.transparent = true; x.material.opacity = x.isMesh ? 0.28 : 0.35; x.material.depthWrite = false; } x.renderOrder = 5; });
         }
         for (const m of r.members) {
           const fm = s.asm.frames.find((f) => f.id === m.id);
@@ -1065,7 +1068,7 @@ export default function AsmViewport() {
     const unsubCalc = useAsmCalc.subscribe((a, b) => { if (a.colorBy !== b.colorBy || a.revDiff !== b.revDiff || (a.colorBy !== 'none' && a.calc !== b.calc)) build(useStore.getState()); });
     const unsub = useStore.subscribe((s, p) => {
       if (s.kind !== 'assembly') return;
-      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.selGroup !== p.selGroup || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud) {
+      if (s.asmResult !== p.asmResult || s.interf !== p.interf || s.wire !== p.wire || s.clip !== p.clip || s.selItem !== p.selItem || s.selGroup !== p.selGroup || s.memberUtil !== p.memberUtil || s.showEdges !== p.showEdges || s.explodeT !== p.explodeT || s.mode !== p.mode || s.tool !== p.tool || s.asm.explode !== p.asm.explode || s.hud !== p.hud || s.settings.insView !== p.settings.insView) {
         build(s);
         if (first && s.asmResult && V.hasModel) { first = false; V.setView('home'); }
       }
@@ -1243,7 +1246,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
           <button onClick={() => { close(); const v = prompt('Copiar el ramal desplazado (mm): dx, dy, dz', '0, 1000, 0'); if (v) { const d = v.split(/[;,\s]+/).map((x) => parseFloat(x.replace(',', '.')) || 0); void import('./hvacops').then((m) => m.copyBranch(occ.id, [d[0] ?? 0, d[1] ?? 0, d[2] ?? 0])); } }}>Copiar ramal…</button>
           <button onClick={() => { close(); const v = prompt('Sistema del ramal (p. ej. Impulsión, Retorno, Extracción; vacío = quitar)', occ.system ?? 'Impulsión'); if (v != null) setSystem(occ.id, v.trim()); }}>Asignar sistema…</button>
           <button onClick={() => { close(); const v = prompt('Soportes en el ramal: separación (mm)', '2500'); const d = v ? parseFloat(v.replace(',', '.')) : NaN; if (d > 200) addSupports(d, 500, epGroup(occ.id)); }}>Soportes en el ramal…</button>
-          <button onClick={() => { close(); const v = prompt(`Aislar el ramal: espesor (mm). Mínimo RITE (λ 0,04): interior ${riteMin('int', 'cold')} frío / ${riteMin('int', 'hot')} caliente · exterior ${riteMin('ext', 'cold')} / ${riteMin('ext', 'hot')}`, String(riteMin('int', 'cold'))); const e = v ? parseFloat(v.replace(',', '.')) : NaN; if (e > 0) addInsulation(e, epGroup(occ.id)); }}>Aislar ramal…</button>
+          <button onClick={() => { close(); s.open({ kind: 'insulate', scope: epGroup(occ.id) } as never); }}>Aislar ramal…</button>
           <button title="Guarda el ramal (o las piezas resaltadas) como plantilla para insertarla después en cualquier boca libre (clic derecho sobre el ePoint › Insertar plantilla)" onClick={() => { close(); const ids = s.selGroup?.includes(occ.id) ? s.selGroup : epGroup(occ.id); const v = prompt(`Nombre de la plantilla (${ids.length} piezas; se inserta por la boca de entrada de «${occ.name}»)`, 'Rejilla + plenum'); if (v?.trim()) void import('./asmextra').then((m) => m.saveTemplate(v.trim(), ids, occ.id)); }}>Guardar como plantilla…</button>
           <button onClick={() => { close(); const g = epGroup(occ.id); if (confirm(`¿Borrar el ramal (${g.length} componentes)?`)) void import('./hvacops').then((m) => m.deleteBranch(occ.id)); }}>Borrar ramal</button>
         </div>)}
@@ -1270,6 +1273,7 @@ function AsmCtxMenu({ ctx, close }: { ctx: { x: number; y: number; ref: FaceRef;
           </>}
         </div>)}</>); })()}
       {occ && (() => { const tgt = s.selGroup?.includes(occ.id) ? s.selGroup : [occ.id]; return (<>
+        {(!occ.tag) && <button title="Aislamiento asociado a esta pieza (o a las piezas resaltadas)" onClick={() => { close(); s.open({ kind: 'insulate', scope: tgt } as never); }}>Aislamiento{occ.ins ? ` (${occ.ins.e} mm)` : ''}…</button>}
         <button className={stOpen ? 'on' : ''} title="Estado de fabricación y montaje (colores por estado)" onClick={() => setStOpen(!stOpen)}>Estado: {STATUS_NAMES[occ.status ?? 'design']}{tgt.length > 1 ? ` · ${tgt.length} piezas` : ''} {stOpen ? '▾' : '▸'}</button>
         {stOpen && (<div className="ctx-indent">{(Object.keys(STATUS_NAMES) as (keyof typeof STATUS_NAMES)[]).map((k) => <button key={k} onClick={() => { close(); setStatus(tgt, k); }}><span style={{ display: 'inline-block', width: 10, height: 10, background: STATUS_COLORS[k], borderRadius: 2, marginRight: 6 }} />{STATUS_NAMES[k]}</button>)}</div>)}</>); })()}
       {occ && (<><hr />

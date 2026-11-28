@@ -14,8 +14,11 @@ export interface Occurrence {
   flow?: number;
   /** Generado automáticamente (soportes, aislamiento): se rehace al repetir la orden */
   tag?: 'support' | 'insulation' | 'penetration';
-  /** Pieza sobre la que va (pasos por mamparo) */
+  /** Pieza sobre la que va (pasos por mamparo, aislamiento) */
   host?: string;
+  /** Aislamiento de esta pieza (se genera y actualiza solo); en la pieza de aislamiento, su desfase local */
+  ins?: { e: number; type: 'mw' | 'mw-al' | 'mw-steel' | 'elast' | 'inner' };
+  insOff?: [number, number, number];
   /** Estado de fabricación y montaje */
   status?: 'design' | 'review' | 'fab' | 'sent' | 'mounted';
   /** id del documento de pieza (en el espacio de trabajo / embebido) */

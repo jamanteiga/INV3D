@@ -34,6 +34,8 @@ export interface HvacSpec {
   blades?: number; bladeAngle?: number; neck?: number; splitter?: number; plate?: number; spigot?: 'top' | 'side';
   /** Aislamiento / soporte */
   ins?: number; rod?: string; material: string;
+  /** aislamiento por el interior del conducto (reduce la sección libre) */
+  insIn?: boolean;
 }
 
 export const f1 = (x: number) => String(Math.round(x * 1000) / 1000);
@@ -499,8 +501,9 @@ function makeSupport(s: HvacSpec): PartDoc {
 }
 function makeInsulation(s: HvacSpec): PartDoc {
   const t = autoT(s), e = s.ins ?? 25, L = s.L, b = new B();
-  b.ext('Aislamiento', XY(), [secE(s.shape, s.W, s.H, s.D, 2 * t + 2 * e), secE(s.shape, s.W, s.H, s.D, 2 * t)], L);
-  const d = doc(s, `Aislamiento ${sizeLabel(s)} e=${e} L=${L}`, `Aislamiento térmico de ${e} mm para conducto ${sizeLabel(s)} · L ${L} (RITE IT 1.2.4.2.1)`);
+  if (s.insIn) b.ext('Aislamiento interior', XY(), [secE(s.shape, s.W, s.H, s.D, 0), secE(s.shape, s.W, s.H, s.D, -2 * e)], L);
+  else b.ext('Aislamiento', XY(), [secE(s.shape, s.W, s.H, s.D, 2 * t + 2 * e), secE(s.shape, s.W, s.H, s.D, 2 * t)], L);
+  const d = doc(s, `Aislamiento${s.insIn ? ' interior' : ''} ${sizeLabel(s)} e=${e} L=${L}`, `Aislamiento térmico de ${e} mm para conducto ${sizeLabel(s)} · L ${L} (RITE IT 1.2.4.2.1)`);
   d.features = b.f; return d;
 }
 

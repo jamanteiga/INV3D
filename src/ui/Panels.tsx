@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState, lazy, Suspense, type ReactNode } from 're
 const AsmCalcDialog = lazy(() => import('./AsmCalcDialog'));
 const FabDialog = lazy(() => import('./FabDialog'));
 const SegUnitsDialog = lazy(() => import('./SegUnitsDialog'));
+const InsulateDialog = lazy(() => import('./InsulateDialog'));
 import { useStore, activeSketch } from '../core/store';
 import { evaluate, resolveParams, makeEval, fmt, isValidName } from '../core/expr';
 import {
@@ -3458,6 +3459,7 @@ export function Modals() {
     case 'meshfit': return <MeshFitDialog onClose={close} />;
     case 'flat': return <FlatDialog key={(d as { pid?: string }).pid ?? ''} pid={(d as { pid?: string }).pid} onClose={close} />;
     case 'asmcalc': return <Suspense fallback={null}><AsmCalcDialog onClose={close} /></Suspense>;
+    case 'insulate': return <Suspense fallback={null}><InsulateDialog onClose={close} scope={(d as { scope?: string[] }).scope} /></Suspense>;
     case 'segunits': return <Suspense fallback={null}><SegUnitsDialog onClose={close} /></Suspense>;
     case 'fab': return <Suspense fallback={null}><FabDialog onClose={close} tab={(d as { tab?: 'nest' }).tab} /></Suspense>;
     case 'routeto': return <RouteToDialog key={(d as { occ: string }).occ + (d as { ep: string }).ep} occ={(d as { occ: string }).occ} ep={(d as { ep: string }).ep} onClose={close} />;

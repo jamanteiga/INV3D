@@ -92,7 +92,7 @@ function replaceByChain(occ: string, chain: string[], label: string) {
   s.commitAsm((a) => {
     const at = a.occurrences.findIndex((x) => x.id === occ);
     const cnt = new Map<string, number>(); for (const x of a.occurrences) cnt.set(x.part, (cnt.get(x.part) ?? 0) + 1);
-    const news = chain.map((pid, k) => { const n = (cnt.get(pid) ?? 0) + 1; cnt.set(pid, n); return { id: ids[k], name: `${base(pid)}:${n}`, part: pid, xf: xfs[k], ...(k === 0 && o.grounded ? { grounded: true } : {}), ...(o.system ? { system: o.system } : {}) }; });
+    const news = chain.map((pid, k) => { const n = (cnt.get(pid) ?? 0) + 1; cnt.set(pid, n); return { id: ids[k], name: `${base(pid)}:${n}`, part: pid, xf: xfs[k], ...(k === 0 && o.grounded ? { grounded: true } : {}), ...(o.system ? { system: o.system } : {}), ...(o.ins && specOf(pid)?.kind !== 'gasket' ? { ins: { ...o.ins } } : {}) }; });
     a.occurrences.splice(at, 1, ...(news as typeof a.occurrences));
     for (const u of a.segUnits ?? []) if (u.occs.includes(occ)) u.occs = [...u.occs.filter((x) => x !== occ), ...ids];
     const oq = X.quat;
@@ -102,7 +102,7 @@ function replaceByChain(occ: string, chain: string[], label: string) {
       if (!j.ep) continue; // otras restricciones sobre el tramo se pierden
       const side = j.a.occ === occ ? 'a' : 'b'; const e = j.ep[side];
       const k = e === eIn ? 0 : e === eOut ? chain.length - 1 : -1; if (k < 0) continue;
-      const newEp = k === 0 ? 'ep1' : 'ep2';
+      const newEp = e === eIn ? 'ep1' : 'ep2'; // (con una sola pieza k = 0 también en la salida)
       if (j === jIn || (k === 0 && j.id === jIn?.id)) {
         // unión con la pieza anterior: se rehace con la primera pieza
         const other = side === 'a' ? j.b : j.a; const oe = j.ep[side === 'a' ? 'b' : 'a'];
@@ -237,7 +237,8 @@ function occVerts(id: string): number[][] | null {
 /** Medidas de la unidad: longitud = mayor lado de la caja envolvente (con bridas y juntas), peso = suma */
 export function unitInfo(u: Unit) {
   const ids = u.occs.filter((id) => partOfOcc(id) && !partOfOcc(id)!.suppressed);
-  const kg = ids.reduce((a, id) => a + occKg(id), 0);
+  const insK = S().asm.occurrences.filter((o) => o.tag === 'insulation' && o.host && ids.includes(o.host)).map((o) => o.id);
+  const kg = [...ids, ...insK].reduce((a, id) => a + (occKg(id) || 0), 0);
   const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity]; let ready = true;
   for (const id of ids) { const V = occVerts(id); if (!V) { ready = false; continue; } for (const p of V) for (let k = 0; k < 3; k++) { if (p[k] < mn[k]) mn[k] = p[k]; if (p[k] > mx[k]) mx[k] = p[k]; } }
   const dims = [0, 1, 2].map((k) => (isFinite(mx[k] - mn[k]) ? mx[k] - mn[k] : 0));
