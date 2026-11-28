@@ -18,7 +18,7 @@ export function buildContext(s: State = S()): string {
   L.push(`Documentos abiertos: ${s.docs.map((d) => `${d.fileName} [${d.kind}]`).join(', ')}`);
   if (s.kind === 'part' || s.kind === 'sheet' as never) {
     const d = s.doc;
-    L.push(`iPropiedades: ${JSON.stringify(d.iProperties)}`);
+    L.push(`eProperties: ${JSON.stringify(d.iProperties)}`);
     if (d.parameters.length) L.push(`Parámetros: ${d.parameters.map((p) => `${p.name} = ${p.expr}${p.comment ? ` (${p.comment})` : ''}`).join('; ')}`);
     L.push('Operaciones (id · nombre · tipo · datos · estado):');
     for (const f of d.features) {
@@ -85,7 +85,7 @@ export const TOOLS: GTool[] = [
   { name: 'update_feature', description: 'Modifica campos de una operación existente de la pieza activa. patch = objeto JSON con los campos a cambiar.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' }, patch: { type: 'STRING', description: 'Objeto JSON' }, summary: { type: 'STRING' } }, required: ['id', 'patch', 'summary'] } },
   { name: 'delete_features', description: 'Elimina operaciones de la pieza activa por id.', parameters: { type: 'OBJECT', properties: { ids: { type: 'ARRAY', items: { type: 'STRING' } }, summary: { type: 'STRING' } }, required: ['ids', 'summary'] } },
   { name: 'set_parameters', description: 'Crea o cambia parámetros de usuario de la pieza activa.', parameters: { type: 'OBJECT', properties: { params: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, expr: { type: 'STRING', description: 'p. ej. "40 mm" o "L/2"' }, comment: { type: 'STRING' } }, required: ['name', 'expr'] } }, summary: { type: 'STRING' } }, required: ['params', 'summary'] } },
-  { name: 'set_iproperties', description: 'Cambia iPropiedades de la pieza activa (partNumber, description, designer, material, revision). Materiales válidos: ' + MATERIALS.map((m) => m.name).join(', '), parameters: { type: 'OBJECT', properties: { props: { type: 'STRING', description: 'Objeto JSON con los campos' }, summary: { type: 'STRING' } }, required: ['props', 'summary'] } },
+  { name: 'set_iproperties', description: 'Cambia eProperties de la pieza activa (partNumber, description, designer, material, revision). Materiales válidos: ' + MATERIALS.map((m) => m.name).join(', '), parameters: { type: 'OBJECT', properties: { props: { type: 'STRING', description: 'Objeto JSON con los campos' }, summary: { type: 'STRING' } }, required: ['props', 'summary'] } },
   { name: 'new_part', description: 'Crea una pieza nueva (documento nuevo) con sus operaciones y parámetros, y la abre.', parameters: { type: 'OBJECT', properties: { fileName: { type: 'STRING', description: 'Nombre sin extensión' }, features: { type: 'STRING', description: 'Array JSON de operaciones' }, parameters: { type: 'STRING', description: 'Array JSON [{name,expr,comment}] (opcional)' }, material: { type: 'STRING' }, summary: { type: 'STRING' } }, required: ['fileName', 'features', 'summary'] } },
   { name: 'undo', description: 'Deshace el último cambio del documento activo.' },
   ...ASM_TOOLS,

@@ -167,7 +167,7 @@ export const Icons: Record<string, (p: { size?: number }) => JSX.Element> = {
   svgfile: (p) => <S {...p}><path d="M8 4h11l6 6v18H8z" /><text x="16.5" y="22" fontSize="7.5" textAnchor="middle" fill="currentColor" stroke="none" fontWeight="700">SVG</text></S>,
   sheetsize: (p) => <S {...p}><rect x="5" y="4" width="22" height="24" /><path d="M5 22h22M18 22v6" /></S>,
   calc: (p) => <S {...p}><rect x="7" y="4" width="18" height="24" rx="2" /><rect x="10" y="7" width="12" height="5" fill={B} /><path d="M11 16h2M15 16h2M19 16h2M11 20h2M15 20h2M19 20h2M11 24h2M15 24h6" /></S>,
-  ilogic: (p) => <S {...p}><path d="M8 4h11l6 6v18H8z" fill={B} /><text x="16.5" y="21" fontSize="9" textAnchor="middle" fill={A} stroke="none" fontWeight="700" fontStyle="italic">iL</text></S>,
+  ilogic: (p) => <S {...p}><path d="M8 4h11l6 6v18H8z" fill={B} /><text x="16.5" y="21" fontSize="9" textAnchor="middle" fill={A} stroke="none" fontWeight="700" fontStyle="italic">eL</text></S>,
   sheetmetal: (p) => <S {...p}><path d="M4 22l10-7h14l-10 7z" fill={B} /><path d="M18 22V10l10-7" /></S>,
   weldment: (p) => <S {...p}><path d="M4 24h24M10 24V10h12v14" /><path d="M10 24l-3-3M22 24l3-3" stroke={A} strokeWidth="2.4" /></S>,
 

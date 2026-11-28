@@ -1,4 +1,4 @@
-// Reglas de automatización (estilo iLogic) en JavaScript: Param(), iProp(), Suppress(), Msg(), Mass()…
+// Reglas de automatización eLogic en JavaScript: Param(), eProp(), Suppress(), Msg(), Mass()…
 import { useStore } from '../core/store';
 import { docParams, MATERIALS, type PartDoc } from '../core/doc';
 import { makeEval } from '../core/expr';
@@ -15,7 +15,8 @@ export function ruleApi(log: (s: string) => void) {
       S().commit((d) => { const p = d.parameters.find((x) => x.name === name); if (p) p.expr = String(value); else d.parameters.push({ name, expr: String(value), comment: 'regla' }); });
       return value;
     },
-    /** iProp('partNumber') / iProp('description', 'Soporte') */
+    /** eProp('partNumber') / eProp('description', 'Soporte') (iProp sigue valiendo) */
+    eProp(field: string, value?: string) { return this.iProp(field, value); },
     iProp(field: string, value?: string) {
       const ip = S().doc.iProperties as unknown as Record<string, string>;
       if (value === undefined) return ip[field];

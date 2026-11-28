@@ -1564,13 +1564,13 @@ function IPropsDialog({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<'sum' | 'proj' | 'state' | 'custom' | 'phys'>('proj');
   const p = s.kind === 'part' ? s.result?.props : null;
   const dens = MATERIALS.find((m) => m.name === ip.material)?.density ?? 1000;
-  if (!src) return <Modal title="iProperties" onClose={onClose}><p className="phelp">Los datos del plano se editan en el cajetín (panel de propiedades).</p></Modal>;
+  if (!src) return <Modal title="eProperties" onClose={onClose}><p className="phelp">Los datos del plano se editan en el cajetín (panel de propiedades).</p></Modal>;
   type SK = Exclude<keyof IProps, 'custom' | 'status'>;
   const field = (k: SK, label: string, ph?: string) => <Row label={label}><input value={(ip[k] as string) ?? ''} placeholder={ph} onChange={(e) => setIp({ ...ip, [k]: e.target.value })} onKeyDown={(e) => e.stopPropagation()} /></Row>;
   const custom = ip.custom ?? [];
   const setCustom = (c: { name: string; value: string }[]) => setIp({ ...ip, custom: c });
   return (
-    <Modal title={`iProperties — ${s.fileName}`} onClose={onClose} wide>
+    <Modal title={`eProperties — ${s.fileName}`} onClose={onClose} wide>
       <div style={{ marginBottom: 10 }}><Seg value={tab} onChange={setTab} options={[['sum', 'Resumen'], ['proj', 'Proyecto'], ['state', 'Estado'], ['custom', 'Personalizadas'], ['phys', 'Físicas']]} /></div>
       {tab === 'sum' && (<>{field('title', 'Título')}{field('subject', 'Asunto')}{field('author', 'Autor')}{field('manager', 'Responsable')}{field('company', 'Empresa')}{field('keywords', 'Palabras clave')}{field('comments', 'Comentarios')}</>)}
       {tab === 'proj' && (<>
@@ -1991,7 +1991,7 @@ function ContentDialog({ onClose, init }: { onClose: () => void; init?: string }
           <Row label="Tamaño"><select value={size} onChange={(e) => setSize(e.target.value)}>{F.sizes.map((z) => <option key={z}>{z}</option>)}</select></Row>
           {lens.length > 0 && <Row label={F.lenLabel ?? 'Longitud'}><select value={len} onChange={(e) => setLen(Number(e.target.value))}>{lens.map((l) => <option key={l} value={l}>{F.fmtLen ? `${F.fmtLen(l)} (${l} mm)` : `${l} mm`}</option>)}</select></Row>}
           {F.category === 'Juntas' && <p className="phelp">Ø interior = Ø exterior del tubo y Ø exterior tangente a los pernos de la brida. Espirometálica: aros y espiral con medidas aproximadas a partir de la brida.</p>}
-          <p className="phelp">{kind === 'assembly' ? 'Se crea una pieza paramétrica normalizada (con sus iProperties y rosca cosmética) y se coloca en el ensamblaje. Después se restringe con Insertar o Coincidir.' : 'Se crea una pieza paramétrica normalizada (con sus iProperties y rosca cosmética) y se abre como documento nuevo.'}</p>
+          <p className="phelp">{kind === 'assembly' ? 'Se crea una pieza paramétrica normalizada (con sus eProperties y rosca cosmética) y se coloca en el ensamblaje. Después se restringe con Insertar o Coincidir.' : 'Se crea una pieza paramétrica normalizada (con sus eProperties y rosca cosmética) y se abre como documento nuevo.'}</p>
           <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button>
             <button className="btn primary" onClick={() => { asmActions.placeContent(F.id, size, len); onClose(); }}>{kind === 'assembly' ? 'Colocar' : 'Crear pieza'}</button></div>
         </div>
@@ -2951,7 +2951,7 @@ function PipingDialog({ pk: pk0, norm: norm0, init, edit, onClose }: { pk: strin
           </>)}
           <Row label="Material"><select value={matV} onChange={(e) => setMat(e.target.value)}>{mats.map((m) => <option key={m.name}>{m.name}</option>)}</select></Row>
           {err ? <Err text={err} /> : <div className="pick-info">{info}</div>}
-          <p className="phelp">Se crea una pieza paramétrica con sus iProperties (designación, norma y material) para la lista de materiales. En un ensamblaje se coloca y se restringe con Insertar en las caras de los extremos.</p>
+          <p className="phelp">Se crea una pieza paramétrica con sus eProperties (designación, norma y material) para la lista de materiales. En un ensamblaje se coloca y se restringe con Insertar en las caras de los extremos.</p>
           <div className="modal-btns"><span className="grow" /><button className="btn" onClick={onClose}>Cerrar</button>
             {edit ? <button className="btn primary" disabled={!!err} onClick={() => { try { const nd = makePipePart(spec); s.editPartDoc(edit.pid, nd); asmActions.renameGenerated(edit.pid, nd); onClose(); s.notify(`Actualizada: ${nd.iProperties.description}`); } catch (e) { s.notify((e as Error).message, 'error'); } }}>Actualizar pieza</button> : <>
             <button className="btn" disabled={!!err} onClick={() => create(false)}>Abrir como pieza</button>

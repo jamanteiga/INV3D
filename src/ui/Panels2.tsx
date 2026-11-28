@@ -409,7 +409,7 @@ export function MacrosDialog({ onClose }: { onClose: () => void }) {
         {cur && <><input value={cur.name} onChange={(e) => save(list.map((m, k) => (k === i ? { ...m, name: e.target.value } : m)))} /><button className="btn" onClick={() => { save(list.filter((_, k) => k !== i)); setI(0); }}>Eliminar</button></>}
       </div>
       {cur && <textarea spellCheck={false} value={cur.code} onChange={(e) => save(list.map((m, k) => (k === i ? { ...m, code: e.target.value } : m)))} onKeyDown={(e) => e.stopPropagation()} style={{ width: '100%', height: 220, fontFamily: 'monospace', fontSize: 12.5, marginTop: 6 }} />}
-      <p className="phelp">JavaScript con: Param(nombre[, valor]), iProp(campo[, valor]), Suppress(operación, sí/no), Features(), Material([nombre]), Mass(), Volume(), Msg(texto), Log(texto), Math. Las macros se guardan en este navegador.</p>
+      <p className="phelp">JavaScript con: Param(nombre[, valor]), eProp(campo[, valor]), Suppress(operación, sí/no), Features(), Material([nombre]), Mass(), Volume(), Msg(texto), Log(texto), Math. Las macros se guardan en este navegador.</p>
       {log.length > 0 && <pre style={{ background: 'var(--bg-2)', padding: 6, maxHeight: 120, overflow: 'auto' }}>{log.join('\n')}</pre>}
       <div className="modal-btns"><span className="grow" /><button className="btn primary" disabled={!cur} onClick={run}>Ejecutar</button><button className="btn" onClick={onClose}>Cerrar</button></div>
     </Modal>
@@ -422,7 +422,7 @@ export function RulesDialog({ onClose }: { onClose: () => void }) {
   const [log, setLog] = useState<string[]>([]);
   const cur = rules[i];
   const u = (p: Partial<Rule>) => setRules(rules.map((r, k) => (k === i ? { ...r, ...p } : r)));
-  const EV: [Rule['on'][number], string][] = [['manual', 'Manual'], ['param', 'Al cambiar parámetros'], ['save', 'Al guardar'], ['trigger', 'iTrigger']];
+  const EV: [Rule['on'][number], string][] = [['manual', 'Manual'], ['param', 'Al cambiar parámetros'], ['save', 'Al guardar'], ['trigger', 'eTrigger']];
   void ruleApi;
   return (
     <Modal title="Reglas" onClose={onClose} wide>
@@ -435,7 +435,7 @@ export function RulesDialog({ onClose }: { onClose: () => void }) {
         <div className="chips" style={{ marginTop: 6 }}>{EV.map(([k, n]) => <button key={k} className={`chip ${cur.on.includes(k) ? 'on' : ''}`} onClick={() => u({ on: cur.on.includes(k) ? cur.on.filter((x) => x !== k) : [...cur.on, k] })}>{n}</button>)}</div>
         <textarea spellCheck={false} value={cur.code} onChange={(e) => u({ code: e.target.value })} onKeyDown={(e) => e.stopPropagation()} style={{ width: '100%', height: 200, fontFamily: 'monospace', fontSize: 12.5, marginTop: 6 }} />
       </>}
-      <p className="phelp">Las reglas se guardan con la pieza. API: Param, iProp, Suppress, Features, Material, Mass, Volume, Msg, Log. «iTrigger» las ejecuta con el botón iTrigger de Administrar.</p>
+      <p className="phelp">Las reglas se guardan con la pieza. API: Param, eProp, Suppress, Features, Material, Mass, Volume, Msg, Log. «eTrigger» las ejecuta con el botón eTrigger de Administrar.</p>
       {log.length > 0 && <pre style={{ background: 'var(--bg-2)', padding: 6, maxHeight: 110, overflow: 'auto' }}>{log.join('\n')}</pre>}
       <div className="modal-btns">
         <button className="btn" disabled={!cur} onClick={() => { S().commit((d) => { d.rules = rules; }); const out: string[] = []; runRule(cur, (x) => out.push(x)); setLog(out.length ? out : ['Ejecutada']); }}>Guardar y ejecutar</button>

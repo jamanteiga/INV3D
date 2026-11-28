@@ -3,12 +3,12 @@
 CAD paramétrico 3D libre en el navegador.
 Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor Three.js, interfaz React.
 
-## Versión 0.57
+## Versión 0.57.1
 
 | Entorno | Qué hace |
 | --- | --- |
 | **Boceto 2D** | Línea, círculo (centro / 3 puntos), arco (3 puntos / centro / tangente), rectángulo (2 puntos / 3 puntos / centro), ranura, polígono, elipse, spline, punto, texto. **Restricciones geométricas** (coincidente, colineal, concéntrica, fija, paralela, perpendicular, horizontal, vertical, tangente, punto medio, simétrica, igual), aplicadas también solas al forzar el cursor. **Cotas** como restricciones (lineal, horizontal, vertical, radio, diámetro, ángulo, punto-línea, entre paralelas) con parámetros `d0, d1…` y expresiones, cotas de referencia. Grados de libertad y color de geometría totalmente restringida. Arrastre de puntos y curvas resuelto por el solver. Recortar, alargar, desfase, empalme y chaflán 2D, simetría, patrones, mover, copiar, girar, escalar y proyectar geometría del modelo |
-| **Pieza** | Extrusión (distancia, a través de todo, dos direcciones, inclinación), revolución, solevación, barrido, nervio, bobina (muelles), relieve/grabado de texto, agujero (simple, refrentado, avellanado, roscado), empalme, chaflán, vaciado, inclinación de caras (desmoldeo), rosca cosmética, dividir, engrosar, patrón rectangular y circular (también sobre eje de trabajo), simetría, planos, ejes y puntos de trabajo, importar STEP. Parámetros fx, iProperties, masa, CdG y medición |
+| **Pieza** | Extrusión (distancia, a través de todo, dos direcciones, inclinación), revolución, solevación, barrido, nervio, bobina (muelles), relieve/grabado de texto, agujero (simple, refrentado, avellanado, roscado), empalme, chaflán, vaciado, inclinación de caras (desmoldeo), rosca cosmética, dividir, engrosar, patrón rectangular y circular (también sobre eje de trabajo), simetría, planos, ejes y puntos de trabajo, importar STEP. Parámetros fx, eProperties, masa, CdG y medición |
 | **Superficies** | Superficie extruida, de revolución y solevada/reglada, **parche** (contorno plano o 3D), **coser** (si cierran volumen pasa a sólido), engrosar superficie. Se muestran translúcidas |
 | **Boceto 3D** | Líneas, splines y hélices en el espacio con expresiones; trayectorias de barrido y contornos de parche |
 | **eFamily / eOperaciones** | Tabla de familia de piezas (activar fila, generar miembros .i3p); extraer e insertar operaciones reutilizables con sus cotas como parámetros (biblioteca propia y ficheros .i3f) |
@@ -28,6 +28,10 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 | **Intercambio** | Proyectos propios `.fdp` (directorio de trabajo y subdirectorios), lectura de `.ipj`, miniatura y propiedades de `.ipt/.iam/.idw/.ipn`, visor `.dwg` (LibreDWG) y `.dxf`, regla VB.NET de exportación a STEP/DWG |
 
 **Barra de vista** en la parte superior del área gráfica de pieza y ensamblaje: zoom para ajustar, **zoom encuadre**, **vista anterior**, **vista de sección** (plano frontal, superior o lateral con desfase e inversión), orientación (6 vistas, isométrica, dimétrica, trimétrica, normal al boceto), **estilo de visualización** (sombreado con aristas, sombreado, sin líneas ocultas, líneas ocultas visibles, alámbrico), ocultar/mostrar (planos y ejes de trabajo, bocetos, triedro, cubo de vistas, aristas) y **escena** (fondo); se recuerda entre sesiones.
+
+**Novedades 0.57.1**
+- **eProperties** (antes iProperties) y **eLogic** (antes iLogic): reglas en Administrar con `eProp()` (sigue valiendo `iProp()`) y desencadenador **eTrigger**.
+- Herramientas: quitados los ejemplos *Brida* y *Escalera*.
 
 **Novedades 0.57** — aislamiento asociado (HVAC › Ingeniería › *Aislamiento*, clic derecho › *Aislamiento…* o *Ramal ▸ Aislar ramal…*)
 - **Asociado a cada pieza**: se rehace solo al **cortar, dividir, cambiar longitud o sección, mover o borrar** la pieza, en el mismo paso de deshacer (antes quedaba como copia fija).
@@ -219,7 +223,7 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 - **Anotar** (anotaciones 3D): tolerancia de operación, SRD (referencias A/B/C), asesor de tolerancias, cota 3D, promover cotas, nota de taladro/rosca automática, textura superficial, símbolo de soldadura, identificador y objetivo de referencia, marco de control ISO 1101, texto con directriz, nota general y de perfil, escala de anotación, media sección, ocultar anotaciones, análisis de tolerancias (peor caso y RSS), PDF con vista y anotaciones, STEP y vistas compartidas.
 - **Inspeccionar**: propiedades de región (área, perímetro, centroide), análisis de cebra, inclinación (desmoldeo) y curvatura, sección, análisis de tolerancias y **AutoLímites** (masa, volumen, área, medidas y distancias vigiladas).
 - **Herramientas**: material, aspecto (presets, color, metálico, rugosidad, opacidad; borrar/ajustar), acabado, opciones, configuración del documento, personalizar, vínculos, complementos (ocultar pestañas), novedades, macros JavaScript, copiar/cortar/pegar operaciones entre piezas, buscar.
-- **Administrar**: actualizar, reconstruir, masa, parámetros, limpiar, estilos, derivar, insertar objeto (adjuntos), eOperaciones, **nube de puntos** (XYZ/CSV/PLY, recorte, punto de trabajo en la nube), crear pieza/componentes, ePoint, exportar boceto a DXF, **forma estructural** (perfiles propios), **reglas** (JavaScript al cambiar parámetros, al guardar, manual o iTrigger) y publicación en una biblioteca de usuario del centro de contenido.
+- **Administrar**: actualizar, reconstruir, masa, parámetros, limpiar, estilos, derivar, insertar objeto (adjuntos), eOperaciones, **nube de puntos** (XYZ/CSV/PLY, recorte, punto de trabajo en la nube), crear pieza/componentes, ePoint, exportar boceto a DXF, **forma estructural** (perfiles propios), **reglas** (JavaScript al cambiar parámetros, al guardar, manual o eTrigger) y publicación en una biblioteca de usuario del centro de contenido.
 - **Entornos**: análisis de tensiones, **estudio de render** (entorno, sombras, captura ×2/×4), análisis de tolerancias, **diseño de molde** (macho y hembra con contracción), generador de formas, contenido BIM (clase y propiedades IFC), convertir a chapa, **impresión 3D** (comprobación de bandeja y 3MF) y complementos.
 
 **Novedades 0.32** — Modelo 3D completo (cinta reorganizada)
@@ -296,7 +300,7 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 - **ePoints automáticos en las piezas generadas**: cada extremo de tubos, codos, tes, cruces, reducciones, casquetes, portabridas, manguitos y bridas (ASME/EN), y de conductos, codos, transiciones, manguitos, tapas, compuertas, silenciadores y flexibles de HVAC lleva un ePoint de inserción en su centro, con la dirección hacia fuera. Las bridas llevan además el de la cara de junta (WN en el extremo del cuello, SO retranqueado espesor + 3 mm, SW en el fondo del encaje con 1,6 mm). Extremos con el mismo nombre (p. ej. «Tubo 4"», «Conducto Ø315», «Cara brida 4 Clase 150») se conectan solos al colocarlos.
 
 **Novedades 0.27**
-- **Asistente IA (Gemini)**: botón **IA** de la barra superior o **F1**. Panel a la derecha que conoce el documento abierto (operaciones y errores, parámetros, propiedades físicas, componentes, GDL y restricciones, vistas del plano) y puede actuar: crear piezas y operaciones, modificarlas o borrarlas, cambiar parámetros e iPropiedades, abrir órdenes. Cada cambio se confirma antes (o automático, opcional) y se deshace con Ctrl+Z. Admite adjuntar una imagen o PDF.
+- **Asistente IA (Gemini)**: botón **IA** de la barra superior o **F1**. Panel a la derecha que conoce el documento abierto (operaciones y errores, parámetros, propiedades físicas, componentes, GDL y restricciones, vistas del plano) y puede actuar: crear piezas y operaciones, modificarlas o borrarlas, cambiar parámetros y eProperties, abrir órdenes. Cada cambio se confirma antes (o automático, opcional) y se deshace con Ctrl+Z. Admite adjuntar una imagen o PDF.
 - Configuración en ⚙ del panel: clave de API de Gemini (Google AI Studio) guardada solo en el navegador y elección de modelo.
 
 **Novedades 0.26.2**
@@ -363,7 +367,6 @@ Núcleo geométrico OpenCascade (vía [replicad](https://replicad.xyz)), visor T
 
 Visualización nítida: supermuestreo en monitores 1x, aristas con grosor real en píxeles, mallado con tolerancia angular de 3,4°, iconos a color y planos con grosor de línea constante en pantalla.
 
-Ejemplos en **Herramientas › Ejemplos**: brida paramétrica y escalera con meseta.
 
 ### Límites conocidos
 

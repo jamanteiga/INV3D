@@ -9,11 +9,10 @@ import { rebuildAll } from '../core/store';
 import { asmEnv } from '../core/asm';
 import { TabCtx, useRibbonReg, ribbonCtl } from './toolbars';
 import { openFile, saveDoc, exportSTEP, exportSTL, exportMesh, exportIFC, importStep, newIpj } from '../core/files';
-import { demoDoc, MATERIALS, nextName } from '../core/doc';
+import { MATERIALS, nextName } from '../core/doc';
 import * as P2 from './Panels2';
 import type { PmiKind } from '../core/pmi';
 import { asmActions, drwActions, partActions } from './actions';
-import { demoStair } from './demo';
 
 type Tab = string;
 
@@ -840,11 +839,11 @@ export default function Ribbon() {
             <Col><Small icon="ifeature" label="Extraer eOperación" onClick={() => s.open({ kind: 'ifeature' })} /></Col>
           </Group>
           <Group label="Reglas">
-            <Big icon="ilogic" label="Agregar regla" onClick={() => s.open({ kind: 'rules' })} title="Reglas en JavaScript que cambian parámetros, propiedades u operaciones" />
+            <Big icon="ilogic" label="Agregar regla" onClick={() => s.open({ kind: 'rules' })} title="Reglas eLogic en JavaScript que cambian parámetros, eProperties u operaciones" />
             <Col>
               <Small icon="ilogic" label="Navegador de reglas" onClick={() => s.open({ kind: 'rules' })} />
-              <Small icon="trigger" label="Desencadenadores" onClick={() => s.open({ kind: 'rules' })} title="Al cambiar parámetros, al guardar, manual o iTrigger" />
-              <Small icon="trigger" label="iTrigger" onClick={() => { import('./rules').then((m) => m.fireRules('trigger')); s.notify('iTrigger'); }} />
+              <Small icon="trigger" label="Desencadenadores" onClick={() => s.open({ kind: 'rules' })} title="Al cambiar parámetros, al guardar, manual o eTrigger" />
+              <Small icon="trigger" label="eTrigger" onClick={() => { import('./rules').then((m) => m.fireRules('trigger')); s.notify('eTrigger'); }} />
             </Col>
           </Group>
           <Group label="Centro de contenido">
@@ -877,7 +876,7 @@ export default function Ribbon() {
         {cur === 'tools' && (<>
           <Group label="Opciones">
             {k === 'part' && <Big icon="params" label="Parámetros" onClick={() => s.open({ kind: 'params' })} />}
-            <Big icon="iprops" label="iProperties" onClick={() => s.open({ kind: 'iprops' })} />
+            <Big icon="iprops" label="eProperties" onClick={() => s.open({ kind: 'iprops' })} />
             <Big icon="project" label="Proyectos" onClick={() => s.open({ kind: 'project' })} />
             {(k === 'part' || k === 'assembly') && <Big icon="workpoint" label="Referencias a objetos" kbd="F3" onClick={() => s.open({ kind: 'osnap' })} title="Punto final, medio, centro, cuadrante, intersección, perpendicular, tangente, cercano, nodo, origen" />}
           </Group>
@@ -906,10 +905,6 @@ export default function Ribbon() {
           <Group label="Web"><Big icon="web" label="Web del proyecto" onClick={() => window.open('https://github.com/jamanteiga/INV3D', '_blank')} /></Group>
           <Group label="Intercambio">
             <Big icon="ilogic" label="Regla de exportación" onClick={() => s.open({ kind: 'ilogic' })} title="Regla (VB.NET) para exportar un proyecto .ipj a STEP y DWG" />
-          </Group>
-          <Group label="Ejemplos">
-            <Big icon="part" label="Brida" onClick={() => s.addDocument('part', demoDoc(), 'Brida-DN80.i3p')} />
-            <Big icon="frame" label="Escalera" onClick={demoStair} title="Estructura de escalera con perfiles, ingletes y soldaduras" />
           </Group>
         </>)}
         {cur === 'view' && (<>
@@ -997,7 +992,7 @@ function FileMenu() {
           <button onClick={() => tg({ mech: !e.mech })} title="Activa o desactiva la pestaña Mecánica en este ensamblaje"><Icon name="pipe" size={20} />{e.mech ? '☑' : '☐'} Entorno Mecánica</button>
         </>); })()}
         <button onClick={act(() => s.open({ kind: 'project', create: true } as never))}><Icon name="project" size={20} />Crear proyecto .fdp</button>
-        <button onClick={act(() => s.open({ kind: 'iprops' }))}><Icon name="iprops" size={20} />iProperties</button>
+        <button onClick={act(() => s.open({ kind: 'iprops' }))}><Icon name="iprops" size={20} />eProperties</button>
         <hr />
         <button onClick={act(() => s.open({ kind: 'options' }))}><Icon name="settings" size={20} />Opciones de la aplicación…</button>
         <button onClick={act(() => s.open({ kind: 'about' }))}><Icon name="help" size={20} />Acerca de INV3D</button>
